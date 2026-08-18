@@ -18,7 +18,27 @@ sos mcp --root PATH
 ```
 
 `sos init` preserves existing project files and atomically creates a local
-`.sigma/` control plane after one confirmation. The first supported
+`.sigma/` control plane after one confirmation. Bootstrap writes exact
+P101-v2 record envelopes plus an ordered three-receipt acceptance lineage for
+authority, policy and operator state. The shipped Draft 2020-12 schema pair is
+validated before bootstrap and replayed by `status`, `validate`, `recover`,
+`doctor` and their MCP equivalents. Record, receipt, source-observation,
+exclusion-policy, check-plan and qualification-pointer integrity failures are
+`invalid`; they take precedence over source staleness.
+
+Acceptance requires an observed controlling terminal. `--yes` removes the
+extra prompt but does not bypass that boundary; a non-interactive invocation
+returns `SOS_ACCEPTANCE_TTY_REQUIRED` and writes nothing. This is intentionally
+weak local evidence, not authentication, and SOS does not claim that an agent
+cannot invoke the CLI.
+
+The current candidate bootstraps only a clean Git application projection. A
+dirty worktree returns `SOS_DIRTY_FINGERPRINT_PROFILE_NOT_QUALIFIED` and writes
+nothing until the complete P101 dirty-fingerprint observer is qualified. A
+commit containing only the excluded `.sigma` control plane does not make the
+application source stale.
+
+The first supported
 qualification family performs a bounded syntax qualification of tracked
 Python source without executing project code. Standard-library unit-test
 execution is discovered but remains explicitly unsupported until the host has
@@ -32,5 +52,10 @@ or qualification tool.
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate
 distribution concern.
+
+Public contracts are packaged at
+`src/sos/schemas/sos-contracts-v1.schema.json` and
+`src/sos/schemas/sos-contracts-v2.schema.json`. Their frozen SHA-256 values are
+checked at runtime before they can validate accepted state.
 
 See `PUBLIC_REPOSITORY_BOUNDARY.md` before contributing.

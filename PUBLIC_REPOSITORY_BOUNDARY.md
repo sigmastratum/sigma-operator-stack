@@ -1,6 +1,6 @@
 # SOS Public Repository Boundary
 
-Status: pre-public, documentation-only
+Status: pre-public, public-safe product candidate
 
 This repository is the clean source home for the future public Sigma Operator
 Stack core. Its current private visibility is a staging condition, not

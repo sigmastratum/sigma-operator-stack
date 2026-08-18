@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigmastratum.org/sos/sos-contracts-v2.schema.json",
+  "title": "SOS P101 amended contract bundle v2",
+  "oneOf": [
+    { "$ref": "#/$defs/envelope" },
+    { "$ref": "#/$defs/acceptanceReceipt" },
+    { "$ref": "#/$defs/sourceObservation" },
+    { "$ref": "#/$defs/terminalResult" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "hexSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitOid": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "reasonCode": {
+      "type": "string",
+      "pattern": "^(?:SOS_[A-Z0-9_]+|[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Z0-9_]+)$",
+      "maxLength": 160
+    },
+    "transactionId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "exclusionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "schema_major", "control_plane_root", "staging_prefix", "transaction_id", "policy_digest"],
+      "properties": {
+        "contract": { "const": "sos_bootstrap_exclusion_policy_v2" },
+        "schema_major": { "const": 2 },
+        "control_plane_root": { "const": ".sigma" },
+        "staging_prefix": { "const": ".sigma.init." },
+        "transaction_id": { "$ref": "#/$defs/transactionId" },
+        "policy_digest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sensitivePresence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path_projection", "filesystem_type", "sensitive_class_id", "content_opened", "content_hashed"],
+      "properties": {
+        "path_projection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\x00-\\x1f\\x7f\\\\]+$"
+        },
+        "filesystem_type": { "enum": ["regular", "directory", "symlink", "other"] },
+        "sensitive_class_id": {
+          "enum": ["environment_or_secret", "private_key", "credential_store", "raw_conversation_export", "production_or_database_dump", "authenticated_remote_configuration", "user_declared_protected"]
+        },
+        "content_opened": { "const": false },
+        "content_hashed": { "const": false }
+      }
+    },
+    "applicationObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "fingerprint", "entry_count", "bytes_hashed", "complete", "content_completeness", "exclusion_policy_ref", "protected_presence", "reasons"],
+      "properties": {
+        "state": { "enum": ["clean", "dirty", "not_verified"] },
+        "fingerprint": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "entry_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "bytes_hashed": { "type": "integer", "minimum": 0, "maximum": 268435456 },
+        "complete": { "type": "boolean" },
+        "content_completeness": { "enum": ["byte_complete", "protected_content_not_observed", "byte_complete_with_consent", "not_verified"] },
+        "exclusion_policy_ref": { "$ref": "#/$defs/sha256" },
+        "protected_presence": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": { "$ref": "#/$defs/sensitivePresence" }
+        },
+        "reasons": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/reasonCode" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "complete": { "const": false } }, "required": ["complete"] },
+          "then": {
+            "properties": {
+              "state": { "const": "not_verified" },
+              "fingerprint": { "type": "null" },
+              "content_completeness": { "const": "not_verified" },
+              "reasons": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "protected_presence": { "minItems": 1 } }, "required": ["protected_presence"] },
+          "then": {
+            "properties": {
+              "content_completeness": { "enum": ["protected_content_not_observed", "byte_complete_with_consent"] }
+            }
+          }
+        }
+      ]
+    },
+    "controlPlaneObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "tree_digest", "integrity_status", "accepted_ledger_tip", "reasons"],
+      "properties": {
+        "root": { "const": ".sigma" },
+        "tree_digest": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "integrity_status": { "enum": ["absent", "valid", "invalid", "not_verified"] },
+        "accepted_ledger_tip": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "reasons": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/reasonCode" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "integrity_status": { "const": "absent" } }, "required": ["integrity_status"] },
+          "then": { "properties": { "tree_digest": { "type": "null" }, "accepted_ledger_tip": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "integrity_status": { "const": "valid" } }, "required": ["integrity_status"] },
+          "then": { "properties": { "tree_digest": { "$ref": "#/$defs/sha256" } } }
+        }
+      ]
+    },
+    "sourceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "repository_id", "head", "branch", "detached", "worktree_id", "application_state", "control_plane_state", "exclusion_policy", "observed_at", "observation_digest"],
+      "properties": {
+        "contract": { "const": "sos_source_observation_v2" },
+        "repository_id": { "$ref": "#/$defs/sha256" },
+        "head": { "$ref": "#/$defs/gitOid" },
+        "branch": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "detached": { "type": "boolean" },
+        "worktree_id": { "$ref": "#/$defs/sha256" },
+        "application_state": { "$ref": "#/$defs/applicationObservation" },
+        "control_plane_state": { "$ref": "#/$defs/controlPlaneObservation" },
+        "exclusion_policy": { "$ref": "#/$defs/exclusionPolicy" },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "observation_digest": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        { "if": { "properties": { "detached": { "const": true } }, "required": ["detached"] }, "then": { "properties": { "branch": { "type": "null" } } } },
+        { "if": { "properties": { "detached": { "const": false } }, "required": ["detached"] }, "then": { "properties": { "branch": { "type": "string" } } } }
+      ]
+    },
+    "actorEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_label", "surface", "identity_assurance", "controlling_tty_observed", "strong_authentication_claimed", "agent_invocation_prevented", "no_agent_acceptance_interface_exposed"],
+      "properties": {
+        "actor_label": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "surface": { "const": "human_intended_local_cli" },
+        "identity_assurance": { "const": "declared_local_evidence_only" },
+        "controlling_tty_observed": { "const": true },
+        "strong_authentication_claimed": { "const": false },
+        "agent_invocation_prevented": { "const": false },
+        "no_agent_acceptance_interface_exposed": { "const": true }
+      }
+    },
+    "lineageBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_mode", "authority_predecessor", "current_authority", "policy_predecessor", "current_policy", "bootstrap_intent_id", "bootstrap_plan_id"],
+      "properties": {
+        "binding_mode": { "enum": ["authority_bootstrap", "authority_successor", "policy_successor", "operator_state"] },
+        "authority_predecessor": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "current_authority": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "policy_predecessor": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "current_policy": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "bootstrap_intent_id": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "bootstrap_plan_id": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "binding_mode": { "const": "authority_bootstrap" } }, "required": ["binding_mode"] },
+          "then": {
+            "properties": {
+              "authority_predecessor": { "type": "null" },
+              "current_authority": { "type": "null" },
+              "policy_predecessor": { "type": "null" },
+              "current_policy": { "type": "null" },
+              "bootstrap_intent_id": { "$ref": "#/$defs/sha256" },
+              "bootstrap_plan_id": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "binding_mode": { "const": "authority_successor" } }, "required": ["binding_mode"] },
+          "then": {
+            "properties": {
+              "authority_predecessor": { "$ref": "#/$defs/sha256" },
+              "current_authority": { "type": "null" },
+              "policy_predecessor": { "type": "null" },
+              "current_policy": { "type": "null" },
+              "bootstrap_intent_id": { "type": "null" },
+              "bootstrap_plan_id": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "binding_mode": { "const": "policy_successor" } }, "required": ["binding_mode"] },
+          "then": {
+            "properties": {
+              "authority_predecessor": { "type": "null" },
+              "current_authority": { "$ref": "#/$defs/sha256" },
+              "current_policy": { "type": "null" }
+            },
+            "oneOf": [
+              { "properties": { "bootstrap_intent_id": { "$ref": "#/$defs/sha256" }, "bootstrap_plan_id": { "$ref": "#/$defs/sha256" }, "policy_predecessor": { "type": "null" } } },
+              { "properties": { "bootstrap_intent_id": { "type": "null" }, "bootstrap_plan_id": { "type": "null" } } }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "binding_mode": { "const": "operator_state" } }, "required": ["binding_mode"] },
+          "then": {
+            "properties": {
+              "authority_predecessor": { "type": "null" },
+              "current_authority": { "$ref": "#/$defs/sha256" },
+              "policy_predecessor": { "type": "null" },
+              "current_policy": { "$ref": "#/$defs/sha256" }
+            },
+            "oneOf": [
+              { "properties": { "bootstrap_intent_id": { "$ref": "#/$defs/sha256" }, "bootstrap_plan_id": { "$ref": "#/$defs/sha256" } } },
+              { "properties": { "bootstrap_intent_id": { "type": "null" }, "bootstrap_plan_id": { "type": "null" } } }
+            ]
+          }
+        }
+      ]
+    },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_observation", "lineage"],
+      "properties": {
+        "source_observation": { "$ref": "#/$defs/sourceObservation" },
+        "lineage": { "$ref": "#/$defs/lineageBinding" }
+      }
+    },
+    "acceptanceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "receipt_id", "receipt_kind", "sequence_ordinal", "repository_id", "proposal_revision", "accepted_revision", "accepted_record_schema", "authority_revision_used", "policy_revision_observed", "predecessor_revision", "predecessor_receipt", "bootstrap_intent_id", "bootstrap_plan_id", "source_observation_digest", "exclusion_policy_digest", "actor", "accepted_at", "decision", "integrity"],
+      "properties": {
+        "schema": { "const": "sos_acceptance_receipt_v2" },
+        "receipt_id": { "$ref": "#/$defs/sha256" },
+        "receipt_kind": { "enum": ["authority_bootstrap", "policy_bootstrap_plan", "operator_state_bootstrap_plan", "successor_acceptance"] },
+        "sequence_ordinal": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "repository_id": { "$ref": "#/$defs/sha256" },
+        "proposal_revision": { "$ref": "#/$defs/sha256" },
+        "accepted_revision": { "$ref": "#/$defs/sha256" },
+        "accepted_record_schema": { "enum": ["sos_authority_record_v2", "sos_policy_record_v2", "sos_operator_state_v2"] },
+        "authority_revision_used": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "policy_revision_observed": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "predecessor_revision": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "predecessor_receipt": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "bootstrap_intent_id": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "bootstrap_plan_id": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "source_observation_digest": { "$ref": "#/$defs/sha256" },
+        "exclusion_policy_digest": { "$ref": "#/$defs/sha256" },
+        "actor": { "$ref": "#/$defs/actorEvidence" },
+        "accepted_at": { "type": "string", "format": "date-time" },
+        "decision": { "const": "accepted" },
+        "integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["receipt_sha256"],
+          "properties": { "receipt_sha256": { "$ref": "#/$defs/hexSha256" } }
+        }
+      },
+      "allOf": [
+        { "not": { "properties": { "proposal_revision": { "type": "null" } } } },
+        {
+          "if": { "properties": { "receipt_kind": { "const": "authority_bootstrap" } }, "required": ["receipt_kind"] },
+          "then": { "properties": { "sequence_ordinal": { "const": 1 }, "accepted_record_schema": { "const": "sos_authority_record_v2" }, "authority_revision_used": { "type": "null" }, "policy_revision_observed": { "type": "null" }, "predecessor_revision": { "type": "null" }, "predecessor_receipt": { "type": "null" }, "bootstrap_intent_id": { "$ref": "#/$defs/sha256" }, "bootstrap_plan_id": { "$ref": "#/$defs/sha256" } } }
+        },
+        {
+          "if": { "properties": { "receipt_kind": { "const": "policy_bootstrap_plan" } }, "required": ["receipt_kind"] },
+          "then": { "properties": { "sequence_ordinal": { "const": 2 }, "accepted_record_schema": { "const": "sos_policy_record_v2" }, "authority_revision_used": { "$ref": "#/$defs/sha256" }, "policy_revision_observed": { "type": "null" }, "predecessor_revision": { "type": "null" }, "predecessor_receipt": { "$ref": "#/$defs/sha256" }, "bootstrap_intent_id": { "$ref": "#/$defs/sha256" }, "bootstrap_plan_id": { "$ref": "#/$defs/sha256" } } }
+        },
+        {
+          "if": { "properties": { "receipt_kind": { "const": "operator_state_bootstrap_plan" } }, "required": ["receipt_kind"] },
+          "then": { "properties": { "sequence_ordinal": { "const": 3 }, "accepted_record_schema": { "const": "sos_operator_state_v2" }, "authority_revision_used": { "$ref": "#/$defs/sha256" }, "policy_revision_observed": { "$ref": "#/$defs/sha256" }, "predecessor_revision": { "type": "null" }, "predecessor_receipt": { "$ref": "#/$defs/sha256" }, "bootstrap_intent_id": { "$ref": "#/$defs/sha256" }, "bootstrap_plan_id": { "$ref": "#/$defs/sha256" } } }
+        },
+        {
+          "if": { "properties": { "receipt_kind": { "const": "successor_acceptance" } }, "required": ["receipt_kind"] },
+          "then": { "properties": { "sequence_ordinal": { "const": 0 }, "authority_revision_used": { "$ref": "#/$defs/sha256" }, "predecessor_revision": { "$ref": "#/$defs/sha256" }, "bootstrap_intent_id": { "type": "null" }, "bootstrap_plan_id": { "type": "null" } } }
+        }
+      ]
+    },
+    "acceptancePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "identity_assurance", "controlling_tty_required", "strong_authentication_claimed", "agent_invocation_prevented", "agent_acceptance_interface_exposed", "receipt_schema", "current_binding_required"],
+      "properties": {
+        "surface": { "const": "human_intended_local_cli" },
+        "identity_assurance": { "const": "declared_local_evidence_only" },
+        "controlling_tty_required": { "const": true },
+        "strong_authentication_claimed": { "const": false },
+        "agent_invocation_prevented": { "const": false },
+        "agent_acceptance_interface_exposed": { "const": false },
+        "receipt_schema": { "const": "sos_acceptance_receipt_v2" },
+        "current_binding_required": { "const": true }
+      }
+    },
+    "policyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "action_classes", "rules", "default_decision", "proposal_write_policy", "acceptance_policy", "content_policy", "limits_ref"],
+      "properties": {
+        "policy_id": { "$ref": "sos-contracts-v1.schema.json#/$defs/recordId" },
+        "action_classes": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "sos-contracts-v1.schema.json#/$defs/label" } },
+        "rules": { "type": "array", "maxItems": 1024, "items": { "$ref": "sos-contracts-v1.schema.json#/$defs/policyRule" } },
+        "default_decision": { "enum": ["blocked", "owner_required"] },
+        "proposal_write_policy": { "$ref": "sos-contracts-v1.schema.json#/$defs/proposalWritePolicy" },
+        "acceptance_policy": { "$ref": "#/$defs/acceptancePolicy" },
+        "content_policy": { "$ref": "sos-contracts-v1.schema.json#/$defs/contentPolicy" },
+        "limits_ref": { "const": "sos_limits_v1" }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "record_schema", "record_id", "revision_id", "lifecycle", "repository", "source_binding", "created_at", "created_by", "supersedes", "provenance", "integrity", "payload", "extensions"],
+      "properties": {
+        "schema": { "const": "sos_record_envelope_v2" },
+        "record_schema": { "enum": ["sos_authority_record_v2", "sos_policy_record_v2", "sos_operator_state_v2"] },
+        "record_id": { "$ref": "sos-contracts-v1.schema.json#/$defs/recordId" },
+        "revision_id": { "$ref": "#/$defs/sha256" },
+        "lifecycle": { "$ref": "sos-contracts-v1.schema.json#/$defs/lifecycle" },
+        "repository": { "$ref": "sos-contracts-v1.schema.json#/$defs/repositoryIdentity" },
+        "source_binding": { "$ref": "#/$defs/sourceBinding" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "created_by": { "$ref": "#/$defs/actorEvidence" },
+        "supersedes": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "provenance": { "$ref": "sos-contracts-v1.schema.json#/$defs/provenance" },
+        "integrity": { "$ref": "sos-contracts-v1.schema.json#/$defs/integrity" },
+        "payload": { "type": "object" },
+        "extensions": { "type": "object", "maxProperties": 64, "propertyNames": { "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "record_schema": { "const": "sos_authority_record_v2" } }, "required": ["record_schema"] }, "then": { "properties": { "payload": { "$ref": "sos-contracts-v1.schema.json#/$defs/authorityPayload" } } } },
+        { "if": { "properties": { "record_schema": { "const": "sos_policy_record_v2" } }, "required": ["record_schema"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/policyPayload" } } } },
+        { "if": { "properties": { "record_schema": { "const": "sos_operator_state_v2" } }, "required": ["record_schema"] }, "then": { "properties": { "payload": { "$ref": "sos-contracts-v1.schema.json#/$defs/operatorStatePayload" } } } }
+      ]
+    },
+    "terminalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "status", "reasons", "source_observation", "truncated", "omitted_count", "limit_bytes"],
+      "properties": {
+        "contract": { "const": "sos_terminal_result_v2" },
+        "status": { "enum": ["invalid", "blocked", "unsupported", "stale", "owner_required", "not_verified", "success"] },
+        "reasons": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/reasonCode" } },
+        "source_observation": { "oneOf": [{ "$ref": "#/$defs/sourceObservation" }, { "type": "null" }] },
+        "truncated": { "type": "boolean" },
+        "omitted_count": { "type": "integer", "minimum": 0 },
+        "limit_bytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ version = "0.1.0.dev0"
 description = "Local-first repository authority and recovery tools for coding agents"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.10,<5"]
 authors = [{name = "Sigma Stratum"}]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
@@ -23,6 +24,9 @@ sos = "sos.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["sos*"]
+
+[tool.setuptools.package-data]
+"sos.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

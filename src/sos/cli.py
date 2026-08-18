@@ -73,7 +73,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
         confirmed = args.yes or _ask_confirmation("Initialize SOS in this repository?")
-        result = initialize_workspace(args.path, confirmed=confirmed)
+        result = initialize_workspace(
+            args.path,
+            confirmed=confirmed,
+            controlling_tty_observed=sys.stdin.isatty(),
+        )
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "check":
