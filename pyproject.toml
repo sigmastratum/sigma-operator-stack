@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68,<69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sigma-operator-stack"
+version = "0.1.0.dev0"
+description = "Local-first repository authority and recovery tools for coding agents"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "Sigma Stratum"}]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+sos = "sos.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sos*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
