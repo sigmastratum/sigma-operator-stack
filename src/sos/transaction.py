@@ -7,6 +7,7 @@ import os
 import re
 import ctypes
 import errno
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -124,3 +125,114 @@ def execute_disposable_bootstrap(root: Path, plan: BootstrapPlan, records: dict[
         raise
     finally:
         os.close(root_descriptor)
+
+
+def execute_bootstrap_files(
+    root: Path,
+    transaction_id: str,
+    files: Mapping[str, bytes],
+    *,
+    confirmed: bool,
+) -> Path:
+    """Create a new `.sigma` tree atomically without replacing existing state."""
+    if not confirmed:
+        raise TransactionError("SOS_BOOTSTRAP_CONFIRMATION_REQUIRED")
+    if not _TX.fullmatch(transaction_id):
+        raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    if root.is_symlink() or not root.is_dir():
+        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    target_name = ".sigma"
+    staging_name = f".sigma.init.{transaction_id}"
+    if not files:
+        raise TransactionError("SOS_BOOTSTRAP_PLAN_EMPTY")
+    total = 0
+    normalized: dict[tuple[str, ...], bytes] = {}
+    for relative, payload in files.items():
+        path = Path(relative)
+        parts = path.parts
+        if path.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
+            raise TransactionError("SOS_BOOTSTRAP_PATH_INVALID")
+        if any("/" in part or "\\" in part or "\x00" in part for part in parts):
+            raise TransactionError("SOS_BOOTSTRAP_PATH_INVALID")
+        total += len(payload)
+        if total > _MAX_BOOTSTRAP_BYTES:
+            raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
+        normalized[parts] = payload
+
+    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            os.mkdir(staging_name, mode=0o700, dir_fd=root_descriptor)
+        except FileExistsError as exc:
+            raise TransactionError("SOS_CONTROL_PLANE_COLLISION") from exc
+        staging_descriptor = os.open(
+            staging_name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=root_descriptor,
+        )
+        try:
+            directories = sorted({parts[:depth] for parts in normalized for depth in range(1, len(parts))})
+            for directory_parts in directories:
+                _mkdir_relative(staging_descriptor, directory_parts)
+            for parts, payload in sorted(normalized.items()):
+                _write_relative(staging_descriptor, parts, payload)
+            os.fsync(staging_descriptor)
+        finally:
+            os.close(staging_descriptor)
+        _rename_noreplace(root_descriptor, staging_name, root_descriptor, target_name)
+        os.fsync(root_descriptor)
+        return root / target_name
+    finally:
+        os.close(root_descriptor)
+
+
+def _open_directory_chain(root_descriptor: int, parts: tuple[str, ...]) -> int:
+    descriptor = os.dup(root_descriptor)
+    try:
+        for part in parts:
+            next_descriptor = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _mkdir_relative(root_descriptor: int, parts: tuple[str, ...]) -> None:
+    parent = _open_directory_chain(root_descriptor, parts[:-1])
+    try:
+        try:
+            os.mkdir(parts[-1], mode=0o700, dir_fd=parent)
+        except FileExistsError:
+            existing = os.open(
+                parts[-1],
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=parent,
+            )
+            os.close(existing)
+    finally:
+        os.close(parent)
+
+
+def _write_relative(root_descriptor: int, parts: tuple[str, ...], payload: bytes) -> None:
+    parent = _open_directory_chain(root_descriptor, parts[:-1])
+    try:
+        descriptor = os.open(
+            parts[-1],
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent,
+        )
+        try:
+            _write_all(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.fsync(parent)
+    finally:
+        os.close(parent)

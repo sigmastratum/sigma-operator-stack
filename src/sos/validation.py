@@ -22,6 +22,16 @@ def validate_repository(path: str = ".") -> TerminalResult:
         status = Status.BLOCKED
     elif "SOS_REPOSITORY_UNBORN" in inspection.reasons:
         status = Status.NOT_VERIFIED
+    elif inspection.control_plane_state == "present_unverified":
+        from .workspace import workspace_status
+
+        workspace = workspace_status(path)
+        return TerminalResult(
+            contract="sos_validate_result_v1",
+            status=workspace.status,
+            reasons=workspace.reasons,
+            details={"workspace": workspace.details},
+        )
     else:
         status = Status.SUCCESS
     return TerminalResult(

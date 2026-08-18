@@ -29,6 +29,7 @@ class RepositoryInspection:
     contract: str
     root: str
     root_path_serialized: bool
+    repository_id: str
     head: str | None
     branch: str | None
     detached: bool
@@ -36,6 +37,7 @@ class RepositoryInspection:
     application_state: str
     application_entry_count: int
     application_status_digest: str
+    application_tree_digest: str
     control_plane_state: str
     staging_roots: tuple[str, ...]
     reasons: tuple[str, ...]
@@ -211,6 +213,8 @@ def inspect_repository(path: str | os.PathLike[str] = ".") -> RepositoryInspecti
     inventory_staging, staging_collision = _staging_inventory(root)
     staging = status_staging | inventory_staging
     digest = hashlib.sha256(b"\0".join(entries)).hexdigest()
+    tree_digest = _application_tree_digest(root)
+    repository_id = _repository_identity(root, object_format)
     application_state = "clean" if not entries else "dirty"
     control_state = _control_plane_state(root)
     reasons: list[str] = []
@@ -224,6 +228,7 @@ def inspect_repository(path: str | os.PathLike[str] = ".") -> RepositoryInspecti
         contract="sos_repository_inspection_v1",
         root=".",
         root_path_serialized=False,
+        repository_id=repository_id,
         head=head,
         branch=branch,
         detached=detached,
@@ -231,6 +236,7 @@ def inspect_repository(path: str | os.PathLike[str] = ".") -> RepositoryInspecti
         application_state=application_state,
         application_entry_count=len(entries),
         application_status_digest="sha256:" + digest,
+        application_tree_digest=tree_digest,
         control_plane_state=control_state,
         staging_roots=tuple(sorted(staging)),
         reasons=tuple(reasons),
@@ -243,3 +249,36 @@ def _is_attached(root: Path) -> bool:
     except RepositoryError:
         return False
     return True
+
+
+def discover_repository_root(path: str | os.PathLike[str] = ".") -> Path:
+    """Return the local root for internal operations without serializing it."""
+    return _discover_root(Path(path))
+
+
+def _application_tree_digest(root: Path) -> str:
+    raw = _bounded_git(root, "ls-files", "-s", "-z")
+    records: list[bytes] = []
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        try:
+            _metadata, path_raw = record.split(b"\t", 1)
+            path_text = path_raw.decode("utf-8", errors="strict")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise RepositoryError("SOS_GIT_INDEX_MALFORMED") from exc
+        if path_text == ".sigma" or path_text.startswith(".sigma/"):
+            continue
+        if _STAGING_ROOT.match(path_text):
+            continue
+        records.append(record)
+    return "sha256:" + hashlib.sha256(b"\0".join(records)).hexdigest()
+
+
+def _repository_identity(root: Path, object_format: str) -> str:
+    raw = _bounded_git(root, "rev-list", "--max-parents=0", "--all")
+    roots = sorted(item for item in raw.splitlines() if item)
+    if not roots:
+        return "sha256:" + hashlib.sha256(("unborn:" + object_format).encode("ascii")).hexdigest()
+    material = object_format.encode("ascii") + b"\0" + b"\0".join(roots)
+    return "sha256:" + hashlib.sha256(material).hexdigest()
