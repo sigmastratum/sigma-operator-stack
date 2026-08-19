@@ -618,6 +618,11 @@ def _sensitive_class(path: str) -> str | None:
     return None
 
 
+def sensitive_path_class(path: str) -> str | None:
+    """Return the frozen public sensitive-path class without opening the path."""
+    return _sensitive_class(path)
+
+
 def _add_bytes(current: int, added: int) -> int:
     result = current + added
     if result > MAX_TOTAL_BYTES:

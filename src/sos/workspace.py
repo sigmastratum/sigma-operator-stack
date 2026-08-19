@@ -1068,11 +1068,59 @@ def _validate_qualification_payload(payload: dict[str, Any]) -> None:
         "raw_output_serialized",
         "limits",
     }
+    limits = payload.get("limits")
+    reasons = payload.get("reasons")
+    exit_code = payload.get("exit_code")
+    output_digest = payload.get("output_digest")
+    output_bytes = payload.get("output_bytes")
     if (
         set(payload) != expected
         or payload.get("contract") != "sos_qualification_receipt_v1"
-        or payload.get("status") not in {"passed_local", "failed", "blocked", "unsupported", "not_verified"}
+        or payload.get("status")
+        not in {"passed_local", "failed", "blocked", "unsupported", "not_verified", "skipped", "stale"}
         or payload.get("raw_output_serialized") is not False
+        or not isinstance(reasons, list)
+        or not 1 <= len(reasons) <= 16
+        or any(not _is_public_token(reason, 128) for reason in reasons)
+        or not _is_public_token(payload.get("family_id"), 128)
+        or not _is_public_token(payload.get("command_id"), 128)
+        or not _is_public_token(payload.get("isolation"), 128)
+        or not _is_sha256(payload.get("plan_digest"))
+        or not _is_sha256(payload.get("source_tree_digest"))
+        or not _is_sha256(payload.get("source_status_digest"))
+        or (exit_code is not None and (not isinstance(exit_code, int) or isinstance(exit_code, bool)))
+        or (output_digest is not None and not _is_sha256(output_digest))
+        or not isinstance(output_bytes, int)
+        or isinstance(output_bytes, bool)
+        or output_bytes < 0
+        or not isinstance(limits, dict)
+        or not limits
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in limits.values()
+        )
+    ):
+        raise ContractError()
+    if payload.get("isolation") == "linux-landlock-seccomp-snapshot-v1":
+        if set(limits) != {
+            "tracked_files",
+            "tracked_bytes",
+            "source_file_bytes",
+            "timeout_seconds",
+            "output_bytes",
+            "processes",
+            "cpu_seconds",
+            "address_space_bytes",
+            "open_files",
+            "file_write_bytes",
+            "writable_bytes",
+            "writable_entries",
+        }:
+            raise ContractError()
+        if payload.get("output_bytes", 0) > limits["output_bytes"]:
+            raise ContractError()
+    if payload.get("status") == "passed_local" and (
+        payload.get("exit_code") != 0 or not _is_sha256(payload.get("output_digest"))
     ):
         raise ContractError()
 
@@ -1734,6 +1782,14 @@ def _is_sha256(value: object) -> bool:
         and len(value) == 71
         and value.startswith("sha256:")
         and all(character in "0123456789abcdef" for character in value[7:])
+    )
+
+
+def _is_public_token(value: object, maximum: int) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= maximum
+        and all(character.isascii() and (character.isalnum() or character in "._-") for character in value)
     )
 
 

@@ -171,7 +171,7 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         self.assertEqual(doctor.status, "owner_required")
         self.assertEqual(doctor.reasons, ("SOS_CURRENT_WORK_NOT_CONFIGURED",))
 
-    def test_supported_structural_check_passes_and_project_execution_fails_closed(self) -> None:
+    def test_structural_default_passes_and_isolated_unittest_is_configured(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
@@ -180,7 +180,9 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         self.assertEqual(plan.families[0].family_id, "python.syntax")
         self.assertEqual(plan.families[0].isolation, "non-executing-structural-v1")
         self.assertEqual(plan.families[1].family_id, "python.stdlib-unittest")
-        self.assertEqual(plan.families[1].status, "unsupported")
+        self.assertEqual(plan.families[1].status, "configured")
+        self.assertEqual(plan.families[1].command_id, "python.unittest.v1")
+        self.assertEqual(plan.families[1].isolation, "linux-landlock-seccomp-snapshot-v1")
         receipt = qualify_supported(str(root))
         self.assertEqual(receipt.status, "passed_local")
         self.assertFalse(receipt.raw_output_serialized)

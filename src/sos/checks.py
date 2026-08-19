@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .isolation import PROFILE_ID, isolation_limits, profile_declared_available, run_isolated_unittest
 from .repository import RepositoryError, discover_repository_root, inspect_repository
 
 
@@ -100,13 +101,22 @@ def discover_checks(path: str = ".") -> CheckPlan:
             reasons=("SOS_CHECK_NOT_CONFIGURED",),
         )
     if python_project and unittest_tests:
-        unittest_family = CheckFamily(
-            family_id="python.stdlib-unittest",
-            status="unsupported",
-            command_id=None,
-            isolation="unavailable",
-            reasons=("SOS_PROJECT_EXECUTION_PROFILE_NOT_QUALIFIED",),
-        )
+        if profile_declared_available():
+            unittest_family = CheckFamily(
+                family_id="python.stdlib-unittest",
+                status="configured",
+                command_id="python.unittest.v1",
+                isolation=PROFILE_ID,
+                reasons=("SOS_CHECK_CONFIGURED",),
+            )
+        else:
+            unittest_family = CheckFamily(
+                family_id="python.stdlib-unittest",
+                status="unsupported",
+                command_id=None,
+                isolation="unavailable",
+                reasons=("SOS_PROJECT_EXECUTION_PROFILE_NOT_QUALIFIED",),
+            )
     else:
         unittest_family = CheckFamily(
             family_id="python.stdlib-unittest",
@@ -131,10 +141,15 @@ def discover_checks(path: str = ".") -> CheckPlan:
     )
 
 
-def qualify_supported(path: str = ".") -> QualificationReceipt:
+def qualify_supported(path: str = ".", *, family_id: str | None = None) -> QualificationReceipt:
     root = discover_repository_root(path)
     plan = discover_checks(os.fspath(root))
-    family = plan.families[0]
+    if family_id is None:
+        family = plan.families[0]
+    else:
+        family = next((item for item in plan.families if item.family_id == family_id), None)
+        if family is None:
+            raise RepositoryError("SOS_CHECK_FAMILY_UNKNOWN")
     if family.status != "configured" or family.command_id is None:
         return QualificationReceipt(
             contract="sos_qualification_receipt_v1",
@@ -169,7 +184,11 @@ def qualify_supported(path: str = ".") -> QualificationReceipt:
             raw_output_serialized=False,
             limits=_limits(),
         )
-    return _run_python_syntax(root, plan, family)
+    if family.command_id == "python.compile.v1":
+        return _run_python_syntax(root, plan, family)
+    if family.command_id == "python.unittest.v1":
+        return _run_python_unittest(root, plan, family)
+    raise RepositoryError("SOS_CHECK_COMMAND_UNKNOWN")
 
 
 def _tracked_paths(root: Path) -> tuple[str, ...]:
@@ -246,6 +265,28 @@ def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> Qual
         raw_output_serialized=False,
         limits=_limits(),
     )
+
+
+def _run_python_unittest(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationReceipt:
+    isolated = run_isolated_unittest(root, _tracked_paths(root))
+    return QualificationReceipt(
+        contract="sos_qualification_receipt_v1",
+        status=isolated.status,
+        reasons=isolated.reasons,
+        family_id=family.family_id,
+        command_id=family.command_id or "none",
+        plan_digest=plan.plan_digest,
+        source_tree_digest=plan.source_tree_digest,
+        source_status_digest=plan.source_status_digest,
+        isolation=family.isolation,
+        exit_code=isolated.exit_code,
+        output_digest=isolated.output_digest,
+        output_bytes=isolated.output_bytes,
+        raw_output_serialized=False,
+        limits=isolation_limits(),
+    )
+
+
 def _limits() -> dict[str, int]:
     return {
         "tracked_files": _MAX_TRACKED_FILES,

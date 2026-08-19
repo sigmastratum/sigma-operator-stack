@@ -30,11 +30,16 @@ def _parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--json", action="store_true", dest="as_json")
-    for command in ("init", "qualify", "regenerate"):
+    for command in ("init", "regenerate"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--yes", action="store_true")
         subparser.add_argument("--json", action="store_true", dest="as_json")
+    qualify = subparsers.add_parser("qualify")
+    qualify.add_argument("path", nargs="?", default=".")
+    qualify.add_argument("--family")
+    qualify.add_argument("--yes", action="store_true")
+    qualify.add_argument("--json", action="store_true", dest="as_json")
     accept = subparsers.add_parser("accept")
     accept.add_argument("revision")
     accept.add_argument("path", nargs="?", default=".")
@@ -123,8 +128,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code = 2
         else:
             try:
-                receipt = qualify_supported(args.path)
-                store_qualification(args.path, receipt)
+                receipt = qualify_supported(args.path, family_id=args.family)
+                try:
+                    store_qualification(args.path, receipt)
+                except WorkspaceError as exc:
+                    if not (
+                        receipt.status in {"blocked", "stale"}
+                        and str(exc) == "SOS_WORKSPACE_NOT_CURRENT"
+                    ):
+                        raise
                 payload = receipt.to_dict()
                 exit_code = 0 if receipt.status == "passed_local" else 2
             except (RepositoryError, WorkspaceError) as exc:

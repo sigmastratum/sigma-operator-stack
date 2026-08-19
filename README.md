@@ -13,7 +13,7 @@ sos init [PATH]
 sos regenerate [PATH]
 sos accept REVISION [PATH]
 sos check [PATH]
-sos qualify [PATH]
+sos qualify [PATH] [--family FAMILY]
 sos doctor [PATH]
 sos recover [PATH]
 sos mcp --root PATH
@@ -56,12 +56,26 @@ unchanged. A commit containing only the excluded `.sigma` control plane does
 not make the application source stale. Limits, unsupported filesystem types or
 a snapshot race produce `not_verified` and no usable fingerprint.
 
-The first supported
-qualification family performs a bounded syntax qualification of tracked
-Python source without executing project code. Standard-library unit-test
-execution is discovered but remains explicitly unsupported until the host has
-a qualified disposable, network-denied execution profile. Unsupported
-isolation never becomes a green result.
+The default qualification family performs a bounded syntax qualification of
+tracked Python source without executing project code. On Linux x86_64,
+`python.stdlib-unittest` can be selected explicitly:
+
+```text
+sos check PATH
+sos qualify PATH --family python.stdlib-unittest
+```
+
+The selected family uses the narrow
+`linux-landlock-seccomp-snapshot-v1` profile: SOS copies only eligible tracked
+files into a disposable read-only source projection, runs one fixed standard
+library unittest command with `shell=false`, and gives it a separate bounded
+writable root. Landlock denies access outside the declared system/source/output
+roots; seccomp denies network, child-process, namespace and mount syscalls; the
+environment contains no inherited credentials. Raw test output is never
+serialized. A missing Landlock capability, protected tracked path, unsupported
+file type, failed/skipped/empty suite, timeout or resource-limit result never
+becomes green. See [Qualification isolation](docs/qualification-isolation.md)
+for the exact boundary and residuals.
 
 The MCP surface is read-only and exposes the same status, doctor, recovery and
 check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
