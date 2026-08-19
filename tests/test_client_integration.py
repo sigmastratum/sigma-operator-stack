@@ -139,6 +139,67 @@ class CodexClientIntegrationTests(unittest.TestCase):
         self.assertEqual(removed.status, "stale")
         self.assertEqual(target.read_bytes(), before)
 
+    def test_concurrent_install_edits_are_rolled_back_without_overwrite(self) -> None:
+        from sos import client_integration as integration
+
+        for strategy in ("in_place", "atomic_replace"):
+            with self.subTest(strategy=strategy):
+                original = b'model = "synthetic"\n'
+                foreign = f'# concurrent {strategy}\n'.encode()
+                temporary, root = self.make_project(original)
+                self.addCleanup(temporary.cleanup)
+                target = root / ".codex" / "config.toml"
+                real_exchange = integration._rename_with_flags
+                injected = False
+
+                def concurrent_exchange(directory, source, destination, flags):
+                    nonlocal injected
+                    if not injected and flags == integration._RENAME_EXCHANGE:
+                        injected = True
+                        if strategy == "in_place":
+                            target.write_bytes(foreign)
+                        else:
+                            competing = target.with_name("competing.toml")
+                            competing.write_bytes(foreign)
+                            os.replace(competing, target)
+                    return real_exchange(directory, source, destination, flags)
+
+                with mock.patch.object(integration, "_rename_with_flags", side_effect=concurrent_exchange):
+                    result = self.install(root)
+                self.assertTrue(injected)
+                self.assertEqual(result.status, "stale")
+                self.assertEqual(result.reasons, ("SOS_CLIENT_CONFIG_DRIFT",))
+                self.assertEqual(target.read_bytes(), foreign)
+                self.assertFalse(any(target.parent.glob(".sos-config.*")))
+
+    def test_concurrent_remove_edits_are_preserved_without_overwrite_or_delete(self) -> None:
+        from sos import client_integration as integration
+
+        for original in (None, b'model = "synthetic"\n'):
+            with self.subTest(original_existed=original is not None):
+                temporary, root = self.make_project(original)
+                self.addCleanup(temporary.cleanup)
+                self.assertEqual(self.install(root).status, "success")
+                target = root / ".codex" / "config.toml"
+                foreign = b"# concurrent remove edit\n"
+                real_rename = integration._rename_with_flags
+                injected = False
+
+                def concurrent_rename(directory, source, destination, flags):
+                    nonlocal injected
+                    if not injected:
+                        injected = True
+                        target.write_bytes(foreign)
+                    return real_rename(directory, source, destination, flags)
+
+                with mock.patch.object(integration, "_rename_with_flags", side_effect=concurrent_rename):
+                    result = self.remove(root)
+                self.assertTrue(injected)
+                self.assertEqual(result.status, "stale")
+                self.assertEqual(result.reasons, ("SOS_CLIENT_CONFIG_DRIFT",))
+                self.assertEqual(target.read_bytes(), foreign)
+                self.assertFalse(any(target.parent.glob(".sos-config.*")))
+
     def test_existing_server_and_symlink_fail_closed(self) -> None:
         collision = b'[mcp_servers.sigma_operator_stack]\ncommand = "other"\n'
         temporary, root = self.make_project(collision)

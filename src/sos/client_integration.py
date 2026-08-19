@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -32,6 +34,8 @@ _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _BEGIN = "# >>> SOS managed Codex MCP (sos_codex_mcp_v1)"
 _END = "# <<< SOS managed Codex MCP (sos_codex_mcp_v1)"
 _TOOLS = ("sos_status", "sos_doctor", "sos_recover", "sos_check")
+_RENAME_NOREPLACE = 1
+_RENAME_EXCHANGE = 2
 
 
 class ClientIntegrationError(RuntimeError):
@@ -566,20 +570,35 @@ def _replace_target(root: Path, payload: bytes, *, expected: bytes, expected_exi
             try:
                 _write_all(descriptor, payload)
                 os.fsync(descriptor)
+                replacement_identity = _file_identity(os.fstat(descriptor))
             finally:
                 os.close(descriptor)
+            preserve_temporary = False
             try:
                 if expected_existed:
-                    os.replace(temporary, "config.toml", src_dir_fd=parent, dst_dir_fd=parent)
+                    outcome = _exchange_if_expected(
+                        parent,
+                        temporary,
+                        "config.toml",
+                        expected=expected,
+                        replacement=payload,
+                        replacement_identity=replacement_identity,
+                    )
+                    if outcome == "rolled_back":
+                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+                    if outcome == "recovery_required":
+                        preserve_temporary = True
+                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
                 else:
                     os.link(temporary, "config.toml", src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
                     os.unlink(temporary, dir_fd=parent)
                 os.fsync(parent)
             finally:
-                try:
-                    os.unlink(temporary, dir_fd=parent)
-                except FileNotFoundError:
-                    pass
+                if not preserve_temporary:
+                    try:
+                        os.unlink(temporary, dir_fd=parent)
+                    except FileNotFoundError:
+                        pass
         finally:
             os.close(parent)
     except BaseException:
@@ -614,11 +633,37 @@ def _restore_target(
                 try:
                     _write_all(descriptor, original)
                     os.fsync(descriptor)
+                    replacement_identity = _file_identity(os.fstat(descriptor))
                 finally:
                     os.close(descriptor)
-                os.replace(temporary, "config.toml", src_dir_fd=parent, dst_dir_fd=parent)
+                preserve_temporary = False
+                try:
+                    outcome = _exchange_if_expected(
+                        parent,
+                        temporary,
+                        "config.toml",
+                        expected=expected,
+                        replacement=original,
+                        replacement_identity=replacement_identity,
+                    )
+                    if outcome == "rolled_back":
+                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+                    if outcome == "recovery_required":
+                        preserve_temporary = True
+                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
+                finally:
+                    if not preserve_temporary:
+                        try:
+                            os.unlink(temporary, dir_fd=parent)
+                        except FileNotFoundError:
+                            pass
             else:
-                os.unlink("config.toml", dir_fd=parent)
+                temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
+                outcome = _move_away_if_expected(parent, "config.toml", temporary, expected=expected)
+                if outcome == "rolled_back":
+                    raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+                if outcome == "recovery_required":
+                    raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
             os.fsync(parent)
         finally:
             os.close(parent)
@@ -705,6 +750,84 @@ def _read_relative_file(directory: int, name: str) -> bytes | None:
         return _read_bounded(descriptor, _MAX_CONFIG_BYTES)
     finally:
         os.close(descriptor)
+
+
+def _rename_with_flags(directory: int, source: str, target: str, flags: int) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_UNSUPPORTED", Status.UNSUPPORTED)
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    if renameat2(directory, os.fsencode(source), directory, os.fsencode(target), flags) == 0:
+        return
+    error = ctypes.get_errno()
+    if error in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_UNSUPPORTED", Status.UNSUPPORTED)
+    if flags == _RENAME_NOREPLACE and error in (errno.EEXIST, errno.ENOTEMPTY):
+        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+    if error == errno.ENOENT:
+        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+    raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_FAILED", Status.BLOCKED)
+
+
+def _file_identity(observed: os.stat_result) -> tuple[int, int]:
+    return observed.st_dev, observed.st_ino
+
+
+def _relative_identity(directory: int, name: str) -> tuple[int, int] | None:
+    try:
+        return _file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False))
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
+
+
+def _exchange_if_expected(
+    directory: int,
+    temporary: str,
+    target: str,
+    *,
+    expected: bytes,
+    replacement: bytes,
+    replacement_identity: tuple[int, int],
+) -> str:
+    """Exchange atomically, then either admit or restore the displaced target."""
+    _rename_with_flags(directory, temporary, target, _RENAME_EXCHANGE)
+    try:
+        displaced = _read_relative_file(directory, temporary)
+    except ClientIntegrationError:
+        displaced = None
+    if displaced == expected:
+        return "matched"
+    if _relative_identity(directory, target) != replacement_identity:
+        return "recovery_required"
+    _rename_with_flags(directory, temporary, target, _RENAME_EXCHANGE)
+    try:
+        restored_replacement = _read_relative_file(directory, temporary)
+    except ClientIntegrationError:
+        return "recovery_required"
+    if restored_replacement == replacement:
+        return "rolled_back"
+    return "recovery_required"
+
+
+def _move_away_if_expected(directory: int, target: str, temporary: str, *, expected: bytes) -> str:
+    """Move a deletion target aside without ever unlinking a racing pathname."""
+    _rename_with_flags(directory, target, temporary, _RENAME_NOREPLACE)
+    try:
+        displaced = _read_relative_file(directory, temporary)
+    except ClientIntegrationError:
+        displaced = None
+    if displaced == expected:
+        os.unlink(temporary, dir_fd=directory)
+        return "matched"
+    try:
+        _rename_with_flags(directory, temporary, target, _RENAME_NOREPLACE)
+    except ClientIntegrationError:
+        return "recovery_required"
+    return "rolled_back"
 
 
 def _safe_details(manifest: dict[str, Any] | None) -> dict[str, Any]:
