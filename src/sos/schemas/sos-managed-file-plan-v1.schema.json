@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigma-stratum.dev/sos/sos-managed-file-plan-v1.schema.json",
+  "title": "SOS Managed File Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "journal_id", "repository_id", "target", "patch_kind", "before_exists", "before_byte_count", "before_digest", "patch_byte_count", "patch_digest", "after_exists", "after_byte_count", "after_digest", "raw_content_serialized", "absolute_paths_serialized", "plan_digest"],
+  "properties": {
+    "contract": {"const": "sos_managed_file_plan_v1"},
+    "journal_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "target": {"type": "string", "minLength": 1, "maxLength": 512},
+    "patch_kind": {"enum": ["create_file", "append_suffix"]},
+    "before_exists": {"type": "boolean"},
+    "before_byte_count": {"type": "integer", "minimum": 0, "maximum": 1048576},
+    "before_digest": {"$ref": "#/$defs/digest"},
+    "patch_byte_count": {"type": "integer", "minimum": 0, "maximum": 1048576},
+    "patch_digest": {"$ref": "#/$defs/digest"},
+    "after_exists": {"const": true},
+    "after_byte_count": {"type": "integer", "minimum": 0, "maximum": 1048576},
+    "after_digest": {"$ref": "#/$defs/digest"},
+    "raw_content_serialized": {"const": false},
+    "absolute_paths_serialized": {"const": false},
+    "plan_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

@@ -295,6 +295,119 @@ class CodexClientIntegrationTests(unittest.TestCase):
         self.assertEqual(second.status, "success")
         self.assertEqual(second.reasons, ("SOS_CLIENT_REMOVED",))
 
+    def test_journal_recovers_before_and_after_target_install_boundaries(self) -> None:
+        from sos import client_integration as integration
+
+        for boundary in ("before_target", "after_target"):
+            with self.subTest(boundary=boundary):
+                temporary, root = self.make_project()
+                self.addCleanup(temporary.cleanup)
+                if boundary == "before_target":
+                    with mock.patch.object(
+                        integration,
+                        "_replace_target",
+                        side_effect=ClientIntegrationError("SOS_SYNTHETIC_INTERRUPTION", integration.Status.BLOCKED),
+                    ):
+                        first = self.install(root)
+                    self.assertFalse((root / ".codex" / "config.toml").exists())
+                else:
+                    real_record = integration.record_managed_file_state
+                    interrupted = False
+
+                    def interrupt_applied(target_root, plan, state):
+                        nonlocal interrupted
+                        if state == "applied" and not interrupted:
+                            interrupted = True
+                            raise integration.ManagedFileError("SOS_SYNTHETIC_INTERRUPTION", integration.Status.BLOCKED)
+                        return real_record(target_root, plan, state)
+
+                    with mock.patch.object(integration, "record_managed_file_state", side_effect=interrupt_applied):
+                        first = self.install(root)
+                    self.assertTrue((root / ".codex" / "config.toml").exists())
+                self.assertEqual(first.status, "blocked")
+                before = integration.replay_managed_file_journal(root, integration._JOURNAL_ID)
+                self.assertEqual(before["latest"]["state"], "apply_prepared")
+                recovered = self.install(root)
+                expected_reason = (
+                    "SOS_CLIENT_INSTALLED" if boundary == "before_target" else "SOS_CLIENT_INSTALL_RECOVERED"
+                )
+                self.assertEqual(recovered.reasons, (expected_reason,))
+                after = integration.replay_managed_file_journal(root, integration._JOURNAL_ID)
+                self.assertEqual(after["event_count"], 2)
+                self.assertEqual(after["latest"]["state"], "applied")
+
+    def test_journal_recovers_remove_after_target_restore(self) -> None:
+        original = b'model = "synthetic"\n'
+        temporary, root = self.make_project(original)
+        self.addCleanup(temporary.cleanup)
+        self.assertEqual(self.install(root).status, "success")
+        from sos import client_integration as integration
+
+        real_record = integration.record_managed_file_state
+        interrupted = False
+
+        def interrupt_rolled_back(target_root, plan, state):
+            nonlocal interrupted
+            if state == "rolled_back" and not interrupted:
+                interrupted = True
+                raise integration.ManagedFileError("SOS_SYNTHETIC_INTERRUPTION", integration.Status.BLOCKED)
+            return real_record(target_root, plan, state)
+
+        with mock.patch.object(integration, "record_managed_file_state", side_effect=interrupt_rolled_back):
+            first = self.remove(root)
+        self.assertEqual(first.status, "blocked")
+        self.assertEqual((root / ".codex" / "config.toml").read_bytes(), original)
+        before = integration.replay_managed_file_journal(root, integration._JOURNAL_ID)
+        self.assertEqual(before["latest"]["state"], "rollback_prepared")
+        self.assertEqual(self.remove(root).status, "success")
+        after = integration.replay_managed_file_journal(root, integration._JOURNAL_ID)
+        self.assertEqual(after["event_count"], 4)
+        self.assertEqual(after["latest"]["state"], "rolled_back")
+
+    def test_journal_corruption_or_tail_deletion_blocks_status_without_touching_target(self) -> None:
+        for mode in ("corrupt", "delete_tail"):
+            with self.subTest(mode=mode):
+                temporary, root = self.make_project()
+                self.addCleanup(temporary.cleanup)
+                self.assertEqual(self.install(root).status, "success")
+                target = root / ".codex" / "config.toml"
+                before = target.read_bytes()
+                event = root / ".sigma" / "managed-files" / "journals" / "codex-mcp" / "00000002.json"
+                if mode == "corrupt":
+                    value = json.loads(event.read_text(encoding="utf-8"))
+                    value["event_digest"] = "sha256:" + "0" * 64
+                    event.write_text(json.dumps(value), encoding="utf-8")
+                    expected_reason = "SOS_MANAGED_FILE_EVENT_INVALID"
+                else:
+                    event.unlink()
+                    expected_reason = "SOS_MANAGED_FILE_STATE_MISMATCH"
+                result = client_status(str(root), launcher=self.binding())
+                self.assertIn(result.status.value, {"invalid", "stale"})
+                self.assertEqual(result.reasons, (expected_reason,))
+                self.assertEqual(target.read_bytes(), before)
+
+    def test_removed_or_orphaned_journal_never_becomes_not_installed_success(self) -> None:
+        for mode in ("removed_tail_missing", "manifest_missing"):
+            with self.subTest(mode=mode):
+                temporary, root = self.make_project()
+                self.addCleanup(temporary.cleanup)
+                self.assertEqual(self.install(root).status, "success")
+                self.assertEqual(self.remove(root).status, "success")
+                if mode == "removed_tail_missing":
+                    event = root / ".sigma" / "managed-files" / "journals" / "codex-mcp" / "00000004.json"
+                    event.unlink()
+                    expected_reason = "SOS_MANAGED_FILE_STATE_MISMATCH"
+                else:
+                    manifest = root / ".sigma" / "integrations" / "codex-mcp.json"
+                    manifest.unlink()
+                    expected_reason = "SOS_MANAGED_FILE_MANIFEST_MISSING"
+                status = client_status(str(root), launcher=self.binding())
+                self.assertIn(status.status.value, {"invalid", "stale"})
+                self.assertEqual(status.reasons, (expected_reason,))
+                removed = self.remove(root)
+                self.assertIn(removed.status.value, {"invalid", "stale"})
+                self.assertEqual(removed.reasons, (expected_reason,))
+
     def test_manifest_tamper_and_unknown_client_fail_closed(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)

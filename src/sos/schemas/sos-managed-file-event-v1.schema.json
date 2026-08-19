@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigma-stratum.dev/sos/sos-managed-file-event-v1.schema.json",
+  "title": "SOS Managed File Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "journal_id", "repository_id", "plan_digest", "state", "sequence_ordinal", "predecessor_event", "raw_content_serialized", "absolute_paths_serialized", "event_digest"],
+  "properties": {
+    "contract": {"const": "sos_managed_file_event_v1"},
+    "journal_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "plan_digest": {"$ref": "#/$defs/digest"},
+    "state": {"enum": ["apply_prepared", "applied", "rollback_prepared", "rolled_back"]},
+    "sequence_ordinal": {"type": "integer", "minimum": 1, "maximum": 4096},
+    "predecessor_event": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "raw_content_serialized": {"const": false},
+    "absolute_paths_serialized": {"const": false},
+    "event_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

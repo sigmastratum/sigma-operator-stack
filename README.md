@@ -48,6 +48,12 @@ Accepted revisions, receipts, transitions and monotonic tips are append-only;
 an interrupted write cannot advance the authoritative tip, and a gap or hash
 failure makes every authoritative read fail closed.
 
+External agent/documentation files are not part of that acceptance lineage.
+They use a separate [managed-file journal](docs/managed-file-journal.md) with
+immutable digest-only plans and ordinal events. Only exact `create_file` and
+`append_suffix` operations are supported; drift blocks recovery rather than
+overwriting user content.
+
 Bootstrap accepts clean or dirty Git application state only after producing a
 complete P101-v2 application fingerprint. Staged index entries, unstaged and
 untracked bytes, deletions, symlink targets and bounded submodule state use the

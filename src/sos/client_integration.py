@@ -18,6 +18,13 @@ from typing import Any
 
 from . import __version__
 from .contracts import digest_value
+from .managed_files import (
+    ManagedFileError,
+    build_managed_file_plan,
+    record_managed_file_state,
+    replay_managed_file_journal,
+    require_managed_file_state,
+)
 from .repository import RepositoryError, discover_repository_root
 from .result import Status, TerminalResult
 from .workspace import WorkspaceError, workspace_status
@@ -34,6 +41,7 @@ _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _BEGIN = "# >>> SOS managed Codex MCP (sos_codex_mcp_v1)"
 _END = "# <<< SOS managed Codex MCP (sos_codex_mcp_v1)"
 _TOOLS = ("sos_status", "sos_doctor", "sos_recover", "sos_check")
+_JOURNAL_ID = "codex-mcp"
 _RENAME_NOREPLACE = 1
 _RENAME_EXCHANGE = 2
 
@@ -104,13 +112,16 @@ def preview_client_install(
         root, repository_id = _ready_root(path, allow_stale_installed=True)
         binding = launcher or observe_installed_launcher()
         manifest = _read_manifest(root)
-        if manifest is not None:
+        if manifest is None:
+            _require_no_orphan_journal(root)
+        else:
             state = manifest["state"]
             if state == "installed":
                 _verify_installed(root, manifest, binding)
                 return _result(Status.SUCCESS, "SOS_CLIENT_ALREADY_INSTALLED", manifest)
             if state in {"install_prepared", "remove_prepared"}:
                 return _result(Status.BLOCKED, "SOS_CLIENT_RECOVERY_REQUIRED", manifest)
+            _require_journal(root, manifest, "rolled_back")
         current = workspace_status(os.fspath(root))
         if current.status != Status.SUCCESS:
             return TerminalResult(_RESULT_CONTRACT, current.status, current.reasons, _safe_details(None))
@@ -129,7 +140,7 @@ def preview_client_install(
             updated=updated,
         )
         return _result(Status.OWNER_REQUIRED, "SOS_CLIENT_INSTALL_CONFIRMATION_REQUIRED", prepared)
-    except (ClientIntegrationError, RepositoryError, WorkspaceError, OSError) as exc:
+    except (ClientIntegrationError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
         return _error_result(exc)
 
 
@@ -151,6 +162,10 @@ def install_client(
         root, repository_id = _ready_root(path, allow_stale_installed=True)
         binding = launcher or observe_installed_launcher()
         existing = _read_manifest(root)
+        if existing is None:
+            _require_no_orphan_journal(root)
+        elif existing["state"] == "removed":
+            _require_journal(root, existing, "rolled_back")
         if existing is not None and existing["state"] == "installed":
             _verify_installed(root, existing, binding)
             return _result(Status.SUCCESS, "SOS_CLIENT_ALREADY_INSTALLED", existing)
@@ -161,6 +176,7 @@ def install_client(
             _verify_manifest_binding(prepared, repository_id, binding)
             original, existed, _ = _read_target(root)
             if _bytes_digest(original) == prepared["configured_digest"] and existed:
+                _ensure_journal_state(root, prepared, "applied")
                 installed = _with_state(prepared, "installed")
                 _write_manifest(root, installed)
                 return _result(Status.SUCCESS, "SOS_CLIENT_INSTALL_RECOVERED", installed)
@@ -189,11 +205,13 @@ def install_client(
                 updated=updated,
             )
             _write_manifest(root, prepared)
+        _ensure_journal_state(root, prepared, "apply_prepared")
         _replace_target(root, updated, expected=original, expected_existed=existed)
+        _ensure_journal_state(root, prepared, "applied")
         installed = _with_state(prepared, "installed")
         _write_manifest(root, installed)
         return _result(Status.SUCCESS, "SOS_CLIENT_INSTALLED", installed)
-    except (ClientIntegrationError, RepositoryError, WorkspaceError, OSError) as exc:
+    except (ClientIntegrationError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
         return _error_result(exc)
 
 
@@ -206,7 +224,11 @@ def client_status(
         root = discover_repository_root(path)
         workspace = workspace_status(os.fspath(root))
         manifest = _read_manifest(root)
-        if manifest is None or manifest["state"] == "removed":
+        if manifest is None:
+            _require_no_orphan_journal(root)
+            return _result(Status.SUCCESS, "SOS_CLIENT_NOT_INSTALLED", manifest)
+        if manifest["state"] == "removed":
+            _require_journal(root, manifest, "rolled_back")
             return _result(Status.SUCCESS, "SOS_CLIENT_NOT_INSTALLED", manifest)
         if manifest["state"] != "installed":
             return _result(Status.BLOCKED, "SOS_CLIENT_RECOVERY_REQUIRED", manifest)
@@ -215,7 +237,7 @@ def client_status(
         binding = launcher or observe_installed_launcher()
         _verify_installed(root, manifest, binding)
         return _result(Status.SUCCESS, "SOS_CLIENT_INSTALLED", manifest)
-    except (ClientIntegrationError, RepositoryError, WorkspaceError, OSError) as exc:
+    except (ClientIntegrationError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
         return _error_result(exc)
 
 
@@ -244,7 +266,11 @@ def remove_client(
     try:
         root, repository_id = _ready_root(path, allow_stale_installed=True)
         manifest = _read_manifest(root)
-        if manifest is None or manifest["state"] == "removed":
+        if manifest is None:
+            _require_no_orphan_journal(root)
+            return _result(Status.SUCCESS, "SOS_CLIENT_ALREADY_REMOVED", manifest)
+        if manifest["state"] == "removed":
+            _require_journal(root, manifest, "rolled_back")
             return _result(Status.SUCCESS, "SOS_CLIENT_ALREADY_REMOVED", manifest)
         if manifest["repository_id"] != repository_id:
             raise ClientIntegrationError("SOS_CLIENT_REPOSITORY_MISMATCH", Status.STALE)
@@ -252,12 +278,14 @@ def remove_client(
             raise ClientIntegrationError("SOS_CLIENT_INSTALL_RECOVERY_REQUIRED", Status.BLOCKED)
         if manifest["state"] == "installed":
             _verify_removable(root, manifest)
+            _require_journal(root, manifest, "applied")
             removing = _with_state(manifest, "remove_prepared")
             _write_manifest(root, removing)
         elif manifest["state"] == "remove_prepared":
             removing = manifest
         else:
             raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
+        _ensure_journal_state(root, removing, "rollback_prepared")
         current, exists, _ = _read_target(root)
         if exists and _bytes_digest(current) == removing["configured_digest"]:
             original_length = removing["original_byte_count"]
@@ -277,10 +305,11 @@ def remove_client(
             expected_restored = removing["original_existed"] and exists and _bytes_digest(current) == removing["original_digest"]
             if not (expected_removed or expected_restored):
                 raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+        _ensure_journal_state(root, removing, "rolled_back")
         removed = _with_state(removing, "removed")
         _write_manifest(root, removed)
         return _result(Status.SUCCESS, "SOS_CLIENT_REMOVED", removed)
-    except (ClientIntegrationError, RepositoryError, WorkspaceError, OSError) as exc:
+    except (ClientIntegrationError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
         return _error_result(exc)
 
 
@@ -386,7 +415,9 @@ def _manifest(
         "parent_existed": parent_existed,
         "original_byte_count": len(original),
         "original_digest": _bytes_digest(original),
+        "managed_addition_byte_count": len(addition),
         "managed_addition_digest": _bytes_digest(addition),
+        "configured_byte_count": len(updated),
         "configured_digest": _bytes_digest(updated),
         "launcher_digest": binding.digest,
         "package_version": binding.package_version,
@@ -439,7 +470,8 @@ def _read_manifest(root: Path) -> dict[str, Any] | None:
 def _validate_manifest(value: object) -> None:
     required = {
         "contract", "client", "state", "repository_id", "target", "original_existed", "parent_existed",
-        "original_byte_count", "original_digest", "managed_addition_digest", "configured_digest",
+        "original_byte_count", "original_digest", "managed_addition_byte_count", "managed_addition_digest",
+        "configured_byte_count", "configured_digest",
         "launcher_digest", "package_version", "absolute_paths_serialized", "raw_config_serialized",
         "manifest_digest",
     }
@@ -455,7 +487,10 @@ def _validate_manifest(value: object) -> None:
         raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
     if not isinstance(value["package_version"], str) or not value["package_version"]:
         raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
-    if not isinstance(value["original_byte_count"], int) or value["original_byte_count"] < 0:
+    for field in ("original_byte_count", "managed_addition_byte_count", "configured_byte_count"):
+        if not isinstance(value[field], int) or isinstance(value[field], bool) or value[field] < 0:
+            raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
+    if value["configured_byte_count"] != value["original_byte_count"] + value["managed_addition_byte_count"]:
         raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
     for field in ("repository_id", "original_digest", "managed_addition_digest", "configured_digest", "launcher_digest", "manifest_digest"):
         item = value[field]
@@ -472,6 +507,41 @@ def _verify_manifest_binding(manifest: dict[str, Any], repository_id: str, bindi
         raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_STALE", Status.STALE)
 
 
+def _managed_plan(manifest: dict[str, Any]) -> dict[str, Any]:
+    return build_managed_file_plan(
+        journal_id=_JOURNAL_ID,
+        repository_id=manifest["repository_id"],
+        target=manifest["target"],
+        patch_kind="append_suffix" if manifest["original_existed"] else "create_file",
+        before_exists=manifest["original_existed"],
+        before_byte_count=manifest["original_byte_count"],
+        before_digest=manifest["original_digest"],
+        patch_byte_count=manifest["managed_addition_byte_count"],
+        patch_digest=manifest["managed_addition_digest"],
+        after_byte_count=manifest["configured_byte_count"],
+        after_digest=manifest["configured_digest"],
+    )
+
+
+def _ensure_journal_state(root: Path, manifest: dict[str, Any], state: str) -> None:
+    plan = _managed_plan(manifest)
+    current = replay_managed_file_journal(root, _JOURNAL_ID)
+    if current is not None and current["plan"] == plan:
+        latest_state = current["latest"]["state"]
+        if (state, latest_state) in {("apply_prepared", "applied"), ("rollback_prepared", "rolled_back")}:
+            return
+    record_managed_file_state(root, plan, state)
+
+
+def _require_journal(root: Path, manifest: dict[str, Any], state: str) -> None:
+    require_managed_file_state(root, _managed_plan(manifest), state)
+
+
+def _require_no_orphan_journal(root: Path) -> None:
+    if replay_managed_file_journal(root, _JOURNAL_ID) is not None:
+        raise ManagedFileError("SOS_MANAGED_FILE_MANIFEST_MISSING")
+
+
 def _verify_installed(root: Path, manifest: dict[str, Any], binding: LauncherBinding) -> None:
     _verify_manifest_binding(manifest, manifest["repository_id"], binding)
     current, exists, _ = _read_target(root)
@@ -485,6 +555,7 @@ def _verify_installed(root: Path, manifest: dict[str, Any], binding: LauncherBin
     expected_addition = _render_addition(root, binding, current[:original_length])
     if current != current[:original_length] + expected_addition:
         raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
+    _require_journal(root, manifest, "applied")
 
 
 def _verify_removable(root: Path, manifest: dict[str, Any]) -> None:
@@ -862,6 +933,8 @@ def _result(status: Status, reason: str, manifest: dict[str, Any] | None = None)
 
 def _error_result(exc: BaseException) -> TerminalResult:
     if isinstance(exc, ClientIntegrationError):
+        return _result(exc.status, exc.reason)
+    if isinstance(exc, ManagedFileError):
         return _result(exc.status, exc.reason)
     if isinstance(exc, RepositoryError):
         return _result(Status.INVALID, exc.reason)

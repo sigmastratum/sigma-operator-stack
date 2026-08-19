@@ -50,8 +50,12 @@ sos client remove codex PATH
 ```
 
 SOS keeps a content-safe integration manifest under `.sigma/`; it stores
-digests and package metadata, never raw config or absolute paths. Status fails
-closed on repository, package, launcher, manifest or config drift.
+digests and package metadata, never raw config or absolute paths. The manifest
+is bound to the general append-only
+[managed-file journal](managed-file-journal.md). Installation persists an
+immutable plan and `apply_prepared` event, updates the client file, appends the
+`applied` event and only then marks the integration installed. Status fails
+closed on repository, package, launcher, manifest, journal or config drift.
 
 Removal requires a controlling terminal and confirmation. It removes only the
 exact marked suffix whose complete config, original prefix and managed block
@@ -60,12 +64,14 @@ created solely by SOS is removed, and its directory is removed only when SOS
 created it and it is empty. `.sigma/` and accepted records are always retained.
 User edits block automatic removal and require manual resolution. Exact managed
 cleanup remains available after a package upgrade because it does not execute
-the old launcher. Removal restores Git-visible content but does not claim to
-advance or rewrite accepted SOS source observations; a prior accepted adapter
-change still follows the normal successor lifecycle.
+the old launcher. Removal records `rollback_prepared` before mutation and
+`rolled_back` before advancing the manifest. Removal restores Git-visible
+content but does not claim to advance or rewrite accepted SOS source
+observations; a prior accepted adapter change still follows the normal
+successor lifecycle.
 
 ## Current boundary
 
 This is the first Codex adapter slice, not a broad compatibility claim. Claude,
-other clients, package update/uninstall composition, crash-proof append-only
-external-file journals and cross-server qualification remain separate gates.
+other clients, multi-target update/uninstall composition and cross-server
+qualification remain separate gates.
