@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ _STAGING_ROOT = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}(?:/|$)")
 _STAGING_ROOT_NAME = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}$")
 _COMMAND_TIMEOUT_SECONDS = 5
 _MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024
+_SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+_GIT_EXECUTABLE = shutil.which("git", path=_SAFE_PATH)
 
 
 class RepositoryError(RuntimeError):
@@ -75,16 +78,32 @@ class RepositoryIdentity:
 
 
 def _bounded_git(root: Path, *args: str) -> bytes:
+    if _GIT_EXECUTABLE is None:
+        raise RepositoryError("SOS_GIT_INSPECTION_FAILED")
     environment = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "PATH": _SAFE_PATH,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_PAGER": "cat",
+        "GIT_EXTERNAL_DIFF": "",
     }
     try:
         completed = subprocess.run(
-            ["git", "-C", os.fspath(root), *args],
+            [
+                _GIT_EXECUTABLE,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "diff.external=",
+                "-C",
+                os.fspath(root),
+                *args,
+            ],
             check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -103,16 +122,32 @@ def _bounded_git(root: Path, *args: str) -> bytes:
 
 
 def _optional_git(root: Path, *args: str) -> bytes | None:
+    if _GIT_EXECUTABLE is None:
+        raise RepositoryError("SOS_GIT_INSPECTION_FAILED")
     environment = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "PATH": _SAFE_PATH,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_PAGER": "cat",
+        "GIT_EXTERNAL_DIFF": "",
     }
     try:
         completed = subprocess.run(
-            ["git", "-C", os.fspath(root), *args],
+            [
+                _GIT_EXECUTABLE,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "diff.external=",
+                "-C",
+                os.fspath(root),
+                *args,
+            ],
             check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,

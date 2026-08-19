@@ -32,11 +32,16 @@ returns `SOS_ACCEPTANCE_TTY_REQUIRED` and writes nothing. This is intentionally
 weak local evidence, not authentication, and SOS does not claim that an agent
 cannot invoke the CLI.
 
-The current candidate bootstraps only a clean Git application projection. A
-dirty worktree returns `SOS_DIRTY_FINGERPRINT_PROFILE_NOT_QUALIFIED` and writes
-nothing until the complete P101 dirty-fingerprint observer is qualified. A
-commit containing only the excluded `.sigma` control plane does not make the
-application source stale.
+Bootstrap accepts clean or dirty Git application state only after producing a
+complete P101-v2 application fingerprint. Staged index entries, unstaged and
+untracked bytes, deletions, symlink targets and bounded submodule state use the
+normative canonical encoding. Protected local paths contribute presence, type
+and a stable class identifier without opening or hashing their content. Every
+authoritative read re-observes the application fingerprint, so an untracked
+file content change can make recovery stale even when Git's textual status is
+unchanged. A commit containing only the excluded `.sigma` control plane does
+not make the application source stale. Limits, unsupported filesystem types or
+a snapshot race produce `not_verified` and no usable fingerprint.
 
 The first supported
 qualification family performs a bounded syntax qualification of tracked

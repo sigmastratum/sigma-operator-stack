@@ -128,14 +128,20 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         self.assertNotIn("synthetic-user", authority_text)
         self.assertNotIn("private-marker=synthetic", authority_text)
 
-    def test_dirty_bootstrap_fails_closed_before_writing_p101_records(self) -> None:
+    def test_dirty_bootstrap_binds_complete_application_fingerprint(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         (root / "README.md").write_text("synthetic dirty state\n", encoding="utf-8")
         result = initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        self.assertEqual(result.status, "not_verified")
-        self.assertEqual(result.reasons, ("SOS_DIRTY_FINGERPRINT_PROFILE_NOT_QUALIFIED",))
-        self.assertFalse((root / ".sigma").exists())
+        self.assertEqual(result.status, "success")
+        authority = json.loads((root / ".sigma" / "records" / "authority.json").read_text(encoding="utf-8"))
+        application = authority["source_binding"]["source_observation"]["application_state"]
+        self.assertEqual(application["state"], "dirty")
+        self.assertTrue(application["complete"])
+        self.assertEqual(application["entry_count"], 1)
+        self.assertGreater(application["bytes_hashed"], 0)
+        self.assertRegex(application["fingerprint"], r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(workspace_status(str(root)).status, "success")
 
     def test_unconfirmed_bootstrap_does_not_write(self) -> None:
         temporary, root = self.make_project()

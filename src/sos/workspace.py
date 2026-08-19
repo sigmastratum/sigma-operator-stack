@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import os
 import secrets
@@ -25,6 +24,7 @@ from .contracts import (
     verify_receipt,
     verify_record,
 )
+from .dirty import observe_application
 from .repository import (
     RepositoryError,
     RepositoryIdentity,
@@ -98,6 +98,8 @@ def initialize_workspace(
         preliminary = inspect_repository(root)
     except RepositoryError as exc:
         return _failure(Status.INVALID, exc.reason)
+    if "SOS_CONTROL_PLANE_COLLISION" in preliminary.reasons:
+        return _failure(Status.INVALID, "SOS_CONTROL_PLANE_COLLISION")
     if preliminary.control_plane_state != "absent":
         status = workspace_status(os.fspath(root))
         if status.status == Status.SUCCESS:
@@ -110,8 +112,6 @@ def initialize_workspace(
         return TerminalResult("sos_init_result_v1", status.status, status.reasons, status.details)
     if preliminary.head is None:
         return _failure(Status.NOT_VERIFIED, "SOS_REPOSITORY_UNBORN")
-    if preliminary.application_state != "clean":
-        return _failure(Status.NOT_VERIFIED, "SOS_DIRTY_FINGERPRINT_PROFILE_NOT_QUALIFIED")
     if not confirmed:
         return _failure(Status.OWNER_REQUIRED, "SOS_BOOTSTRAP_CONFIRMATION_REQUIRED")
     if not controlling_tty_observed:
@@ -130,7 +130,7 @@ def initialize_workspace(
     docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
     task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
     try:
-        source = _source_observation(inspection, identity, transaction_id, created_at)
+        source = _source_observation(root, inspection, identity, transaction_id, created_at)
         actor = _actor()
         records = _bootstrap_records(
             inspection=inspection,
@@ -156,7 +156,12 @@ def initialize_workspace(
         )
         schemas = schema_bundle_hashes()
     except ContractError as exc:
-        return _failure(Status.INVALID, exc.reason)
+        incomplete_observation = exc.reason.startswith("SOS_DIRTY_") or exc.reason in {
+            "SOS_PATH_LIMIT_EXCEEDED",
+            "SOS_SUBMODULE_LIMIT_EXCEEDED",
+        }
+        status = Status.NOT_VERIFIED if incomplete_observation else Status.INVALID
+        return _failure(status, exc.reason)
 
     record_revisions = {name: record["revision_id"] for name, record in records.items()}
     receipt_ids = [receipt["receipt_id"] for receipt in receipts]
@@ -170,6 +175,7 @@ def initialize_workspace(
             "head": inspection.head,
             "tree_digest": inspection.application_tree_digest,
             "status_digest": inspection.application_status_digest,
+            "application_fingerprint": source["application_state"]["fingerprint"],
             "source_observation_digest": source["observation_digest"],
         },
         "records": record_revisions,
@@ -223,8 +229,14 @@ def workspace_status(path: str = ".") -> TerminalResult:
             "SOS_CONTROL_PLANE_INTEGRITY_INVALID",
             contract="sos_workspace_status_v1",
         )
-    del root
     binding = manifest["source_binding"]
+    source = replay["records"]["authority"]["source_binding"]["source_observation"]
+    application = observe_application(
+        root,
+        inspection.repository_id,
+        source["head"],
+        source["exclusion_policy"]["policy_digest"],
+    )
     reasons: list[str] = []
     # A commit containing only the excluded .sigma control plane does not
     # change application currentness.  The acceptance-time HEAD remains in the
@@ -232,12 +244,19 @@ def workspace_status(path: str = ".") -> TerminalResult:
     # the currentness authority.
     if binding["tree_digest"] != inspection.application_tree_digest:
         reasons.append("SOS_SOURCE_TREE_CHANGED")
-    if binding["status_digest"] != inspection.application_status_digest:
+    if (
+        binding["status_digest"] != inspection.application_status_digest
+        or (application.complete and binding["application_fingerprint"] != application.fingerprint)
+    ):
         reasons.append("SOS_SOURCE_STATUS_CHANGED")
     details = {
         "repository_id": inspection.repository_id,
         "source_tree_digest": inspection.application_tree_digest,
         "source_status_digest": inspection.application_status_digest,
+        "application_fingerprint": application.fingerprint,
+        "application_state": application.state,
+        "application_observation_complete": application.complete,
+        "application_content_completeness": application.content_completeness,
         "receipt_tip": manifest["receipt_tip"],
         "control_plane_digest": manifest["control_plane_digest"],
         "control_plane_integrity": "valid",
@@ -248,6 +267,13 @@ def workspace_status(path: str = ".") -> TerminalResult:
     }
     if reasons:
         return TerminalResult("sos_workspace_status_v1", Status.STALE, tuple(reasons), details)
+    if not application.complete:
+        return TerminalResult(
+            "sos_workspace_status_v1",
+            Status.NOT_VERIFIED,
+            application.reasons,
+            details,
+        )
     return TerminalResult(
         "sos_workspace_status_v1",
         Status.SUCCESS,
@@ -357,6 +383,8 @@ def _replay_integrity(
     manifest: dict[str, Any],
     authority: dict[str, Any],
 ) -> dict[str, Any]:
+    if "SOS_CONTROL_PLANE_COLLISION" in inspection.reasons:
+        raise ContractError()
     expected_manifest_keys = {
         "contract",
         "repository_id",
@@ -381,6 +409,7 @@ def _replay_integrity(
         "head",
         "tree_digest",
         "status_digest",
+        "application_fingerprint",
         "source_observation_digest",
     }:
         raise ContractError()
@@ -408,6 +437,8 @@ def _replay_integrity(
         source.get("repository_id") != inspection.repository_id
         or source.get("observation_digest") != source_binding.get("source_observation_digest")
         or source.get("head") != source_binding.get("head")
+        or source.get("application_state", {}).get("fingerprint")
+        != source_binding.get("application_fingerprint")
     ):
         raise ContractError()
     intent = manifest.get("bootstrap_intent_id")
@@ -849,13 +880,14 @@ def _record_envelope(
 
 
 def _source_observation(
+    root: Path,
     inspection: RepositoryInspection,
     identity: RepositoryIdentity,
     transaction_id: str,
     observed_at: str,
 ) -> dict[str, Any]:
-    if inspection.head is None or inspection.application_state != "clean":
-        raise ContractError("SOS_DIRTY_FINGERPRINT_PROFILE_NOT_QUALIFIED")
+    if inspection.head is None:
+        raise ContractError("SOS_REPOSITORY_UNBORN")
     exclusion = {
         "contract": "sos_bootstrap_exclusion_policy_v2",
         "schema_major": 2,
@@ -865,11 +897,14 @@ def _source_observation(
         "policy_digest": "sha256:" + "0" * 64,
     }
     exclusion["policy_digest"] = exclusion_policy_digest(exclusion)
-    fingerprint = _clean_application_fingerprint(
+    application = observe_application(
+        root,
         identity.repository_id,
         inspection.head,
         exclusion["policy_digest"],
     )
+    if not application.complete:
+        raise ContractError(application.reasons[0])
     source = {
         "contract": "sos_source_observation_v2",
         "repository_id": identity.repository_id,
@@ -877,17 +912,7 @@ def _source_observation(
         "branch": inspection.branch,
         "detached": inspection.detached,
         "worktree_id": worktree_identity(identity.repository_id),
-        "application_state": {
-            "state": "clean",
-            "fingerprint": fingerprint,
-            "entry_count": 0,
-            "bytes_hashed": 0,
-            "complete": True,
-            "content_completeness": "byte_complete",
-            "exclusion_policy_ref": exclusion["policy_digest"],
-            "protected_presence": [],
-            "reasons": [],
-        },
+        "application_state": application.to_dict(),
         "control_plane_state": {
             "root": ".sigma",
             "tree_digest": None,
@@ -902,22 +927,6 @@ def _source_observation(
     source["observation_digest"] = source_observation_digest(source)
     validate_source_observation(source)
     return source
-
-
-def _clean_application_fingerprint(repository_id: str, head: str, exclusion_digest: str) -> str:
-    repository_hash = bytes.fromhex(repository_id.removeprefix("sha256:"))
-    head_bytes = bytes.fromhex(head)
-    policy_hash = bytes.fromhex(exclusion_digest.removeprefix("sha256:"))
-    material = (
-        b"sos_dirty_v1"
-        + bytes((0,))
-        + repository_hash
-        + bytes((len(head_bytes),))
-        + head_bytes
-        + policy_hash
-        + (0).to_bytes(4, "big")
-    )
-    return "sha256:" + hashlib.sha256(material).hexdigest()
 
 
 def _lineage(
