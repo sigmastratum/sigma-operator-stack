@@ -81,6 +81,12 @@ _RECEIPT_KINDS = (
     "operator_state_bootstrap_plan",
 )
 _PUBLIC_EXTENSION = "org.sigmastratum.sos"
+_SUCCESSOR_LIMIT = 10_000
+_SUCCESSOR_RECORD_ROOT = "records/revisions"
+_SUCCESSOR_RECEIPT_ROOT = "receipts/successors"
+_TRANSITION_ROOT = "ledger/transitions"
+_LEDGER_TIP_ROOT = "ledger/tips"
+_PROPOSAL_ROOT = "proposals"
 
 
 class WorkspaceError(RuntimeError):
@@ -218,6 +224,251 @@ def initialize_workspace(
     )
 
 
+def regenerate_workspace(
+    path: str = ".",
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+) -> TerminalResult:
+    """Create one immutable three-record successor plan without accepting it."""
+    if not confirmed:
+        return _failure(
+            Status.OWNER_REQUIRED,
+            "SOS_REGENERATION_CONFIRMATION_REQUIRED",
+            contract="sos_regeneration_result_v1",
+        )
+    if not controlling_tty_observed:
+        return _failure(
+            Status.OWNER_REQUIRED,
+            "SOS_REGENERATION_TTY_REQUIRED",
+            contract="sos_regeneration_result_v1",
+        )
+    status = workspace_status(path)
+    if status.status == Status.SUCCESS:
+        return TerminalResult(
+            "sos_regeneration_result_v1",
+            Status.SUCCESS,
+            ("SOS_REGENERATION_NOT_REQUIRED",),
+            status.details,
+        )
+    if status.status != Status.STALE:
+        return TerminalResult("sos_regeneration_result_v1", status.status, status.reasons, status.details)
+    try:
+        root, inspection, _manifest, replay = _load_and_replay(path)
+        if not replay["source_coherent"]:
+            return _failure(
+                Status.BLOCKED,
+                "SOS_SUCCESSOR_SEQUENCE_INCOMPLETE",
+                contract="sos_regeneration_result_v1",
+            )
+        identity = repository_identity_contract(
+            root,
+            local_repository_nonce=_extract_local_nonce(replay["records"]["authority"]),
+        )
+        transaction_material = {
+            "contract": "sos_regeneration_transaction_v1",
+            "repository_id": identity.repository_id,
+            "records": {slot: record["revision_id"] for slot, record in replay["records"].items()},
+            "tree_digest": inspection.application_tree_digest,
+            "status_digest": inspection.application_status_digest,
+        }
+        transaction_id = digest_value(transaction_material).removeprefix("sha256:")
+        created_at = _timestamp()
+        source = _source_observation(
+            root,
+            inspection,
+            identity,
+            transaction_id,
+            created_at,
+            control_plane_digest=replay["control_plane_digest"],
+            accepted_ledger_tip=replay["receipt_tip"],
+        )
+        existing = _existing_regeneration(root, replay, source)
+        if existing is not None:
+            return TerminalResult(
+                "sos_regeneration_result_v1",
+                Status.SUCCESS,
+                ("SOS_REGENERATION_PLAN_EXISTS",),
+                existing,
+            )
+        proposals = _successor_proposals(root, identity, replay, source, created_at)
+        plan = _regeneration_plan(identity, replay, source, proposals, created_at)
+        for record in proposals.values():
+            _write_immutable_json(
+                root,
+                f"{_PROPOSAL_ROOT}/{record['revision_id'].removeprefix('sha256:')}.json",
+                record,
+            )
+        _write_immutable_json(
+            root,
+            f"{_PROPOSAL_ROOT}/plans/{plan['plan_id'].removeprefix('sha256:')}.json",
+            plan,
+        )
+        view = {
+            "contract": "sos_regeneration_view_v1",
+            "plan_id": plan["plan_id"],
+            "source_observation_digest": source["observation_digest"],
+            "predecessors": plan["predecessors"],
+            "proposals": plan["proposals"],
+            "acceptance_order": [item["revision"] for item in plan["proposals"]],
+            "accepted_state_modified": False,
+            "raw_project_content_serialized": False,
+            "absolute_paths_serialized": False,
+        }
+        _replace_view_json(root, "views/regeneration.json", view)
+        return TerminalResult(
+            "sos_regeneration_result_v1",
+            Status.SUCCESS,
+            ("SOS_SUCCESSOR_PROPOSALS_CREATED",),
+            view,
+        )
+    except RepositoryError as exc:
+        return _failure(Status.INVALID, exc.reason, contract="sos_regeneration_result_v1")
+    except (WorkspaceError, ContractError):
+        return _failure(
+            Status.INVALID,
+            "SOS_CONTROL_PLANE_INTEGRITY_INVALID",
+            contract="sos_regeneration_result_v1",
+        )
+
+
+def accept_proposal(
+    path: str,
+    revision: str,
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+) -> TerminalResult:
+    """Accept one exact successor proposal through the human-intended CLI."""
+    if not _is_sha256(revision):
+        return _failure(Status.INVALID, "SOS_PROPOSAL_REVISION_INVALID", contract="sos_accept_result_v1")
+    if not confirmed:
+        return _failure(Status.OWNER_REQUIRED, "SOS_ACCEPTANCE_CONFIRMATION_REQUIRED", contract="sos_accept_result_v1")
+    if not controlling_tty_observed:
+        return _failure(Status.OWNER_REQUIRED, "SOS_ACCEPTANCE_TTY_REQUIRED", contract="sos_accept_result_v1")
+    try:
+        root = discover_repository_root(path)
+        lock = _acquire_acceptance_lock(root)
+        try:
+            _root, inspection, _manifest, replay = _load_and_replay(os.fspath(root))
+            accepted_receipt = replay["record_receipts"].get(revision)
+            if accepted_receipt is not None:
+                return TerminalResult(
+                    "sos_accept_result_v1",
+                    Status.SUCCESS,
+                    ("SOS_PROPOSAL_ALREADY_ACCEPTED",),
+                    {
+                        "accepted_revision": revision,
+                        "receipt_id": accepted_receipt,
+                        "receipt_tip": replay["receipt_tip"],
+                    },
+                )
+            proposal = _read_json(root, f"{_PROPOSAL_ROOT}/{revision.removeprefix('sha256:')}.json")
+            verify_record(proposal)
+            if proposal.get("revision_id") != revision:
+                raise ContractError()
+            slot = _slot_for_schema(proposal.get("record_schema"))
+            identity = repository_identity_contract(
+                root,
+                local_repository_nonce=_extract_local_nonce(replay["records"]["authority"]),
+            )
+            if proposal.get("repository") != identity.to_dict():
+                raise ContractError()
+            source = proposal.get("source_binding", {}).get("source_observation")
+            if not isinstance(source, dict):
+                raise ContractError()
+            validate_source_observation(source)
+            application = observe_application(
+                root,
+                identity.repository_id,
+                source["head"],
+                source["exclusion_policy"]["policy_digest"],
+            )
+            if (
+                not application.complete
+                or application.fingerprint != source["application_state"]["fingerprint"]
+                or inspection.branch != source["branch"]
+                or inspection.detached != source["detached"]
+            ):
+                return _failure(Status.STALE, "SOS_PROPOSAL_SOURCE_STALE", contract="sos_accept_result_v1")
+            receipt = _successor_receipt(replay, slot, proposal, _timestamp())
+            try:
+                _validate_successor_transition(
+                    replay["records"], replay["record_receipts"], slot, proposal, receipt
+                )
+            except ContractError:
+                return _failure(
+                    Status.STALE,
+                    "SOS_PROPOSAL_PREDECESSOR_STALE",
+                    contract="sos_accept_result_v1",
+                )
+            transition = _seal_digest_object(
+                {
+                    "contract": "sos_acceptance_transition_v1",
+                    "receipt_id": receipt["receipt_id"],
+                    "predecessor_tip": replay["receipt_tip"],
+                    "record_slot": slot,
+                    "record_revision": revision,
+                    "record_schema": proposal["record_schema"],
+                    "source_tree_digest": inspection.application_tree_digest,
+                    "source_status_digest": inspection.application_status_digest,
+                    "transition_ordinal": replay["successor_count"] + 1,
+                },
+                "transition_digest",
+            )
+            _write_immutable_json(
+                root,
+                f"{_SUCCESSOR_RECORD_ROOT}/{revision.removeprefix('sha256:')}.json",
+                proposal,
+            )
+            _write_immutable_json(
+                root,
+                f"{_SUCCESSOR_RECEIPT_ROOT}/{receipt['receipt_id'].removeprefix('sha256:')}.json",
+                receipt,
+            )
+            _write_immutable_json(
+                root,
+                f"{_TRANSITION_ROOT}/{receipt['receipt_id'].removeprefix('sha256:')}.json",
+                transition,
+            )
+            tip = _seal_digest_object(
+                {
+                    "contract": "sos_acceptance_ledger_tip_v1",
+                    "receipt_tip": receipt["receipt_id"],
+                    "transition_count": replay["successor_count"] + 1,
+                },
+                "tip_digest",
+            )
+            _write_immutable_json(
+                root,
+                f"{_LEDGER_TIP_ROOT}/{replay['successor_count'] + 1:08d}.json",
+                tip,
+            )
+        finally:
+            _release_acceptance_lock(lock)
+        current = workspace_status(os.fspath(root))
+        return TerminalResult(
+            "sos_accept_result_v1",
+            Status.SUCCESS,
+            ("SOS_SUCCESSOR_ACCEPTED",),
+            {
+                "accepted_revision": revision,
+                "receipt_id": receipt["receipt_id"],
+                "workspace_status": current.status.value,
+                "workspace_reasons": list(current.reasons),
+                "receipt_tip": current.details.get("receipt_tip"),
+            },
+        )
+    except RepositoryError as exc:
+        return _failure(Status.INVALID, exc.reason, contract="sos_accept_result_v1")
+    except WorkspaceError as exc:
+        reason = str(exc)
+        status = Status.BLOCKED if reason == "SOS_ACCEPTANCE_LOCKED" else Status.INVALID
+        return _failure(status, reason, contract="sos_accept_result_v1")
+    except ContractError:
+        return _failure(Status.INVALID, "SOS_PROPOSAL_INVALID", contract="sos_accept_result_v1")
+
+
 def workspace_status(path: str = ".") -> TerminalResult:
     try:
         root, inspection, manifest, replay = _load_and_replay(path)
@@ -230,7 +481,7 @@ def workspace_status(path: str = ".") -> TerminalResult:
             contract="sos_workspace_status_v1",
         )
     binding = manifest["source_binding"]
-    source = replay["records"]["authority"]["source_binding"]["source_observation"]
+    source = replay["source_observation"]
     application = observe_application(
         root,
         inspection.repository_id,
@@ -249,6 +500,8 @@ def workspace_status(path: str = ".") -> TerminalResult:
         or (application.complete and binding["application_fingerprint"] != application.fingerprint)
     ):
         reasons.append("SOS_SOURCE_STATUS_CHANGED")
+    if not replay["source_coherent"]:
+        reasons.append("SOS_SUCCESSOR_SEQUENCE_INCOMPLETE")
     details = {
         "repository_id": inspection.repository_id,
         "source_tree_digest": inspection.application_tree_digest,
@@ -330,7 +583,11 @@ def doctor_workspace(path: str = ".") -> TerminalResult:
             ("SOS_QUALIFICATION_NOT_RUN",),
             recovery.details,
         )
-    if qualification.get("source_tree_digest") != recovery.details.get("source_binding", {}).get("tree_digest"):
+    recovery_binding = recovery.details.get("source_binding", {})
+    if (
+        qualification.get("source_tree_digest") != recovery_binding.get("tree_digest")
+        or qualification.get("source_status_digest") != recovery_binding.get("status_digest")
+    ):
         return TerminalResult("sos_doctor_result_v1", Status.STALE, ("SOS_QUALIFICATION_STALE",), recovery.details)
     if qualification.get("status") != "passed_local":
         return TerminalResult(
@@ -347,7 +604,10 @@ def store_qualification(path: str, receipt: QualificationReceipt) -> None:
     status = workspace_status(os.fspath(root))
     if status.status != Status.SUCCESS:
         raise WorkspaceError("SOS_WORKSPACE_NOT_CURRENT")
-    if receipt.source_tree_digest != status.details.get("source_tree_digest"):
+    if (
+        receipt.source_tree_digest != status.details.get("source_tree_digest")
+        or receipt.source_status_digest != status.details.get("source_status_digest")
+    ):
         raise WorkspaceError("SOS_QUALIFICATION_STALE")
     _validate_qualification_payload(receipt.to_dict())
     view_directory = _open_control_directory(root, ("views",), create=False)
@@ -373,7 +633,15 @@ def _load_and_replay(
         replay = _replay_integrity(root, inspection, identity, manifest, authority)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ContractError() from exc
-    return root, inspection, manifest, replay
+    effective_manifest = copy.deepcopy(manifest)
+    effective_manifest["records"] = {
+        slot: record["revision_id"] for slot, record in replay["records"].items()
+    }
+    effective_manifest["receipts"] = [receipt["receipt_id"] for receipt in replay["receipts"]]
+    effective_manifest["receipt_tip"] = replay["receipt_tip"]
+    effective_manifest["source_binding"] = replay["source_binding"]
+    effective_manifest["control_plane_digest"] = replay["control_plane_digest"]
+    return root, inspection, effective_manifest, replay
 
 
 def _replay_integrity(
@@ -491,14 +759,228 @@ def _replay_integrity(
     context = authority.get("extensions", {}).get(_PUBLIC_EXTENSION, {})
     if not isinstance(context, dict) or context.get("check_plan_digest") != observed_plan_digest:
         raise ContractError()
-    qualification, qualification_integrity = _replay_qualification(root, plan, source_binding)
+    successor = _replay_successors(
+        root,
+        identity,
+        records,
+        receipts,
+        source_binding,
+        observed_plan_digest,
+        schemas,
+    )
+    qualification, qualification_integrity = _replay_qualification(
+        root,
+        plan,
+        successor["source_binding"],
+    )
     return {
-        "records": records,
-        "receipts": receipts,
+        "records": successor["records"],
+        "receipts": successor["receipts"],
+        "receipt_tip": successor["receipt_tip"],
+        "source_binding": successor["source_binding"],
+        "control_plane_digest": successor["control_plane_digest"],
+        "source_coherent": successor["source_coherent"],
+        "source_observation": successor["source_observation"],
+        "record_receipts": successor["record_receipts"],
+        "successor_count": successor["successor_count"],
         "plan": plan,
         "qualification": qualification,
         "qualification_integrity": qualification_integrity,
     }
+
+
+def _replay_successors(
+    root: Path,
+    identity: RepositoryIdentity,
+    bootstrap_records: dict[str, dict[str, Any]],
+    bootstrap_receipts: list[dict[str, Any]],
+    bootstrap_source_binding: dict[str, Any],
+    check_plan_digest: str,
+    schemas: dict[str, str],
+) -> dict[str, Any]:
+    records = dict(bootstrap_records)
+    receipts = list(bootstrap_receipts)
+    record_receipts = {
+        record["revision_id"]: receipt["receipt_id"]
+        for record, receipt in zip(records.values(), bootstrap_receipts, strict=True)
+    }
+    bootstrap_tip = bootstrap_receipts[-1]["receipt_id"]
+    tip = _read_ledger_tip(root)
+    if tip is None:
+        return {
+            "records": records,
+            "receipts": receipts,
+            "receipt_tip": bootstrap_tip,
+            "source_binding": bootstrap_source_binding,
+            "control_plane_digest": _control_plane_digest(
+                {slot: record["revision_id"] for slot, record in records.items()},
+                [receipt["receipt_id"] for receipt in receipts],
+                check_plan_digest,
+                schemas,
+            ),
+            "source_coherent": True,
+            "source_observation": bootstrap_records["authority"]["source_binding"]["source_observation"],
+            "record_receipts": record_receipts,
+            "successor_count": 0,
+        }
+    _verify_digest_object(tip, "tip_digest", "sos_acceptance_ledger_tip_v1")
+    if set(tip) != {"contract", "receipt_tip", "transition_count", "tip_digest"}:
+        raise ContractError()
+    count = tip.get("transition_count")
+    receipt_tip = tip.get("receipt_tip")
+    if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= _SUCCESSOR_LIMIT:
+        raise ContractError()
+    if not _is_sha256(receipt_tip):
+        raise ContractError()
+    transitions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    cursor = receipt_tip
+    while cursor != bootstrap_tip:
+        if cursor in seen or len(transitions) >= count:
+            raise ContractError()
+        seen.add(cursor)
+        transition = _read_json(root, f"{_TRANSITION_ROOT}/{cursor.removeprefix('sha256:')}.json")
+        _verify_digest_object(transition, "transition_digest", "sos_acceptance_transition_v1")
+        if set(transition) != {
+            "contract",
+            "receipt_id",
+            "predecessor_tip",
+            "record_slot",
+            "record_revision",
+            "record_schema",
+            "source_tree_digest",
+            "source_status_digest",
+            "transition_ordinal",
+            "transition_digest",
+        }:
+            raise ContractError()
+        if transition.get("receipt_id") != cursor:
+            raise ContractError()
+        transitions.append(transition)
+        predecessor_tip = transition.get("predecessor_tip")
+        if not _is_sha256(predecessor_tip):
+            raise ContractError()
+        cursor = predecessor_tip
+    if len(transitions) != count:
+        raise ContractError()
+    transitions.reverse()
+    global_tip = bootstrap_tip
+    source_binding = bootstrap_source_binding
+    source_observation = bootstrap_records["authority"]["source_binding"]["source_observation"]
+    for ordinal, transition in enumerate(transitions, start=1):
+        if transition.get("transition_ordinal") != ordinal or transition.get("predecessor_tip") != global_tip:
+            raise ContractError()
+        slot = transition.get("record_slot")
+        schema = transition.get("record_schema")
+        revision = transition.get("record_revision")
+        receipt_id = transition.get("receipt_id")
+        if slot not in _RECORD_FILES or schema != _RECORD_SCHEMAS[tuple(_RECORD_FILES).index(slot)]:
+            raise ContractError()
+        if not _is_sha256(revision) or not _is_sha256(receipt_id):
+            raise ContractError()
+        ordinal_tip = _read_json(root, f"{_LEDGER_TIP_ROOT}/{ordinal:08d}.json")
+        _verify_digest_object(ordinal_tip, "tip_digest", "sos_acceptance_ledger_tip_v1")
+        if ordinal_tip.get("transition_count") != ordinal or ordinal_tip.get("receipt_tip") != receipt_id:
+            raise ContractError()
+        record = _read_json(root, f"{_SUCCESSOR_RECORD_ROOT}/{revision.removeprefix('sha256:')}.json")
+        receipt = _read_json(root, f"{_SUCCESSOR_RECEIPT_ROOT}/{receipt_id.removeprefix('sha256:')}.json")
+        verify_record(record)
+        verify_receipt(receipt)
+        if record.get("revision_id") != revision or record.get("record_schema") != schema:
+            raise ContractError()
+        if record.get("repository") != identity.to_dict():
+            raise ContractError()
+        _validate_successor_transition(records, record_receipts, slot, record, receipt)
+        source = record["source_binding"]["source_observation"]
+        validate_source_observation(source)
+        if (
+            receipt.get("receipt_id") != receipt_id
+            or receipt.get("source_observation_digest") != source.get("observation_digest")
+            or receipt.get("exclusion_policy_digest") != source.get("exclusion_policy", {}).get("policy_digest")
+        ):
+            raise ContractError()
+        source_binding = {
+            "head": source["head"],
+            "tree_digest": transition["source_tree_digest"],
+            "status_digest": transition["source_status_digest"],
+            "application_fingerprint": source["application_state"]["fingerprint"],
+            "source_observation_digest": source["observation_digest"],
+        }
+        source_observation = source
+        records[slot] = record
+        receipts.append(receipt)
+        record_receipts[revision] = receipt_id
+        global_tip = receipt_id
+    observations = [record["source_binding"]["source_observation"] for record in records.values()]
+    source_coherent = observations[1:] == observations[:-1]
+    return {
+        "records": records,
+        "receipts": receipts,
+        "receipt_tip": global_tip,
+        "source_binding": source_binding,
+        "control_plane_digest": _control_plane_digest(
+            {slot: record["revision_id"] for slot, record in records.items()},
+            [receipt["receipt_id"] for receipt in receipts],
+            check_plan_digest,
+            schemas,
+        ),
+        "source_coherent": source_coherent,
+        "source_observation": source_observation,
+        "record_receipts": record_receipts,
+        "successor_count": count,
+    }
+
+
+def _validate_successor_transition(
+    records: dict[str, dict[str, Any]],
+    record_receipts: dict[str, str],
+    slot: str,
+    record: dict[str, Any],
+    receipt: dict[str, Any],
+) -> None:
+    predecessor = records[slot]["revision_id"]
+    authority = records["authority"]["revision_id"]
+    policy = records["policy"]["revision_id"]
+    lineage = record.get("source_binding", {}).get("lineage")
+    if not isinstance(lineage, dict):
+        raise ContractError()
+    if slot == "authority":
+        expected_lineage = _successor_lineage("authority_successor", authority_predecessor=predecessor)
+        expected_authority = predecessor
+        expected_policy = None
+    elif slot == "policy":
+        expected_lineage = _successor_lineage(
+            "policy_successor",
+            current_authority=authority,
+            policy_predecessor=predecessor,
+        )
+        expected_authority = authority
+        expected_policy = None
+    else:
+        expected_lineage = _successor_lineage(
+            "operator_state",
+            current_authority=authority,
+            current_policy=policy,
+        )
+        expected_authority = authority
+        expected_policy = policy
+    if lineage != expected_lineage or record.get("supersedes") != predecessor:
+        raise ContractError()
+    if (
+        receipt.get("receipt_kind") != "successor_acceptance"
+        or receipt.get("sequence_ordinal") != 0
+        or receipt.get("proposal_revision") != record.get("revision_id")
+        or receipt.get("accepted_revision") != record.get("revision_id")
+        or receipt.get("accepted_record_schema") != record.get("record_schema")
+        or receipt.get("repository_id") != record.get("repository", {}).get("repository_id")
+        or receipt.get("authority_revision_used") != expected_authority
+        or receipt.get("policy_revision_observed") != expected_policy
+        or receipt.get("predecessor_revision") != predecessor
+        or receipt.get("predecessor_receipt") != record_receipts.get(predecessor)
+        or receipt.get("bootstrap_intent_id") is not None
+        or receipt.get("bootstrap_plan_id") is not None
+    ):
+        raise ContractError()
 
 
 def _validate_record_lineage(
@@ -560,13 +1042,13 @@ def _replay_qualification(
     if immutable != payload:
         raise ContractError()
     _validate_qualification_payload(payload)
-    if (
-        payload.get("plan_digest") != plan.get("plan_digest")
-        or payload.get("source_tree_digest") != source_binding.get("tree_digest")
-        or payload.get("source_status_digest") != source_binding.get("status_digest")
-    ):
+    if payload.get("plan_digest") != plan.get("plan_digest"):
         raise ContractError()
-    return view, "valid"
+    current = (
+        payload.get("source_tree_digest") == source_binding.get("tree_digest")
+        and payload.get("source_status_digest") == source_binding.get("status_digest")
+    )
+    return view, "valid" if current else "valid_stale"
 
 
 def _validate_qualification_payload(payload: dict[str, Any]) -> None:
@@ -879,12 +1361,288 @@ def _record_envelope(
     }
 
 
+def _successor_proposals(
+    root: Path,
+    identity: RepositoryIdentity,
+    replay: dict[str, Any],
+    source: dict[str, Any],
+    created_at: str,
+) -> dict[str, dict[str, Any]]:
+    current = replay["records"]
+    authority_paths = tuple(candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file())
+    docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
+    task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
+
+    authority = _successor_record(
+        current["authority"],
+        identity,
+        source,
+        _successor_lineage(
+            "authority_successor",
+            authority_predecessor=current["authority"]["revision_id"],
+        ),
+        created_at,
+    )
+    context = authority.setdefault("extensions", {}).setdefault(_PUBLIC_EXTENSION, {})
+    context.update(
+        {
+            "authority_paths": list(authority_paths),
+            "documentation_paths": list(docs),
+            "current_task_path": task_path,
+            "authority_state": "accepted_local_weak_evidence" if authority_paths else "owner_required",
+            "current_task_state": "accepted_local_weak_evidence" if task_path else "not_configured",
+            "check_plan_digest": replay["plan"]["plan_digest"],
+        }
+    )
+    authority = seal_record(authority)
+
+    policy = seal_record(
+        _successor_record(
+            current["policy"],
+            identity,
+            source,
+            _successor_lineage(
+                "policy_successor",
+                current_authority=authority["revision_id"],
+                policy_predecessor=current["policy"]["revision_id"],
+            ),
+            created_at,
+        )
+    )
+
+    operator = _successor_record(
+        current["operator-state"],
+        identity,
+        source,
+        _successor_lineage(
+            "operator_state",
+            current_authority=authority["revision_id"],
+            current_policy=policy["revision_id"],
+        ),
+        created_at,
+    )
+    operator["payload"] = _regenerated_operator_payload(
+        operator["payload"],
+        source,
+        task_path,
+        authority["revision_id"],
+        policy["revision_id"],
+    )
+    operator = seal_record(operator)
+    return {"authority": authority, "policy": policy, "operator-state": operator}
+
+
+def _successor_record(
+    current: dict[str, Any],
+    identity: RepositoryIdentity,
+    source: dict[str, Any],
+    lineage: dict[str, Any],
+    created_at: str,
+) -> dict[str, Any]:
+    proposal = copy.deepcopy(current)
+    predecessor = current["revision_id"]
+    proposal["revision_id"] = "sha256:" + "0" * 64
+    proposal["repository"] = identity.to_dict()
+    proposal["source_binding"] = {"source_observation": source, "lineage": lineage}
+    proposal["created_at"] = created_at
+    proposal["created_by"] = _actor()
+    proposal["supersedes"] = predecessor
+    proposal["provenance"] = {
+        "record_inputs": [predecessor],
+        "evidence_refs": [],
+        "external_artifacts": [],
+    }
+    proposal["integrity"] = {"record_sha256": "0" * 64}
+    proposal["lifecycle"] = {"declared": "proposal"}
+    return proposal
+
+
+def _regenerated_operator_payload(
+    payload: dict[str, Any],
+    source: dict[str, Any],
+    task_path: str | None,
+    authority_revision: str,
+    policy_revision: str,
+) -> dict[str, Any]:
+    result = copy.deepcopy(payload)
+    result["active_task"] = {
+        "task_id": "CURRENT_WORK",
+        "objective": (
+            "Review the detected current work and run the configured local qualification."
+            if task_path
+            else "Review the generated project map and declare the current work."
+        ),
+        "external_artifact_refs": [],
+    }
+    result["current_state"] = [
+        {
+            "fact_id": "REGENERATED_SOURCE",
+            "statement": "Successor proposals are bound to one content-safe local source observation.",
+            "evidence_refs": [source["observation_digest"]],
+            "status": "observed",
+        }
+    ]
+    result["proposal_refs"] = []
+    result["blockers"] = [] if task_path else [
+        {
+            "reason": "SOS_CURRENT_WORK_NOT_CONFIGURED",
+            "needed_owner_scope": "current-work",
+            "clear_condition": "Declare one repository-relative current-work source.",
+        }
+    ]
+    next_target = task_path or ".sigma/views/project-map.md"
+    result["next_action"] = {
+        "action_class": "review-and-qualify",
+        "target_paths": [next_target],
+        "description": (
+            "Review the detected current work, then run sos doctor."
+            if task_path
+            else "Review the generated project map, declare current work, then run sos doctor."
+        ),
+        "stop_conditions": [
+            "authority conflict",
+            "source currentness changed",
+            "qualification failed or is not verified",
+            "external action requires owner confirmation",
+        ],
+    }
+    result["recheck_triggers"] = [
+        {"trigger_type": "source", "bound_value": source["observation_digest"]},
+        {"trigger_type": "authority", "bound_value": authority_revision},
+        {"trigger_type": "policy", "bound_value": policy_revision},
+    ]
+    return result
+
+
+def _regeneration_plan(
+    identity: RepositoryIdentity,
+    replay: dict[str, Any],
+    source: dict[str, Any],
+    proposals: dict[str, dict[str, Any]],
+    created_at: str,
+) -> dict[str, Any]:
+    return _seal_digest_object(
+        {
+            "contract": "sos_regeneration_plan_v1",
+            "repository_id": identity.repository_id,
+            "source_observation_digest": source["observation_digest"],
+            "source_application_fingerprint": source["application_state"]["fingerprint"],
+            "source_branch": source["branch"],
+            "source_detached": source["detached"],
+            "predecessors": {
+                slot: record["revision_id"] for slot, record in replay["records"].items()
+            },
+            "proposals": [
+                {"slot": slot, "schema": record["record_schema"], "revision": record["revision_id"]}
+                for slot, record in proposals.items()
+            ],
+            "created_at": created_at,
+            "accepted_state_modified": False,
+        },
+        "plan_id",
+    )
+
+
+def _existing_regeneration(
+    root: Path,
+    replay: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        view = _read_optional_json(root, "views/regeneration.json")
+        if view is None or not _is_sha256(view.get("plan_id")):
+            return None
+        plan = _read_json(root, f"{_PROPOSAL_ROOT}/plans/{view['plan_id'].removeprefix('sha256:')}.json")
+        _verify_digest_object(plan, "plan_id", "sos_regeneration_plan_v1")
+        expected_predecessors = {
+            slot: record["revision_id"] for slot, record in replay["records"].items()
+        }
+        if (
+            plan.get("predecessors") != expected_predecessors
+            or plan.get("source_application_fingerprint") != source["application_state"]["fingerprint"]
+            or plan.get("source_branch") != source["branch"]
+            or plan.get("source_detached") != source["detached"]
+        ):
+            return None
+        proposals = plan.get("proposals")
+        if not isinstance(proposals, list) or len(proposals) != 3:
+            return None
+        for item in proposals:
+            if not isinstance(item, dict) or not _is_sha256(item.get("revision")):
+                return None
+            record = _read_json(root, f"{_PROPOSAL_ROOT}/{item['revision'].removeprefix('sha256:')}.json")
+            verify_record(record)
+            if record.get("revision_id") != item["revision"]:
+                return None
+        return {
+            "plan_id": plan["plan_id"],
+            "source_observation_digest": plan["source_observation_digest"],
+            "predecessors": plan["predecessors"],
+            "proposals": plan["proposals"],
+            "acceptance_order": [item["revision"] for item in plan["proposals"]],
+            "accepted_state_modified": False,
+            "raw_project_content_serialized": False,
+            "absolute_paths_serialized": False,
+        }
+    except (WorkspaceError, ContractError, KeyError, TypeError):
+        return None
+
+
+def _slot_for_schema(schema: object) -> str:
+    try:
+        return tuple(_RECORD_FILES)[_RECORD_SCHEMAS.index(schema)]
+    except (ValueError, IndexError) as exc:
+        raise ContractError() from exc
+
+
+def _successor_receipt(
+    replay: dict[str, Any],
+    slot: str,
+    proposal: dict[str, Any],
+    accepted_at: str,
+) -> dict[str, Any]:
+    current = replay["records"]
+    predecessor = current[slot]["revision_id"]
+    authority = current["authority"]["revision_id"]
+    policy = current["policy"]["revision_id"]
+    authority_used = predecessor if slot == "authority" else authority
+    policy_observed = policy if slot == "operator-state" else None
+    source = proposal["source_binding"]["source_observation"]
+    return seal_receipt(
+        {
+            "schema": "sos_acceptance_receipt_v2",
+            "receipt_id": "sha256:" + "0" * 64,
+            "receipt_kind": "successor_acceptance",
+            "sequence_ordinal": 0,
+            "repository_id": proposal["repository"]["repository_id"],
+            "proposal_revision": proposal["revision_id"],
+            "accepted_revision": proposal["revision_id"],
+            "accepted_record_schema": proposal["record_schema"],
+            "authority_revision_used": authority_used,
+            "policy_revision_observed": policy_observed,
+            "predecessor_revision": predecessor,
+            "predecessor_receipt": replay["record_receipts"][predecessor],
+            "bootstrap_intent_id": None,
+            "bootstrap_plan_id": None,
+            "source_observation_digest": source["observation_digest"],
+            "exclusion_policy_digest": source["exclusion_policy"]["policy_digest"],
+            "actor": _actor(),
+            "accepted_at": accepted_at,
+            "decision": "accepted",
+            "integrity": {"receipt_sha256": "0" * 64},
+        }
+    )
+
+
 def _source_observation(
     root: Path,
     inspection: RepositoryInspection,
     identity: RepositoryIdentity,
     transaction_id: str,
     observed_at: str,
+    *,
+    control_plane_digest: str | None = None,
+    accepted_ledger_tip: str | None = None,
 ) -> dict[str, Any]:
     if inspection.head is None:
         raise ContractError("SOS_REPOSITORY_UNBORN")
@@ -905,6 +1663,15 @@ def _source_observation(
     )
     if not application.complete:
         raise ContractError(application.reasons[0])
+    if (control_plane_digest is None) != (accepted_ledger_tip is None):
+        raise ContractError()
+    control_plane = {
+        "root": ".sigma",
+        "tree_digest": control_plane_digest,
+        "integrity_status": "valid" if control_plane_digest is not None else "absent",
+        "accepted_ledger_tip": accepted_ledger_tip,
+        "reasons": [],
+    }
     source = {
         "contract": "sos_source_observation_v2",
         "repository_id": identity.repository_id,
@@ -913,13 +1680,7 @@ def _source_observation(
         "detached": inspection.detached,
         "worktree_id": worktree_identity(identity.repository_id),
         "application_state": application.to_dict(),
-        "control_plane_state": {
-            "root": ".sigma",
-            "tree_digest": None,
-            "integrity_status": "absent",
-            "accepted_ledger_tip": None,
-            "reasons": [],
-        },
+        "control_plane_state": control_plane,
         "exclusion_policy": exclusion,
         "observed_at": observed_at,
         "observation_digest": "sha256:" + "0" * 64,
@@ -946,6 +1707,50 @@ def _lineage(
         "bootstrap_intent_id": intent,
         "bootstrap_plan_id": plan_id,
     }
+
+
+def _successor_lineage(
+    mode: str,
+    *,
+    authority_predecessor: str | None = None,
+    current_authority: str | None = None,
+    policy_predecessor: str | None = None,
+    current_policy: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "binding_mode": mode,
+        "authority_predecessor": authority_predecessor,
+        "current_authority": current_authority,
+        "policy_predecessor": policy_predecessor,
+        "current_policy": current_policy,
+        "bootstrap_intent_id": None,
+        "bootstrap_plan_id": None,
+    }
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 71
+        and value.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in value[7:])
+    )
+
+
+def _verify_digest_object(value: dict[str, Any], field: str, contract: str) -> None:
+    if value.get("contract") != contract or not _is_sha256(value.get(field)):
+        raise ContractError()
+    material = copy.deepcopy(value)
+    observed = material.pop(field)
+    if observed != digest_value(material):
+        raise ContractError()
+
+
+def _seal_digest_object(value: dict[str, Any], field: str) -> dict[str, Any]:
+    sealed = copy.deepcopy(value)
+    sealed.pop(field, None)
+    sealed[field] = digest_value(sealed)
+    return sealed
 
 
 def _actor() -> dict[str, Any]:
@@ -1036,18 +1841,63 @@ def _read_optional_json(root: Path, relative: str) -> dict[str, Any] | None:
         raise
 
 
+def _read_ledger_tip(root: Path) -> dict[str, Any] | None:
+    try:
+        descriptor = _open_control_directory(root, tuple(_LEDGER_TIP_ROOT.split("/")), create=False)
+    except WorkspaceError as exc:
+        if str(exc) == "SOS_WORKSPACE_RECORD_MISSING":
+            return None
+        raise
+    try:
+        names = sorted(os.listdir(descriptor))
+    except OSError as exc:
+        os.close(descriptor)
+        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
+    os.close(descriptor)
+    names = [name for name in names if not name.startswith(".tmp.")]
+    if not names:
+        return None
+    expected = [f"{index:08d}.json" for index in range(1, len(names) + 1)]
+    if names != expected or len(names) > _SUCCESSOR_LIMIT:
+        raise ContractError()
+    latest: dict[str, Any] | None = None
+    for index, name in enumerate(names, start=1):
+        tip = _read_json(root, f"{_LEDGER_TIP_ROOT}/{name}")
+        _verify_digest_object(tip, "tip_digest", "sos_acceptance_ledger_tip_v1")
+        if tip.get("transition_count") != index:
+            raise ContractError()
+        latest = tip
+    return latest
+
+
 def _write_immutable_json(root: Path, relative: str, value: dict[str, Any]) -> None:
     parts = Path(relative).parts
     descriptor = _open_control_directory(root, parts[:-1], create=True)
     payload = _json_bytes(value)
+    temporary = f".tmp.{secrets.token_hex(32)}"
+    temporary_created = False
     try:
         try:
-            file_descriptor = os.open(
-                parts[-1],
+            temporary_descriptor = os.open(
+                temporary,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                 0o600,
                 dir_fd=descriptor,
             )
+            temporary_created = True
+            try:
+                _write_all(temporary_descriptor, payload)
+                os.fsync(temporary_descriptor)
+            finally:
+                os.close(temporary_descriptor)
+            os.link(
+                temporary,
+                parts[-1],
+                src_dir_fd=descriptor,
+                dst_dir_fd=descriptor,
+                follow_symlinks=False,
+            )
+            os.fsync(descriptor)
         except FileExistsError as exc:
             try:
                 existing_descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
@@ -1061,13 +1911,15 @@ def _write_immutable_json(root: Path, relative: str, value: dict[str, Any]) -> N
             if existing != value:
                 raise WorkspaceError("SOS_RECEIPT_COLLISION") from exc
             return
-        try:
-            _write_all(file_descriptor, payload)
-            os.fsync(file_descriptor)
-        finally:
-            os.close(file_descriptor)
-        os.fsync(descriptor)
+        except OSError as exc:
+            raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
     finally:
+        if temporary_created:
+            try:
+                os.unlink(temporary, dir_fd=descriptor)
+                os.fsync(descriptor)
+            except FileNotFoundError:
+                pass
         os.close(descriptor)
 
 
@@ -1098,6 +1950,35 @@ def _replace_view_json(root: Path, relative: str, value: dict[str, Any]) -> None
             os.unlink(temporary, dir_fd=descriptor)
         except FileNotFoundError:
             pass
+        os.close(descriptor)
+
+
+def _acquire_acceptance_lock(root: Path) -> int:
+    descriptor = _open_control_directory(root, ("ledger",), create=True)
+    try:
+        lock = os.open(
+            "accept.lock",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=descriptor,
+        )
+    except FileExistsError as exc:
+        os.close(descriptor)
+        raise WorkspaceError("SOS_ACCEPTANCE_LOCKED") from exc
+    try:
+        _write_all(lock, b"sos_acceptance_lock_v1\n")
+        os.fsync(lock)
+    finally:
+        os.close(lock)
+    os.fsync(descriptor)
+    return descriptor
+
+
+def _release_acceptance_lock(descriptor: int) -> None:
+    try:
+        os.unlink("accept.lock", dir_fd=descriptor)
+        os.fsync(descriptor)
+    finally:
         os.close(descriptor)
 
 

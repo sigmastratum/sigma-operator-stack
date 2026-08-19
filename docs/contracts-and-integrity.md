@@ -29,6 +29,43 @@ replay returns `SOS_CONTROL_PLANE_INTEGRITY_INVALID` before stale or readiness
 decisions. Generated Markdown and recovery views are not independent
 authority.
 
+## Ordinary successor acceptance
+
+`sos regenerate` is a proposal-only operation. It observes the current
+application and the previously accepted control-plane digest, then creates an
+immutable plan containing exactly three proposed revisions in this order:
+
+1. authority, with `authority_predecessor` equal to current authority;
+2. policy, with `current_authority` equal to the proposed authority and
+   `policy_predecessor` equal to current policy;
+3. operator state, with `current_authority` and `current_policy` equal to the
+   two preceding proposals.
+
+The command never changes effective accepted state. Repeating it against the
+same accepted predecessors and application fingerprint returns the existing
+plan.
+
+`sos accept REVISION` is a one-revision, controlling-terminal operation. Each
+accepted record retains `lifecycle.declared=proposal`; effective acceptance is
+derived from an exact `successor_acceptance` receipt and an append-only
+transition chain. The receipt binds the proposal, its record predecessor, the
+predecessor's acceptance receipt, the authority/policy revisions observed, the
+repository and the source observation. There is no wildcard or agent-facing
+acceptance operation.
+
+Immutable numbered ledger tips are the commit points. Records, receipts and
+transitions written before an interrupted tip write do not become accepted.
+Every read checks contiguous tip ordinals, hashes, predecessor links, record
+lineage and receipt bindings. During a partially accepted three-record plan,
+the mixed source observations yield `SOS_SUCCESSOR_SEQUENCE_INCOMPLETE`; only
+the final transition restores a coherent current state. Earlier revisions and
+receipts remain available for integrity replay and audit.
+
+Qualification evidence is preserved across a successor cycle but becomes
+`valid_stale` when either its source tree or source status digest differs from
+the effective accepted binding. It cannot satisfy `sos doctor` until a fresh
+qualification is stored.
+
 ## Application fingerprint currentness
 
 The source observation binds `sos_application_dirty_fingerprint_v2`. Its byte

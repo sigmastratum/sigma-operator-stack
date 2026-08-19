@@ -10,6 +10,8 @@ end-to-end Linux/Git/Python vertical:
 
 ```text
 sos init [PATH]
+sos regenerate [PATH]
+sos accept REVISION [PATH]
 sos check [PATH]
 sos qualify [PATH]
 sos doctor [PATH]
@@ -32,6 +34,17 @@ returns `SOS_ACCEPTANCE_TTY_REQUIRED` and writes nothing. This is intentionally
 weak local evidence, not authentication, and SOS does not claim that an agent
 cannot invoke the CLI.
 
+When application source changes, `sos regenerate` creates one immutable,
+content-safe successor plan without changing accepted state. The plan contains
+exact authority, policy and operator-state proposal revisions in dependency
+order. `sos accept REVISION` accepts exactly one displayed revision: authority
+first, then policy, then operator state. An out-of-order or source-stale
+proposal is refused. The workspace remains stale between transitions and
+becomes current only after the complete three-record sequence is replayable.
+Accepted revisions, receipts, transitions and monotonic tips are append-only;
+an interrupted write cannot advance the authoritative tip, and a gap or hash
+failure makes every authoritative read fail closed.
+
 Bootstrap accepts clean or dirty Git application state only after producing a
 complete P101-v2 application fingerprint. Staged index entries, unstaged and
 untracked bytes, deletions, symlink targets and bounded submodule state use the
@@ -51,8 +64,8 @@ a qualified disposable, network-denied execution profile. Unsupported
 isolation never becomes a green result.
 
 The MCP surface is read-only and exposes the same status, doctor, recovery and
-check decisions as the CLI. It has no acceptance, shell, commit, push, deploy
-or qualification tool.
+check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
+push, deploy or qualification tool.
 
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate

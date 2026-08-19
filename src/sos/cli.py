@@ -13,8 +13,10 @@ from .repository import RepositoryError, inspect_repository
 from .validation import validate_repository
 from .workspace import (
     WorkspaceError,
+    accept_proposal,
     doctor_workspace,
     initialize_workspace,
+    regenerate_workspace,
     recover_workspace,
     store_qualification,
     workspace_status,
@@ -28,11 +30,16 @@ def _parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--json", action="store_true", dest="as_json")
-    for command in ("init", "qualify"):
+    for command in ("init", "qualify", "regenerate"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--yes", action="store_true")
         subparser.add_argument("--json", action="store_true", dest="as_json")
+    accept = subparsers.add_parser("accept")
+    accept.add_argument("revision")
+    accept.add_argument("path", nargs="?", default=".")
+    accept.add_argument("--yes", action="store_true")
+    accept.add_argument("--json", action="store_true", dest="as_json")
     mcp = subparsers.add_parser("mcp")
     mcp.add_argument("--root", default=".")
     mcp_config = subparsers.add_parser("mcp-config")
@@ -75,6 +82,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         confirmed = args.yes or _ask_confirmation("Initialize SOS in this repository?")
         result = initialize_workspace(
             args.path,
+            confirmed=confirmed,
+            controlling_tty_observed=sys.stdin.isatty(),
+        )
+        payload = result.to_dict()
+        exit_code = 0 if result.status == "success" else 2
+    elif args.command == "regenerate":
+        confirmed = args.yes or _ask_confirmation("Generate successor proposals for the current source?")
+        result = regenerate_workspace(
+            args.path,
+            confirmed=confirmed,
+            controlling_tty_observed=sys.stdin.isatty(),
+        )
+        payload = result.to_dict()
+        exit_code = 0 if result.status == "success" else 2
+    elif args.command == "accept":
+        confirmed = args.yes or _ask_confirmation(f"Accept exact proposal {args.revision}?")
+        result = accept_proposal(
+            args.path,
+            args.revision,
             confirmed=confirmed,
             controlling_tty_observed=sys.stdin.isatty(),
         )
