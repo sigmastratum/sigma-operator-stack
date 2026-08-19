@@ -18,21 +18,25 @@ _TOOLS = (
         "name": "sos_status",
         "description": "Read repository-bound SOS currentness without modifying the project.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "sos_doctor",
         "description": "Check whether bootstrap, source binding and local qualification are ready for an agent.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "sos_recover",
         "description": "Return authority paths, current work, boundaries, checks and the next safe action.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "sos_check",
         "description": "Discover the closed local qualification plan without executing project code.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
 )
 

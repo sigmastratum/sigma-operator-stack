@@ -17,6 +17,9 @@ sos qualify [PATH] [--family FAMILY]
 sos doctor [PATH]
 sos recover [PATH]
 sos mcp --root PATH
+sos client install codex [PATH]
+sos client status codex [PATH]
+sos client remove codex [PATH]
 ```
 
 `sos init` preserves existing project files and atomically creates a local
@@ -89,7 +92,12 @@ push, deploy, release or production authority.
 
 The MCP surface is read-only and exposes the same status, doctor, recovery and
 check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
-push, deploy or qualification tool.
+push, deploy or qualification tool. `sos client install codex` previews and,
+after an observed terminal confirmation, appends one project-scoped server to
+`.codex/config.toml`. The launcher is bound to the exact installed package,
+Python executable, project root and four-tool allow-list. Removal restores the
+original config bytes only when the managed digest is unchanged and never
+removes `.sigma/`. See [Codex MCP integration](docs/codex-mcp-integration.md).
 
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate

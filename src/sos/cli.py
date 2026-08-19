@@ -7,7 +7,9 @@ import json
 import sys
 from collections.abc import Sequence
 
+from . import __version__
 from .checks import discover_checks
+from .client_integration import client_status, install_client, preview_client_install, remove_client
 from .mcp import serve_stdio
 from .qualification_contracts import QualificationContractError
 from .repository import RepositoryError, inspect_repository
@@ -50,26 +52,73 @@ def _parser() -> argparse.ArgumentParser:
     accept.add_argument("--json", action="store_true", dest="as_json")
     mcp = subparsers.add_parser("mcp")
     mcp.add_argument("--root", default=".")
+    mcp.add_argument("--expected-package-version")
     mcp_config = subparsers.add_parser("mcp-config")
     mcp_config.add_argument("--json", action="store_true", dest="as_json")
+    client = subparsers.add_parser("client")
+    client_commands = client.add_subparsers(dest="client_command", required=True)
+    for operation in ("install", "status", "remove"):
+        command = client_commands.add_parser(operation)
+        command.add_argument("client", choices=("codex",))
+        command.add_argument("path", nargs="?", default=".")
+        command.add_argument("--json", action="store_true", dest="as_json")
+        if operation != "status":
+            command.add_argument("--yes", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "mcp":
+        if args.expected_package_version is not None and args.expected_package_version != __version__:
+            print("SOS_MCP_PACKAGE_VERSION_MISMATCH", file=sys.stderr)
+            return 8
         return serve_stdio(args.root)
     if args.command == "mcp-config":
         payload = {
             "contract": "sos_mcp_launcher_v1",
-            "command": "sos",
-            "args": ["mcp", "--root", "."],
+            "command": sys.executable,
+            "args": ["-m", "sos", "mcp", "--root", ".", "--expected-package-version", __version__],
             "transport": "stdio",
             "capability": "read_only",
-            "absolute_paths_serialized": False,
+            "absolute_paths_serialized": True,
+            "persistent_project_install": "sos client install codex PATH",
         }
         _print(payload, args.as_json)
         return 0
+    if args.command == "client":
+        if args.client_command == "status":
+            result = client_status(args.path, args.client)
+        elif args.client_command == "install":
+            if not args.yes:
+                preview = preview_client_install(args.path, args.client)
+                if preview.status != "owner_required":
+                    _print(preview.to_dict(), args.as_json)
+                    return 0 if preview.status == "success" else 2
+                _print(preview.to_dict(), args.as_json)
+            confirmed = args.yes or _ask_confirmation("Install the project-local SOS MCP adapter for Codex?")
+            result = install_client(
+                args.path,
+                args.client,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        else:
+            if not args.yes:
+                preview = remove_client(args.path, args.client, confirmed=False)
+                if preview.status != "owner_required":
+                    _print(preview.to_dict(), args.as_json)
+                    return 0 if preview.status == "success" else 2
+                _print(preview.to_dict(), args.as_json)
+            confirmed = args.yes or _ask_confirmation("Remove only the exact SOS-managed Codex MCP adapter?")
+            result = remove_client(
+                args.path,
+                args.client,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        _print(result.to_dict(), args.as_json)
+        return 0 if result.status == "success" else 2
     if args.command == "status":
         try:
             inspection = inspect_repository(args.path)
