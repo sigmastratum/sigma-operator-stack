@@ -10,6 +10,44 @@ SOS separates read-only discovery from execution:
 The first executing family is `python.stdlib-unittest`, with fixed command ID
 `python.unittest.v1`. It is intentionally narrow.
 
+## One-run result-integrity lifecycle
+
+One qualification follows this closed sequence:
+
+```text
+discovered -> proposed_plan -> admitted_for_one_run
+           -> consumed_before_execution -> executed -> result_proposed
+```
+
+The proposed plan binds the repository identity, exact application tree and
+status, discovery-plan digest, registered family, fixed argv, working
+directory, isolation profile and limits. SOS displays that plan before an
+interactive confirmation. `--yes` is a command-specific automation
+confirmation; it does not broaden the plan or grant reusable authority.
+
+Admission creates a fresh nonce, has a maximum five-minute lifetime and a use
+limit of one. SOS persists an exclusive claim before entering the runner. A
+crash after that point burns the admission; retry requires a fresh plan and
+confirmation. Caller-supplied clocks are not accepted.
+
+The runner writes a closed execution result, followed by a closed
+source-bound receipt. Plans, admissions, claims, results and receipts are
+immutable. Receipt tips are append-only and ordinal, so concurrent forks,
+rollback and replay fail closed. Every normal status, recovery and doctor read
+replays the full result chain and its predecessor history. Raw test output,
+absolute repository paths and environment values are not serialized.
+
+The four Draft 2020-12 contracts are:
+
+- `sos_qualification_plan_v1`;
+- `sos_command_admission_v1`;
+- `sos_execution_result_v1`;
+- `sos_qualification_receipt_v1`.
+
+They are integrity-pinned in the installed package. These contracts are
+qualification evidence only. They cannot accept P101 proposals or grant
+commit, push, deploy, release, provider or production authority.
+
 ## Linux snapshot profile
 
 `linux-landlock-seccomp-snapshot-v1` is declared only on Linux x86_64. Runtime
@@ -65,5 +103,6 @@ Like conventional unit-test runners, the profile does not treat the test
 definitions themselves as an attestation authority. A project deliberately
 written to falsify its own test result is outside this initial result-integrity
 claim and must not be used as trusted evidence. Source binding, immutable
-qualification storage and caller/MCP forgery resistance remain separate
-receipt-validation gates.
+qualification storage and caller/MCP forgery resistance are enforced by the
+separate receipt-validation chain. A stronger claim against malicious test
+definitions requires a separately trusted runner or independent verifier.

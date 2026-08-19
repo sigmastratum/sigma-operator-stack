@@ -8,16 +8,15 @@ from pathlib import Path
 from unittest import mock
 
 import sos.workspace as workspace
-from sos.checks import qualify_supported
 from sos.contracts import verify_receipt, verify_record
 from sos.mcp import handle_message
 from sos.workspace import (
     accept_proposal,
     doctor_workspace,
     initialize_workspace,
+    qualify_once,
     recover_workspace,
     regenerate_workspace,
-    store_qualification,
     workspace_status,
 )
 
@@ -284,8 +283,7 @@ class SuccessorLifecycleTests(unittest.TestCase):
     def test_prior_qualification_is_valid_but_stale_after_successor_cycle(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
-        receipt = qualify_supported(str(root))
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(str(root), confirmed=True)
         self.make_stale(root)
         plan = self.regenerate(root)
         for revision in plan.details["acceptance_order"]:

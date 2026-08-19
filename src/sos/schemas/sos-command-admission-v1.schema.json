@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigmastratum.org/sos/sos-command-admission-v1.schema.json",
+  "title": "SOS One-Run Command Admission v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "repository_id", "source_tree_digest", "source_status_digest", "plan_digest", "family_id", "command_id", "argv_digest", "isolation_profile", "limits_digest", "issued_at", "expires_at", "nonce_digest", "use_limit", "confirmation", "admission_id"],
+  "properties": {
+    "contract": {"const": "sos_command_admission_v1"},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "source_tree_digest": {"$ref": "#/$defs/digest"},
+    "source_status_digest": {"$ref": "#/$defs/digest"},
+    "plan_digest": {"$ref": "#/$defs/digest"},
+    "family_id": {"$ref": "#/$defs/token"},
+    "command_id": {"$ref": "#/$defs/token"},
+    "argv_digest": {"$ref": "#/$defs/digest"},
+    "isolation_profile": {"$ref": "#/$defs/token"},
+    "limits_digest": {"$ref": "#/$defs/digest"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "nonce_digest": {"$ref": "#/$defs/digest"},
+    "use_limit": {"const": 1},
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "explicit", "strong_authentication_claimed"],
+      "properties": {
+        "surface": {"const": "local_cli"},
+        "explicit": {"const": true},
+        "strong_authentication_claimed": {"const": false}
+      }
+    },
+    "admission_id": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "token": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"}
+  }
+}

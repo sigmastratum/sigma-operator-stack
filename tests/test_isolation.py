@@ -11,7 +11,7 @@ from pathlib import Path
 from sos.checks import discover_checks, qualify_supported
 from sos.cli import main as cli_main
 from sos.isolation import run_isolated_unittest
-from sos.workspace import initialize_workspace, store_qualification
+from sos.workspace import initialize_workspace, qualify_once
 
 
 def git(root: Path, *args: str) -> None:
@@ -151,9 +151,10 @@ class IsolationContract(unittest.TestCase):
         )
         record_root = root / ".sigma" / "records"
         before = {path.name: path.read_bytes() for path in record_root.glob("*.json")}
-        receipt = qualify_supported(str(root), family_id="python.stdlib-unittest")
-        self.assertEqual(receipt.status, "passed_local")
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(
+            str(root), family_id="python.stdlib-unittest", confirmed=True
+        )
+        self.assertEqual(receipt["status"], "passed_local")
         after = {path.name: path.read_bytes() for path in record_root.glob("*.json")}
         self.assertEqual(after, before)
 
@@ -254,7 +255,7 @@ class IsolationContract(unittest.TestCase):
         self.assertIn('"status":"passed_local"', serialized)
         self.assertNotIn("SYNTHETIC_OUTPUT_MUST_NOT_BE_SERIALIZED", serialized)
 
-    def test_cli_preserves_typed_dirty_source_block_instead_of_masking_it(self) -> None:
+    def test_cli_preserves_typed_stale_source_instead_of_masking_it(self) -> None:
         fixture, root = self.make_project(
             "import unittest\n\nclass Pass(unittest.TestCase):\n"
             "    def test_pass(self):\n        self.assertTrue(True)\n"
@@ -271,8 +272,8 @@ class IsolationContract(unittest.TestCase):
                 ["qualify", str(root), "--family", "python.stdlib-unittest", "--yes", "--json"]
             )
         self.assertEqual(exit_code, 2)
-        self.assertIn('"status":"blocked"', output.getvalue())
-        self.assertIn("SOS_QUALIFICATION_DIRTY_SOURCE", output.getvalue())
+        self.assertIn('"status":"stale"', output.getvalue())
+        self.assertIn("SOS_QUALIFICATION_STALE", output.getvalue())
         self.assertFalse((root / ".sigma" / "views" / "qualification.json").exists())
 
     def test_unknown_family_fails_closed(self) -> None:

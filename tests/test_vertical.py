@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sos.checks import discover_checks, qualify_supported
+from sos.checks import discover_checks
 from sos.contracts import (
     V1_SCHEMA_SHA256,
     V2_SCHEMA_SHA256,
@@ -21,6 +21,7 @@ from sos.workspace import (
     WorkspaceError,
     doctor_workspace,
     initialize_workspace,
+    qualify_once,
     recover_workspace,
     store_qualification,
     workspace_status,
@@ -165,8 +166,7 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         git(root, "add", "tasks/current.md")
         git(root, "commit", "-qm", "remove synthetic current work")
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        receipt = qualify_supported(str(root))
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(str(root), confirmed=True)
         doctor = doctor_workspace(str(root))
         self.assertEqual(doctor.status, "owner_required")
         self.assertEqual(doctor.reasons, ("SOS_CURRENT_WORK_NOT_CONFIGURED",))
@@ -183,11 +183,10 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         self.assertEqual(plan.families[1].status, "configured")
         self.assertEqual(plan.families[1].command_id, "python.unittest.v1")
         self.assertEqual(plan.families[1].isolation, "linux-landlock-seccomp-snapshot-v1")
-        receipt = qualify_supported(str(root))
-        self.assertEqual(receipt.status, "passed_local")
-        self.assertFalse(receipt.raw_output_serialized)
-        self.assertIsNotNone(receipt.output_digest)
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(str(root), confirmed=True)
+        self.assertEqual(receipt["status"], "passed_local")
+        self.assertFalse(receipt["raw_output_serialized"])
+        self.assertIsNotNone(receipt["output_digest"])
         store_qualification(str(root), receipt)
         self.assertEqual(doctor_workspace(str(root)).status, "success")
 
@@ -195,20 +194,18 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        receipt = qualify_supported(str(root))
         outside = root / "outside"
         outside.mkdir()
         (root / ".sigma" / "qualification").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(WorkspaceError):
-            store_qualification(str(root), receipt)
+            qualify_once(str(root), confirmed=True)
         self.assertEqual(list(outside.iterdir()), [])
 
     def test_fresh_agent_recovery_exposes_composed_state_without_content(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        receipt = qualify_supported(str(root))
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(str(root), confirmed=True)
         recovery = recover_workspace(str(root))
         self.assertEqual(recovery.status, "success")
         self.assertEqual(recovery.details["authority"]["paths"][0], "AGENTS.md")
@@ -285,7 +282,7 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        store_qualification(str(root), qualify_supported(str(root)))
+        qualify_once(str(root), confirmed=True)
         view_path = root / ".sigma" / "views" / "qualification.json"
         view = json.loads(view_path.read_text(encoding="utf-8"))
         immutable_path = root / ".sigma" / "qualification" / "receipts" / (
@@ -313,10 +310,9 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         git(root, "add", "broken.py")
         git(root, "commit", "-qm", "synthetic syntax failure")
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        receipt = qualify_supported(str(root))
-        self.assertEqual(receipt.status, "failed")
-        self.assertEqual(receipt.reasons, ("SOS_QUALIFICATION_FAILED",))
-        store_qualification(str(root), receipt)
+        _, _, receipt = qualify_once(str(root), confirmed=True)
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual(receipt["reasons"], ["SOS_QUALIFICATION_FAILED"])
         self.assertEqual(doctor_workspace(str(root)).status, "not_verified")
 
     def test_mcp_is_read_only_and_matches_recovery_core(self) -> None:

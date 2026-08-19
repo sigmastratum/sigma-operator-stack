@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigmastratum.org/sos/sos-qualification-plan-v1.schema.json",
+  "title": "SOS Qualification Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "repository_id", "source_tree_digest", "source_status_digest", "discovery_plan_digest", "family_id", "family_state", "command_id", "argv_template", "argv_digest", "working_directory", "discovery_source", "isolation_profile", "limits", "limits_digest", "side_effects", "plan_digest"],
+  "properties": {
+    "contract": {"const": "sos_qualification_plan_v1"},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "source_tree_digest": {"$ref": "#/$defs/digest"},
+    "source_status_digest": {"$ref": "#/$defs/digest"},
+    "discovery_plan_digest": {"$ref": "#/$defs/digest"},
+    "family_id": {"$ref": "#/$defs/token"},
+    "family_state": {"const": "configured"},
+    "command_id": {"$ref": "#/$defs/token"},
+    "argv_template": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/argv"}},
+    "argv_digest": {"$ref": "#/$defs/digest"},
+    "working_directory": {"enum": ["canonical_read_only", "disposable_output_root"]},
+    "discovery_source": {"enum": ["tracked-python-source-v1", "pyproject-and-tracked-unittest-v1"]},
+    "isolation_profile": {"$ref": "#/$defs/token"},
+    "limits": {"$ref": "#/$defs/limits"},
+    "limits_digest": {"$ref": "#/$defs/digest"},
+    "side_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_source_write", "network", "project_process_creation", "raw_output_serialized"],
+      "properties": {
+        "canonical_source_write": {"const": false},
+        "network": {"const": false},
+        "project_process_creation": {"const": false},
+        "raw_output_serialized": {"const": false}
+      }
+    },
+    "plan_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "token": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "argv": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._{}$/-]+$"},
+    "limits": {"type": "object", "minProperties": 1, "maxProperties": 16, "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,63}$"}, "additionalProperties": {"type": "integer", "minimum": 1}}
+  }
+}

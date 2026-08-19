@@ -52,7 +52,7 @@ class CheckPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class QualificationReceipt:
+class QualificationObservation:
     contract: str
     status: str
     reasons: tuple[str, ...]
@@ -67,6 +67,10 @@ class QualificationReceipt:
     output_bytes: int
     raw_output_serialized: bool
     limits: dict[str, int]
+    tests_run: int = 0
+    failures: int = 0
+    errors: int = 0
+    skipped: int = 0
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -141,7 +145,7 @@ def discover_checks(path: str = ".") -> CheckPlan:
     )
 
 
-def qualify_supported(path: str = ".", *, family_id: str | None = None) -> QualificationReceipt:
+def qualify_supported(path: str = ".", *, family_id: str | None = None) -> QualificationObservation:
     root = discover_repository_root(path)
     plan = discover_checks(os.fspath(root))
     if family_id is None:
@@ -151,8 +155,8 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
         if family is None:
             raise RepositoryError("SOS_CHECK_FAMILY_UNKNOWN")
     if family.status != "configured" or family.command_id is None:
-        return QualificationReceipt(
-            contract="sos_qualification_receipt_v1",
+        return QualificationObservation(
+            contract="sos_qualification_observation_v1",
             status="unsupported" if family.status == "unsupported" else "not_verified",
             reasons=family.reasons,
             family_id=family.family_id,
@@ -168,8 +172,8 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
             limits=_limits(),
         )
     if inspect_repository(root).application_state != "clean":
-        return QualificationReceipt(
-            contract="sos_qualification_receipt_v1",
+        return QualificationObservation(
+            contract="sos_qualification_observation_v1",
             status="blocked",
             reasons=("SOS_QUALIFICATION_DIRTY_SOURCE",),
             family_id=family.family_id,
@@ -189,6 +193,34 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
     if family.command_id == "python.unittest.v1":
         return _run_python_unittest(root, plan, family)
     raise RepositoryError("SOS_CHECK_COMMAND_UNKNOWN")
+
+
+def family_execution_contract(family: CheckFamily) -> dict[str, object]:
+    identity = (family.family_id, family.command_id, family.isolation)
+    if identity == ("python.syntax", "python.compile.v1", "non-executing-structural-v1"):
+        argv = ["sos-internal", "python.compile.v1", "{tracked_source}"]
+        limits = _limits()
+        working_directory = "canonical_read_only"
+        discovery_source = "tracked-python-source-v1"
+    elif identity == ("python.stdlib-unittest", "python.unittest.v1", PROFILE_ID):
+        argv = ["python", "-I", "{sos_isolation_worker}", "{disposable_root}"]
+        limits = isolation_limits()
+        working_directory = "disposable_output_root"
+        discovery_source = "pyproject-and-tracked-unittest-v1"
+    else:
+        raise RepositoryError("SOS_CHECK_COMMAND_UNKNOWN")
+    return {
+        "argv_template": argv,
+        "working_directory": working_directory,
+        "discovery_source": discovery_source,
+        "limits": limits,
+        "side_effects": {
+            "canonical_source_write": False,
+            "network": False,
+            "project_process_creation": False,
+            "raw_output_serialized": False,
+        },
+    }
 
 
 def _tracked_paths(root: Path) -> tuple[str, ...]:
@@ -220,7 +252,7 @@ def _tracked_paths(root: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationReceipt:
+def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationObservation:
     source_digests: list[str] = []
     total = 0
     failed = False
@@ -249,8 +281,8 @@ def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> Qual
     summary = "\n".join(source_digests).encode("utf-8")
     status = "failed" if failed else "passed_local"
     reasons = ("SOS_QUALIFICATION_FAILED",) if failed else ("SOS_QUALIFICATION_PASSED",)
-    return QualificationReceipt(
-        contract="sos_qualification_receipt_v1",
+    return QualificationObservation(
+        contract="sos_qualification_observation_v1",
         status=status,
         reasons=reasons,
         family_id=family.family_id,
@@ -267,10 +299,10 @@ def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> Qual
     )
 
 
-def _run_python_unittest(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationReceipt:
+def _run_python_unittest(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationObservation:
     isolated = run_isolated_unittest(root, _tracked_paths(root))
-    return QualificationReceipt(
-        contract="sos_qualification_receipt_v1",
+    return QualificationObservation(
+        contract="sos_qualification_observation_v1",
         status=isolated.status,
         reasons=isolated.reasons,
         family_id=family.family_id,
@@ -284,6 +316,10 @@ def _run_python_unittest(root: Path, plan: CheckPlan, family: CheckFamily) -> Qu
         output_bytes=isolated.output_bytes,
         raw_output_serialized=False,
         limits=isolation_limits(),
+        tests_run=isolated.tests_run,
+        failures=isolated.failures,
+        errors=isolated.errors,
+        skipped=isolated.skipped,
     )
 
 

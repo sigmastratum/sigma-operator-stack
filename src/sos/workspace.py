@@ -7,11 +7,11 @@ import json
 import os
 import secrets
 import stat
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .checks import CheckPlan, QualificationReceipt, discover_checks
+from .checks import CheckFamily, CheckPlan, discover_checks, family_execution_contract, qualify_supported
 from .contracts import (
     ContractError,
     digest_value,
@@ -25,6 +25,15 @@ from .contracts import (
     verify_record,
 )
 from .dirty import observe_application
+from .qualification_contracts import (
+    EXECUTOR_DIGEST,
+    QualificationContractError,
+    canonical_digest,
+    parse_utc,
+    seal_contract,
+    utc_text,
+    validate_contract,
+)
 from .repository import (
     RepositoryError,
     RepositoryIdentity,
@@ -87,6 +96,7 @@ _SUCCESSOR_RECEIPT_ROOT = "receipts/successors"
 _TRANSITION_ROOT = "ledger/transitions"
 _LEDGER_TIP_ROOT = "ledger/tips"
 _PROPOSAL_ROOT = "proposals"
+_QUALIFICATION_TIP_ROOT = "qualification/tips"
 
 
 class WorkspaceError(RuntimeError):
@@ -599,25 +609,279 @@ def doctor_workspace(path: str = ".") -> TerminalResult:
     return TerminalResult("sos_doctor_result_v1", Status.SUCCESS, ("SOS_READY_FOR_AGENT",), recovery.details)
 
 
-def store_qualification(path: str, receipt: QualificationReceipt) -> None:
+def prepare_qualification_plan(path: str = ".", family_id: str | None = None) -> dict[str, Any]:
+    root = discover_repository_root(path)
+    status = workspace_status(os.fspath(root))
+    if status.status == Status.STALE:
+        raise WorkspaceError("SOS_QUALIFICATION_STALE")
+    if status.status != Status.SUCCESS:
+        raise WorkspaceError("SOS_WORKSPACE_NOT_CURRENT")
+    discovery = discover_checks(os.fspath(root))
+    selected_id = family_id or discovery.families[0].family_id
+    family = next((item for item in discovery.families if item.family_id == selected_id), None)
+    if family is None:
+        raise WorkspaceError("SOS_CHECK_FAMILY_UNKNOWN")
+    if family.status != "configured" or family.command_id is None:
+        raise WorkspaceError("SOS_CHECK_FAMILY_NOT_EXECUTABLE")
+    execution = family_execution_contract(family)
+    argv = execution["argv_template"]
+    limits = execution["limits"]
+    return seal_contract(
+        {
+            "contract": "sos_qualification_plan_v1",
+            "repository_id": status.details["repository_id"],
+            "source_tree_digest": status.details["source_tree_digest"],
+            "source_status_digest": status.details["source_status_digest"],
+            "discovery_plan_digest": discovery.plan_digest,
+            "family_id": family.family_id,
+            "family_state": "configured",
+            "command_id": family.command_id,
+            "argv_template": argv,
+            "argv_digest": canonical_digest(argv),
+            "working_directory": execution["working_directory"],
+            "discovery_source": execution["discovery_source"],
+            "isolation_profile": family.isolation,
+            "limits": limits,
+            "limits_digest": canonical_digest(limits),
+            "side_effects": execution["side_effects"],
+        }
+    )
+
+
+def admit_qualification_plan(
+    path: str,
+    plan: dict[str, Any],
+    *,
+    confirmed: bool,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    root = discover_repository_root(path)
+    if not confirmed:
+        raise WorkspaceError("SOS_QUALIFICATION_CONFIRMATION_REQUIRED")
+    if not 1 <= ttl_seconds <= 300:
+        raise WorkspaceError("SOS_QUALIFICATION_TTL_INVALID")
+    _validate_qualification_contract(plan, "sos_qualification_plan_v1")
+    if plan != prepare_qualification_plan(os.fspath(root), plan["family_id"]):
+        raise WorkspaceError("SOS_QUALIFICATION_PLAN_STALE")
+    issued = _utc_now()
+    admission = seal_contract(
+        {
+            "contract": "sos_command_admission_v1",
+            "repository_id": plan["repository_id"],
+            "source_tree_digest": plan["source_tree_digest"],
+            "source_status_digest": plan["source_status_digest"],
+            "plan_digest": plan["plan_digest"],
+            "family_id": plan["family_id"],
+            "command_id": plan["command_id"],
+            "argv_digest": plan["argv_digest"],
+            "isolation_profile": plan["isolation_profile"],
+            "limits_digest": plan["limits_digest"],
+            "issued_at": utc_text(issued),
+            "expires_at": utc_text(issued + timedelta(seconds=ttl_seconds)),
+            "nonce_digest": "sha256:" + secrets.token_hex(32),
+            "use_limit": 1,
+            "confirmation": {
+                "surface": "local_cli",
+                "explicit": True,
+                "strong_authentication_claimed": False,
+            },
+        }
+    )
+    _write_immutable_json(root, _qualification_artifact_path("plans", plan["plan_digest"]), plan)
+    _write_immutable_json(
+        root,
+        _qualification_artifact_path("admissions", admission["admission_id"]),
+        admission,
+    )
+    return admission
+
+
+def execute_admitted_qualification(
+    path: str,
+    plan: dict[str, Any],
+    admission: dict[str, Any],
+) -> dict[str, Any]:
+    root = discover_repository_root(path)
+    _validate_qualification_contract(plan, "sos_qualification_plan_v1")
+    _validate_qualification_contract(admission, "sos_command_admission_v1")
+    stored_plan = _read_json(root, _qualification_artifact_path("plans", plan["plan_digest"]))
+    stored_admission = _read_json(
+        root,
+        _qualification_artifact_path("admissions", admission["admission_id"]),
+    )
+    if stored_plan != plan or stored_admission != admission:
+        raise WorkspaceError("SOS_QUALIFICATION_ARTIFACT_MISMATCH")
+    _validate_plan_admission_binding(plan, admission)
+    observed_now = _utc_now()
+    if observed_now < parse_utc(admission["issued_at"]) or observed_now > parse_utc(admission["expires_at"]):
+        raise WorkspaceError("SOS_QUALIFICATION_ADMISSION_EXPIRED")
+    status = workspace_status(os.fspath(root))
+    if status.status != Status.SUCCESS or any(
+        admission[field] != status.details[field]
+        for field in ("repository_id", "source_tree_digest", "source_status_digest")
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_STALE")
+    claimed_at = utc_text(observed_now)
+    claim = {
+        "contract": "sos_admission_claim_v1",
+        "repository_id": admission["repository_id"],
+        "plan_digest": admission["plan_digest"],
+        "admission_id": admission["admission_id"],
+        "nonce_digest": admission["nonce_digest"],
+        "claimed_at": claimed_at,
+        "state": "consumed_before_execution",
+    }
+    claim["claim_digest"] = digest_value(claim)
+    _write_exclusive_json(
+        root,
+        _qualification_artifact_path("claims", admission["admission_id"]),
+        claim,
+        collision_reason="SOS_QUALIFICATION_ADMISSION_REPLAYED",
+    )
+    observation = qualify_supported(os.fspath(root), family_id=plan["family_id"])
+    if (
+        observation.family_id != admission["family_id"]
+        or observation.command_id != admission["command_id"]
+        or observation.plan_digest != plan["discovery_plan_digest"]
+        or observation.source_tree_digest != admission["source_tree_digest"]
+        or observation.source_status_digest != admission["source_status_digest"]
+        or observation.isolation != admission["isolation_profile"]
+        or canonical_digest(observation.limits) != admission["limits_digest"]
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_RESULT_BINDING_INVALID")
+    post_status = workspace_status(os.fspath(root))
+    if post_status.status != Status.SUCCESS or any(
+        admission[field] != post_status.details[field]
+        for field in ("repository_id", "source_tree_digest", "source_status_digest")
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_STALE")
+    finished = _utc_now()
+    result = seal_contract(
+        {
+            "contract": "sos_execution_result_v1",
+            "repository_id": admission["repository_id"],
+            "source_tree_digest": admission["source_tree_digest"],
+            "source_status_digest": admission["source_status_digest"],
+            "plan_digest": admission["plan_digest"],
+            "admission_id": admission["admission_id"],
+            "claim_digest": claim["claim_digest"],
+            "executor_digest": EXECUTOR_DIGEST,
+            "family_id": admission["family_id"],
+            "command_id": admission["command_id"],
+            "argv_digest": admission["argv_digest"],
+            "isolation_profile": admission["isolation_profile"],
+            "limits_digest": admission["limits_digest"],
+            "started_at": claimed_at,
+            "finished_at": utc_text(finished),
+            "status": observation.status,
+            "reasons": list(observation.reasons),
+            "exit_code": observation.exit_code,
+            "output_digest": observation.output_digest,
+            "output_bytes": observation.output_bytes,
+            "tests_run": observation.tests_run,
+            "failures": observation.failures,
+            "errors": observation.errors,
+            "skipped": observation.skipped,
+            "raw_output_serialized": False,
+        }
+    )
+    _write_immutable_json(root, _qualification_artifact_path("results", result["result_digest"]), result)
+    predecessor = _read_optional_json(root, "views/qualification.json")
+    predecessor_digest = predecessor.get("receipt_digest") if predecessor is not None else None
+    sequence_ordinal = predecessor.get("sequence_ordinal", 0) + 1 if predecessor is not None else 1
+    receipt = seal_contract(
+        {
+            "contract": "sos_qualification_receipt_v1",
+            "repository_id": result["repository_id"],
+            "source_tree_digest": result["source_tree_digest"],
+            "source_status_digest": result["source_status_digest"],
+            "plan_digest": result["plan_digest"],
+            "admission_id": result["admission_id"],
+            "claim_digest": result["claim_digest"],
+            "execution_result_digest": result["result_digest"],
+            "executor_digest": result["executor_digest"],
+            "family_id": result["family_id"],
+            "command_id": result["command_id"],
+            "argv_digest": result["argv_digest"],
+            "isolation": result["isolation_profile"],
+            "limits_digest": result["limits_digest"],
+            "status": result["status"],
+            "reasons": result["reasons"],
+            "exit_code": result["exit_code"],
+            "output_digest": result["output_digest"],
+            "output_bytes": result["output_bytes"],
+            "raw_output_serialized": False,
+            "issued_at": result["finished_at"],
+            "sequence_ordinal": sequence_ordinal,
+            "predecessor_receipt": predecessor_digest,
+        }
+    )
+    store_qualification(os.fspath(root), receipt)
+    return receipt
+
+
+def qualify_once(
+    path: str = ".",
+    *,
+    family_id: str | None = None,
+    confirmed: bool,
+    ttl_seconds: int = 300,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    plan = prepare_qualification_plan(path, family_id)
+    admission = admit_qualification_plan(
+        path,
+        plan,
+        confirmed=confirmed,
+        ttl_seconds=ttl_seconds,
+    )
+    receipt = execute_admitted_qualification(path, plan, admission)
+    return plan, admission, receipt
+
+
+def store_qualification(path: str, receipt: dict[str, Any]) -> None:
     root = discover_repository_root(path)
     status = workspace_status(os.fspath(root))
     if status.status != Status.SUCCESS:
         raise WorkspaceError("SOS_WORKSPACE_NOT_CURRENT")
     if (
-        receipt.source_tree_digest != status.details.get("source_tree_digest")
-        or receipt.source_status_digest != status.details.get("source_status_digest")
+        receipt.get("repository_id") != status.details.get("repository_id")
+        or receipt.get("source_tree_digest") != status.details.get("source_tree_digest")
+        or receipt.get("source_status_digest") != status.details.get("source_status_digest")
     ):
         raise WorkspaceError("SOS_QUALIFICATION_STALE")
-    _validate_qualification_payload(receipt.to_dict())
+    _validate_qualification_payload(receipt)
+    _validate_qualification_chain(root, receipt)
+    current = _read_optional_json(root, "views/qualification.json")
+    if current is not None and current.get("receipt_digest") == receipt.get("receipt_digest"):
+        return
+    expected_predecessor = current.get("receipt_digest") if current is not None else None
+    expected_ordinal = current.get("sequence_ordinal", 0) + 1 if current is not None else 1
+    if (
+        receipt.get("predecessor_receipt") != expected_predecessor
+        or receipt.get("sequence_ordinal") != expected_ordinal
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_REPLAYED")
+    _validate_receipt_history(root, receipt)
     view_directory = _open_control_directory(root, ("views",), create=False)
     os.close(view_directory)
-    payload = receipt.to_dict()
-    receipt_digest = digest_value(payload).removeprefix("sha256:")
-    _write_immutable_json(root, f"qualification/receipts/{receipt_digest}.json", payload)
-    view = dict(payload)
-    view["receipt_digest"] = "sha256:" + receipt_digest
-    _replace_view_json(root, "views/qualification.json", view)
+    receipt_digest = receipt["receipt_digest"]
+    _write_immutable_json(root, _qualification_artifact_path("receipts", receipt_digest), receipt)
+    tip = _seal_digest_object(
+        {
+            "contract": "sos_qualification_receipt_tip_v1",
+            "sequence_ordinal": expected_ordinal,
+            "predecessor_receipt": expected_predecessor,
+            "receipt_digest": receipt_digest,
+        },
+        "tip_digest",
+    )
+    _write_exclusive_json(
+        root,
+        f"{_QUALIFICATION_TIP_ROOT}/{expected_ordinal:08d}.json",
+        tip,
+        collision_reason="SOS_QUALIFICATION_RECEIPT_REPLAYED",
+    )
+    _replace_view_json(root, "views/qualification.json", receipt)
 
 
 def _load_and_replay(
@@ -772,6 +1036,7 @@ def _replay_integrity(
         root,
         plan,
         successor["source_binding"],
+        identity.repository_id,
     )
     return {
         "records": successor["records"],
@@ -1025,104 +1290,297 @@ def _validate_record_lineage(
 
 def _replay_qualification(
     root: Path,
-    plan: dict[str, Any],
+    discovery_plan: dict[str, Any],
     source_binding: dict[str, Any],
+    repository_id: str,
 ) -> tuple[dict[str, Any] | None, str]:
     view = _read_optional_json(root, "views/qualification.json")
     if view is None:
+        _validate_qualification_tip_ledger(root, None)
         return None, "absent"
-    digest = view.get("receipt_digest")
-    if not isinstance(digest, str) or not digest.startswith("sha256:") or len(digest) != 71:
+    _validate_qualification_payload(view)
+    digest = view["receipt_digest"]
+    immutable = _read_json(root, _qualification_artifact_path("receipts", digest))
+    if immutable != view:
         raise ContractError()
-    payload = dict(view)
-    payload.pop("receipt_digest")
-    if digest_value(payload) != digest:
-        raise ContractError()
-    immutable = _read_json(root, f"qualification/receipts/{digest.removeprefix('sha256:')}.json")
-    if immutable != payload:
-        raise ContractError()
-    _validate_qualification_payload(payload)
-    if payload.get("plan_digest") != plan.get("plan_digest"):
+    _validate_qualification_chain(root, view)
+    _validate_receipt_history(root, view)
+    _validate_qualification_tip_ledger(root, view)
+    plan = _read_json(root, _qualification_artifact_path("plans", view["plan_digest"]))
+    if (
+        plan.get("discovery_plan_digest") != discovery_plan.get("plan_digest")
+        or view.get("repository_id") != repository_id
+    ):
         raise ContractError()
     current = (
-        payload.get("source_tree_digest") == source_binding.get("tree_digest")
-        and payload.get("source_status_digest") == source_binding.get("status_digest")
+        view.get("source_tree_digest") == source_binding.get("tree_digest")
+        and view.get("source_status_digest") == source_binding.get("status_digest")
     )
     return view, "valid" if current else "valid_stale"
 
 
 def _validate_qualification_payload(payload: dict[str, Any]) -> None:
-    expected = {
-        "contract",
-        "status",
-        "reasons",
-        "family_id",
-        "command_id",
-        "plan_digest",
-        "source_tree_digest",
-        "source_status_digest",
-        "isolation",
-        "exit_code",
-        "output_digest",
-        "output_bytes",
-        "raw_output_serialized",
-        "limits",
-    }
-    limits = payload.get("limits")
-    reasons = payload.get("reasons")
-    exit_code = payload.get("exit_code")
-    output_digest = payload.get("output_digest")
-    output_bytes = payload.get("output_bytes")
-    if (
-        set(payload) != expected
-        or payload.get("contract") != "sos_qualification_receipt_v1"
-        or payload.get("status")
-        not in {"passed_local", "failed", "blocked", "unsupported", "not_verified", "skipped", "stale"}
-        or payload.get("raw_output_serialized") is not False
-        or not isinstance(reasons, list)
-        or not 1 <= len(reasons) <= 16
-        or any(not _is_public_token(reason, 128) for reason in reasons)
-        or not _is_public_token(payload.get("family_id"), 128)
-        or not _is_public_token(payload.get("command_id"), 128)
-        or not _is_public_token(payload.get("isolation"), 128)
-        or not _is_sha256(payload.get("plan_digest"))
-        or not _is_sha256(payload.get("source_tree_digest"))
-        or not _is_sha256(payload.get("source_status_digest"))
-        or (exit_code is not None and (not isinstance(exit_code, int) or isinstance(exit_code, bool)))
-        or (output_digest is not None and not _is_sha256(output_digest))
-        or not isinstance(output_bytes, int)
-        or isinstance(output_bytes, bool)
-        or output_bytes < 0
-        or not isinstance(limits, dict)
-        or not limits
-        or any(
-            not isinstance(value, int) or isinstance(value, bool) or value <= 0
-            for value in limits.values()
-        )
-    ):
-        raise ContractError()
-    if payload.get("isolation") == "linux-landlock-seccomp-snapshot-v1":
-        if set(limits) != {
-            "tracked_files",
-            "tracked_bytes",
-            "source_file_bytes",
-            "timeout_seconds",
-            "output_bytes",
-            "processes",
-            "cpu_seconds",
-            "address_space_bytes",
-            "open_files",
-            "file_write_bytes",
-            "writable_bytes",
-            "writable_entries",
-        }:
-            raise ContractError()
-        if payload.get("output_bytes", 0) > limits["output_bytes"]:
-            raise ContractError()
+    _validate_qualification_contract(payload, "sos_qualification_receipt_v1")
     if payload.get("status") == "passed_local" and (
         payload.get("exit_code") != 0 or not _is_sha256(payload.get("output_digest"))
     ):
         raise ContractError()
+
+
+def _validate_qualification_contract(payload: dict[str, Any], contract: str) -> None:
+    try:
+        validate_contract(payload, contract)
+    except QualificationContractError as exc:
+        raise ContractError() from exc
+
+
+def _qualification_artifact_path(kind: str, digest: str) -> str:
+    if kind not in {"plans", "admissions", "claims", "results", "receipts"} or not _is_sha256(digest):
+        raise WorkspaceError("SOS_QUALIFICATION_ARTIFACT_INVALID")
+    return f"qualification/{kind}/{digest.removeprefix('sha256:')}.json"
+
+
+def _validate_plan_admission_binding(plan: dict[str, Any], admission: dict[str, Any]) -> None:
+    try:
+        execution = family_execution_contract(
+            CheckFamily(
+                family_id=plan["family_id"],
+                status=plan["family_state"],
+                command_id=plan["command_id"],
+                isolation=plan["isolation_profile"],
+                reasons=("SOS_CHECK_CONFIGURED",),
+            )
+        )
+    except (KeyError, RepositoryError) as exc:
+        raise WorkspaceError("SOS_QUALIFICATION_PLAN_INVALID") from exc
+    expected_plan_fields = {
+        "argv_template": execution["argv_template"],
+        "argv_digest": canonical_digest(execution["argv_template"]),
+        "working_directory": execution["working_directory"],
+        "discovery_source": execution["discovery_source"],
+        "limits": execution["limits"],
+        "limits_digest": canonical_digest(execution["limits"]),
+        "side_effects": execution["side_effects"],
+    }
+    if any(plan.get(field) != expected for field, expected in expected_plan_fields.items()):
+        raise WorkspaceError("SOS_QUALIFICATION_PLAN_INVALID")
+    fields = (
+        "repository_id",
+        "source_tree_digest",
+        "source_status_digest",
+        "plan_digest",
+        "family_id",
+        "command_id",
+        "argv_digest",
+        "limits_digest",
+    )
+    for field in fields:
+        expected = plan["plan_digest"] if field == "plan_digest" else plan[field]
+        if admission.get(field) != expected:
+            raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    if admission.get("isolation_profile") != plan.get("isolation_profile"):
+        raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    try:
+        issued_at = parse_utc(admission["issued_at"])
+        expires_at = parse_utc(admission["expires_at"])
+    except (KeyError, QualificationContractError) as exc:
+        raise WorkspaceError("SOS_QUALIFICATION_ADMISSION_INVALID") from exc
+    lifetime = (expires_at - issued_at).total_seconds()
+    if not 1 <= lifetime <= 300:
+        raise WorkspaceError("SOS_QUALIFICATION_ADMISSION_INVALID")
+
+
+def _validate_claim(claim: dict[str, Any], admission: dict[str, Any]) -> None:
+    expected_fields = {
+        "contract",
+        "repository_id",
+        "plan_digest",
+        "admission_id",
+        "nonce_digest",
+        "claimed_at",
+        "state",
+        "claim_digest",
+    }
+    material = dict(claim)
+    observed = material.pop("claim_digest", None)
+    if (
+        set(claim) != expected_fields
+        or claim.get("contract") != "sos_admission_claim_v1"
+        or claim.get("state") != "consumed_before_execution"
+        or observed != digest_value(material)
+        or any(
+            claim.get(field) != admission.get(field)
+            for field in ("repository_id", "plan_digest", "admission_id", "nonce_digest")
+        )
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_CLAIM_INVALID")
+    try:
+        claimed_at = parse_utc(claim.get("claimed_at"))
+        issued_at = parse_utc(admission.get("issued_at"))
+        expires_at = parse_utc(admission.get("expires_at"))
+    except QualificationContractError as exc:
+        raise WorkspaceError("SOS_QUALIFICATION_CLAIM_INVALID") from exc
+    if not issued_at <= claimed_at <= expires_at:
+        raise WorkspaceError("SOS_QUALIFICATION_CLAIM_INVALID")
+
+
+def _validate_qualification_chain(root: Path, receipt: dict[str, Any]) -> None:
+    plan = _read_json(root, _qualification_artifact_path("plans", receipt["plan_digest"]))
+    admission = _read_json(root, _qualification_artifact_path("admissions", receipt["admission_id"]))
+    claim = _read_json(root, _qualification_artifact_path("claims", receipt["admission_id"]))
+    result = _read_json(root, _qualification_artifact_path("results", receipt["execution_result_digest"]))
+    _validate_qualification_contract(plan, "sos_qualification_plan_v1")
+    _validate_qualification_contract(admission, "sos_command_admission_v1")
+    _validate_qualification_contract(result, "sos_execution_result_v1")
+    _validate_plan_admission_binding(plan, admission)
+    _validate_claim(claim, admission)
+    for field in (
+        "repository_id",
+        "source_tree_digest",
+        "source_status_digest",
+        "plan_digest",
+        "admission_id",
+        "family_id",
+        "command_id",
+        "argv_digest",
+        "limits_digest",
+    ):
+        if result.get(field) != admission.get(field):
+            raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    if result.get("isolation_profile") != admission.get("isolation_profile"):
+        raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    bindings = {
+        "repository_id": result["repository_id"],
+        "source_tree_digest": result["source_tree_digest"],
+        "source_status_digest": result["source_status_digest"],
+        "plan_digest": result["plan_digest"],
+        "admission_id": result["admission_id"],
+        "claim_digest": result["claim_digest"],
+        "execution_result_digest": result["result_digest"],
+        "executor_digest": result["executor_digest"],
+        "family_id": result["family_id"],
+        "command_id": result["command_id"],
+        "argv_digest": result["argv_digest"],
+        "limits_digest": result["limits_digest"],
+        "status": result["status"],
+        "reasons": result["reasons"],
+        "exit_code": result["exit_code"],
+        "output_digest": result["output_digest"],
+        "output_bytes": result["output_bytes"],
+    }
+    for field, expected in bindings.items():
+        if receipt.get(field) != expected:
+            raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    if (
+        result.get("isolation_profile") != receipt.get("isolation")
+        or result.get("executor_digest") != EXECUTOR_DIGEST
+        or result.get("claim_digest") != claim.get("claim_digest")
+        or result.get("admission_id") != admission.get("admission_id")
+        or result.get("plan_digest") != plan.get("plan_digest")
+        or receipt.get("raw_output_serialized") is not False
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+    try:
+        started = parse_utc(result["started_at"])
+        finished = parse_utc(result["finished_at"])
+        issued = parse_utc(receipt["issued_at"])
+    except QualificationContractError as exc:
+        raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID") from exc
+    if (
+        result["started_at"] != claim["claimed_at"]
+        or finished < started
+        or issued != finished
+        or (
+            "output_bytes" in plan["limits"]
+            and result["output_bytes"] > plan["limits"]["output_bytes"]
+        )
+        or (result["status"] == "passed_local" and (result["exit_code"] != 0 or result["output_digest"] is None))
+        or (
+            result["status"] == "passed_local"
+            and result["command_id"] == "python.unittest.v1"
+            and (
+                result["tests_run"] < 1
+                or result["failures"] != 0
+                or result["errors"] != 0
+                or result["skipped"] != 0
+            )
+        )
+    ):
+        raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
+
+
+def _validate_receipt_history(root: Path, receipt: dict[str, Any]) -> None:
+    current = receipt
+    seen: set[str] = set()
+    while True:
+        _validate_qualification_payload(current)
+        _validate_qualification_chain(root, current)
+        digest = current["receipt_digest"]
+        ordinal = current["sequence_ordinal"]
+        if digest in seen or len(seen) >= 10_000:
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+        seen.add(digest)
+        predecessor = current["predecessor_receipt"]
+        if predecessor is None:
+            if ordinal != 1:
+                raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+            break
+        if ordinal <= 1:
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+        current = _read_json(root, _qualification_artifact_path("receipts", predecessor))
+        if current.get("receipt_digest") != predecessor or current.get("sequence_ordinal") != ordinal - 1:
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+
+
+def _validate_qualification_tip_ledger(root: Path, view: dict[str, Any] | None) -> None:
+    try:
+        descriptor = _open_control_directory(root, tuple(_QUALIFICATION_TIP_ROOT.split("/")), create=False)
+    except WorkspaceError as exc:
+        if str(exc) == "SOS_WORKSPACE_RECORD_MISSING" and view is None:
+            return
+        raise
+    try:
+        names = sorted(os.listdir(descriptor))
+    except OSError as exc:
+        os.close(descriptor)
+        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
+    os.close(descriptor)
+    expected_names = [f"{ordinal:08d}.json" for ordinal in range(1, len(names) + 1)]
+    if not names or names != expected_names or len(names) > 10_000 or view is None:
+        raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+    predecessor: str | None = None
+    latest: dict[str, Any] | None = None
+    expected_keys = {
+        "contract",
+        "sequence_ordinal",
+        "predecessor_receipt",
+        "receipt_digest",
+        "tip_digest",
+    }
+    for ordinal, name in enumerate(names, start=1):
+        tip = _read_json(root, f"{_QUALIFICATION_TIP_ROOT}/{name}")
+        try:
+            _verify_digest_object(tip, "tip_digest", "sos_qualification_receipt_tip_v1")
+        except ContractError as exc:
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID") from exc
+        if (
+            set(tip) != expected_keys
+            or tip.get("sequence_ordinal") != ordinal
+            or tip.get("predecessor_receipt") != predecessor
+            or not _is_sha256(tip.get("receipt_digest"))
+        ):
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+        immutable = _read_json(root, _qualification_artifact_path("receipts", tip["receipt_digest"]))
+        if (
+            immutable.get("receipt_digest") != tip["receipt_digest"]
+            or immutable.get("sequence_ordinal") != ordinal
+            or immutable.get("predecessor_receipt") != predecessor
+        ):
+            raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
+        predecessor = tip["receipt_digest"]
+        latest = immutable
+    if latest != view:
+        raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
 
 
 def _bootstrap_records(
@@ -1979,6 +2437,37 @@ def _write_immutable_json(root: Path, relative: str, value: dict[str, Any]) -> N
         os.close(descriptor)
 
 
+def _write_exclusive_json(
+    root: Path,
+    relative: str,
+    value: dict[str, Any],
+    *,
+    collision_reason: str,
+) -> None:
+    parts = Path(relative).parts
+    descriptor = _open_control_directory(root, parts[:-1], create=True)
+    try:
+        try:
+            file_descriptor = os.open(
+                parts[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=descriptor,
+            )
+        except FileExistsError as exc:
+            raise WorkspaceError(collision_reason) from exc
+        try:
+            _write_all(file_descriptor, _json_bytes(value))
+            os.fsync(file_descriptor)
+        finally:
+            os.close(file_descriptor)
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
+    finally:
+        os.close(descriptor)
+
+
 def _replace_view_json(root: Path, relative: str, value: dict[str, Any]) -> None:
     parts = Path(relative).parts
     descriptor = _open_control_directory(root, parts[:-1], create=False)
@@ -2169,8 +2658,12 @@ def _failure(status: Status, reason: str, *, contract: str = "sos_init_result_v1
     return TerminalResult(contract=contract, status=status, reasons=(reason,), details={})
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(timezone.utc)
+
+
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return utc_text(_utc_now())
 
 
 def _json_bytes(value: object) -> bytes:

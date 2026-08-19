@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from importlib import resources
+from pathlib import Path
+from unittest.mock import patch
+
+from jsonschema import Draft202012Validator
+
+from sos.checks import qualify_supported
+from sos.qualification_contracts import schema_hashes, seal_contract, validate_contract
+from sos.workspace import (
+    WorkspaceError,
+    admit_qualification_plan,
+    execute_admitted_qualification,
+    initialize_workspace,
+    prepare_qualification_plan,
+    qualify_once,
+    recover_workspace,
+    store_qualification,
+    workspace_status,
+)
+
+
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+class QualificationIntegrityTests(unittest.TestCase):
+    def make_project(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+        temporary = tempfile.TemporaryDirectory()
+        root = Path(temporary.name)
+        git(root, "init", "-q")
+        git(root, "config", "user.name", "Synthetic Operator")
+        git(root, "config", "user.email", "synthetic@example.invalid")
+        (root / "AGENTS.md").write_text("Synthetic public instructions.\n", encoding="utf-8")
+        (root / "README.md").write_text("Synthetic qualification project.\n", encoding="utf-8")
+        (root / "pyproject.toml").write_text(
+            "[build-system]\nrequires = []\nbuild-backend = 'synthetic.backend'\n",
+            encoding="utf-8",
+        )
+        (root / "tasks").mkdir()
+        (root / "tasks" / "current.md").write_text("Synthetic current task.\n", encoding="utf-8")
+        (root / "tests").mkdir()
+        (root / "tests" / "test_smoke.py").write_text(
+            "import unittest\n\nclass Smoke(unittest.TestCase):\n"
+            "    def test_true(self):\n        self.assertTrue(True)\n",
+            encoding="utf-8",
+        )
+        git(root, "add", ".")
+        git(root, "commit", "-qm", "synthetic qualification project")
+        result = initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
+        self.assertEqual(result.status, "success")
+        return temporary, root
+
+    def test_four_closed_schemas_are_valid_and_integrity_pinned(self) -> None:
+        hashes = schema_hashes()
+        self.assertEqual(
+            set(hashes),
+            {
+                "sos_qualification_plan_v1",
+                "sos_command_admission_v1",
+                "sos_execution_result_v1",
+                "sos_qualification_receipt_v1",
+            },
+        )
+        for filename in (
+            "sos-qualification-plan-v1.schema.json",
+            "sos-command-admission-v1.schema.json",
+            "sos-execution-result-v1.schema.json",
+            "sos-qualification-receipt-v1.schema.json",
+        ):
+            schema = json.loads(resources.files("sos.schemas").joinpath(filename).read_text(encoding="utf-8"))
+            Draft202012Validator.check_schema(schema)
+
+    def test_exact_chain_binds_source_plan_admission_executor_and_result(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with patch("sos.workspace._utc_now", return_value=now):
+            plan, admission, receipt = qualify_once(
+                str(root), family_id="python.stdlib-unittest", confirmed=True
+            )
+        validate_contract(plan, "sos_qualification_plan_v1")
+        validate_contract(admission, "sos_command_admission_v1")
+        validate_contract(receipt, "sos_qualification_receipt_v1")
+        self.assertEqual(receipt["status"], "passed_local")
+        self.assertEqual(receipt["plan_digest"], plan["plan_digest"])
+        self.assertEqual(receipt["admission_id"], admission["admission_id"])
+        self.assertEqual(receipt["repository_id"], plan["repository_id"])
+        self.assertFalse(receipt["raw_output_serialized"])
+        self.assertNotIn(str(root), json.dumps((plan, admission, receipt), sort_keys=True))
+        tip = json.loads(
+            (root / ".sigma" / "qualification" / "tips" / "00000001.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(tip["receipt_digest"], receipt["receipt_digest"])
+        self.assertIsNone(tip["predecessor_receipt"])
+        self.assertEqual(workspace_status(str(root)).details["qualification_integrity"], "valid")
+
+    def test_plan_is_deterministic_read_only_and_confirmation_is_required(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        first = prepare_qualification_plan(str(root), "python.stdlib-unittest")
+        second = prepare_qualification_plan(str(root), "python.stdlib-unittest")
+        self.assertEqual(first, second)
+        self.assertFalse((root / ".sigma" / "qualification").exists())
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_CONFIRMATION_REQUIRED"):
+            admit_qualification_plan(str(root), first, confirmed=False)
+        self.assertFalse((root / ".sigma" / "qualification").exists())
+        tampered = dict(first)
+        tampered.pop("plan_digest")
+        tampered["argv_template"] = ["python", "-c", "pass"]
+        tampered["argv_digest"] = "sha256:" + "0" * 64
+        tampered = seal_contract(tampered)
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_PLAN_STALE"):
+            admit_qualification_plan(str(root), tampered, confirmed=True)
+        self.assertFalse((root / ".sigma" / "qualification").exists())
+
+    def test_admission_is_unique_expires_and_is_consumed_before_execution(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        issued = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
+        with patch("sos.workspace._utc_now", return_value=issued):
+            first = admit_qualification_plan(str(root), plan, confirmed=True, ttl_seconds=5)
+            second = admit_qualification_plan(str(root), plan, confirmed=True, ttl_seconds=5)
+        self.assertNotEqual(first["nonce_digest"], second["nonce_digest"])
+        with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=6)):
+            with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_ADMISSION_EXPIRED"):
+                execute_admitted_qualification(str(root), plan, first)
+        first_claim = root / ".sigma" / "qualification" / "claims" / f"{first['admission_id'][7:]}.json"
+        self.assertFalse(first_claim.exists())
+        with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=1)):
+            execute_admitted_qualification(str(root), plan, second)
+        self.assertTrue(
+            (root / ".sigma" / "qualification" / "claims" / f"{second['admission_id'][7:]}.json").is_file()
+        )
+        with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=2)):
+            with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_ADMISSION_REPLAYED"):
+                execute_admitted_qualification(str(root), plan, second)
+
+    def test_source_drift_blocks_before_nonce_consumption(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        issued = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
+        with patch("sos.workspace._utc_now", return_value=issued):
+            admission = admit_qualification_plan(str(root), plan, confirmed=True)
+        (root / "README.md").write_text("Synthetic source drift.\n", encoding="utf-8")
+        with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=1)):
+            with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
+                execute_admitted_qualification(str(root), plan, admission)
+        claim = root / ".sigma" / "qualification" / "claims" / f"{admission['admission_id'][7:]}.json"
+        self.assertFalse(claim.exists())
+
+    def test_source_drift_during_execution_burns_admission_without_green_receipt(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
+        admission = admit_qualification_plan(str(root), plan, confirmed=True)
+
+        def run_then_drift(path: str, *, family_id: str | None = None):
+            observation = qualify_supported(path, family_id=family_id)
+            (root / "README.md").write_text("Synthetic drift during execution.\n", encoding="utf-8")
+            return observation
+
+        with patch("sos.workspace.qualify_supported", side_effect=run_then_drift):
+            with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
+                execute_admitted_qualification(str(root), plan, admission)
+        claim = root / ".sigma" / "qualification" / "claims" / f"{admission['admission_id'][7:]}.json"
+        self.assertTrue(claim.is_file())
+        self.assertFalse((root / ".sigma" / "views" / "qualification.json").exists())
+
+    def test_receipt_history_is_monotonic_and_rejects_rollback(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with patch("sos.workspace._utc_now", return_value=first_time):
+            _, _, first = qualify_once(
+                str(root), family_id="python.stdlib-unittest", confirmed=True
+            )
+        with patch("sos.workspace._utc_now", return_value=first_time + timedelta(seconds=1)):
+            _, _, second = qualify_once(
+                str(root), family_id="python.stdlib-unittest", confirmed=True
+            )
+        self.assertEqual(first["sequence_ordinal"], 1)
+        self.assertIsNone(first["predecessor_receipt"])
+        self.assertEqual(second["sequence_ordinal"], 2)
+        self.assertEqual(second["predecessor_receipt"], first["receipt_digest"])
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_RECEIPT_REPLAYED"):
+            store_qualification(str(root), first)
+        recovery = recover_workspace(str(root))
+        self.assertEqual(recovery.status.value, "success")
+        self.assertEqual(recovery.details["qualification"]["receipt_digest"], second["receipt_digest"])
+        tip_path = root / ".sigma" / "qualification" / "tips" / "00000002.json"
+        tip = json.loads(tip_path.read_text(encoding="utf-8"))
+        tip["predecessor_receipt"] = None
+        tip_path.write_text(json.dumps(tip), encoding="utf-8")
+        observed = workspace_status(str(root))
+        self.assertEqual(observed.status.value, "invalid")
+        self.assertEqual(observed.reasons, ("SOS_CONTROL_PLANE_INTEGRITY_INVALID",))
+
+    def test_foreign_and_validly_resealed_forged_receipts_fail_closed(self) -> None:
+        first_temporary, first_root = self.make_project()
+        second_temporary, second_root = self.make_project()
+        self.addCleanup(first_temporary.cleanup)
+        self.addCleanup(second_temporary.cleanup)
+        _, _, receipt = qualify_once(
+            str(first_root), family_id="python.stdlib-unittest", confirmed=True
+        )
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
+            store_qualification(str(second_root), receipt)
+        forged = dict(receipt)
+        forged.pop("receipt_digest")
+        forged["status"] = "failed"
+        forged["reasons"] = ["SOS_QUALIFICATION_FAILED"]
+        forged["exit_code"] = 1
+        forged = seal_contract(forged)
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_BINDING_INVALID"):
+            store_qualification(str(first_root), forged)
+
+    def test_tampered_immutable_result_invalidates_every_authoritative_read(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        _, _, receipt = qualify_once(
+            str(root), family_id="python.stdlib-unittest", confirmed=True
+        )
+        result_path = root / ".sigma" / "qualification" / "results" / (
+            receipt["execution_result_digest"][7:] + ".json"
+        )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["status"] = "failed"
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+        observed = workspace_status(str(root))
+        self.assertEqual(observed.status, "invalid")
+        self.assertEqual(observed.reasons, ("SOS_CONTROL_PLANE_INTEGRITY_INVALID",))
+
+
+if __name__ == "__main__":
+    unittest.main()

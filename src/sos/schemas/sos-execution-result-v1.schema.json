@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sigmastratum.org/sos/sos-execution-result-v1.schema.json",
+  "title": "SOS Bounded Execution Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "repository_id", "source_tree_digest", "source_status_digest", "plan_digest", "admission_id", "claim_digest", "executor_digest", "family_id", "command_id", "argv_digest", "isolation_profile", "limits_digest", "started_at", "finished_at", "status", "reasons", "exit_code", "output_digest", "output_bytes", "tests_run", "failures", "errors", "skipped", "raw_output_serialized", "result_digest"],
+  "properties": {
+    "contract": {"const": "sos_execution_result_v1"},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "source_tree_digest": {"$ref": "#/$defs/digest"},
+    "source_status_digest": {"$ref": "#/$defs/digest"},
+    "plan_digest": {"$ref": "#/$defs/digest"},
+    "admission_id": {"$ref": "#/$defs/digest"},
+    "claim_digest": {"$ref": "#/$defs/digest"},
+    "executor_digest": {"$ref": "#/$defs/digest"},
+    "family_id": {"$ref": "#/$defs/token"},
+    "command_id": {"$ref": "#/$defs/token"},
+    "argv_digest": {"$ref": "#/$defs/digest"},
+    "isolation_profile": {"$ref": "#/$defs/token"},
+    "limits_digest": {"$ref": "#/$defs/digest"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["passed_local", "failed", "blocked", "unsupported", "not_verified", "skipped", "stale"]},
+    "reasons": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/token"}},
+    "exit_code": {"type": ["integer", "null"]},
+    "output_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "output_bytes": {"type": "integer", "minimum": 0},
+    "tests_run": {"type": "integer", "minimum": 0},
+    "failures": {"type": "integer", "minimum": 0},
+    "errors": {"type": "integer", "minimum": 0},
+    "skipped": {"type": "integer", "minimum": 0},
+    "raw_output_serialized": {"const": false},
+    "result_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "token": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"}
+  }
+}

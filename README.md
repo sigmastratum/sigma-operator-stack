@@ -77,6 +77,16 @@ file type, failed/skipped/empty suite, timeout or resource-limit result never
 becomes green. See [Qualification isolation](docs/qualification-isolation.md)
 for the exact boundary and residuals.
 
+Before execution, `sos qualify` freezes a closed source-bound plan containing
+the exact registered family, fixed argv digest, isolation profile and limits.
+One explicit confirmation creates an expiring, one-use admission with a fresh
+nonce. The nonce is claimed before project code runs. Execution produces a
+closed result and an append-only, source-bound receipt whose monotonic tip is
+replayed by every authoritative read. Foreign, stale, modified, rolled-back or
+replayed artifacts cannot become local green. These records are
+non-authoritative: they do not modify accepted P101 records or grant commit,
+push, deploy, release or production authority.
+
 The MCP surface is read-only and exposes the same status, doctor, recovery and
 check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
 push, deploy or qualification tool.
@@ -85,9 +95,11 @@ No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate
 distribution concern.
 
-Public contracts are packaged at
+Public P101 contracts are packaged at
 `src/sos/schemas/sos-contracts-v1.schema.json` and
-`src/sos/schemas/sos-contracts-v2.schema.json`. Their frozen SHA-256 values are
-checked at runtime before they can validate accepted state.
+`src/sos/schemas/sos-contracts-v2.schema.json`. Four additional closed P104
+schemas cover the qualification plan, one-run command admission, execution
+result and source-bound receipt. Every packaged schema has a frozen SHA-256
+value checked at runtime before validation.
 
 See `PUBLIC_REPOSITORY_BOUNDARY.md` before contributing.

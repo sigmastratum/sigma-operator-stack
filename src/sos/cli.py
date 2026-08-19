@@ -7,8 +7,9 @@ import json
 import sys
 from collections.abc import Sequence
 
-from .checks import discover_checks, qualify_supported
+from .checks import discover_checks
 from .mcp import serve_stdio
+from .qualification_contracts import QualificationContractError
 from .repository import RepositoryError, inspect_repository
 from .validation import validate_repository
 from .workspace import (
@@ -18,7 +19,9 @@ from .workspace import (
     initialize_workspace,
     regenerate_workspace,
     recover_workspace,
-    store_qualification,
+    admit_qualification_plan,
+    execute_admitted_qualification,
+    prepare_qualification_plan,
     workspace_status,
 )
 
@@ -119,29 +122,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = {"contract": "sos_check_plan_v1", "status": "invalid", "reasons": [exc.reason]}
             exit_code = 2
     elif args.command == "qualify":
-        if not (args.yes or _ask_confirmation("Run the supported check in an isolated disposable workspace?")):
+        try:
+            plan = prepare_qualification_plan(args.path, args.family)
+        except (RepositoryError, WorkspaceError, QualificationContractError) as exc:
+            reason = exc.reason if hasattr(exc, "reason") else str(exc)
+            terminal_status = "stale" if reason in {"SOS_QUALIFICATION_STALE", "SOS_QUALIFICATION_PLAN_STALE"} else "invalid"
+            payload = {"contract": "sos_qualify_result_v1", "status": terminal_status, "reasons": [reason]}
+            exit_code = 2
+            _print(payload, args.as_json)
+            return exit_code
+        if not args.yes:
+            print(json.dumps(plan, sort_keys=True, indent=2, ensure_ascii=False))
+        if not (args.yes or _ask_confirmation(f"Admit and consume exact plan {plan['plan_digest']} once?")):
             payload = {
-                "contract": "sos_qualification_receipt_v1",
+                "contract": "sos_qualify_result_v1",
                 "status": "owner_required",
                 "reasons": ["SOS_QUALIFICATION_CONFIRMATION_REQUIRED"],
             }
             exit_code = 2
         else:
             try:
-                receipt = qualify_supported(args.path, family_id=args.family)
-                try:
-                    store_qualification(args.path, receipt)
-                except WorkspaceError as exc:
-                    if not (
-                        receipt.status in {"blocked", "stale"}
-                        and str(exc) == "SOS_WORKSPACE_NOT_CURRENT"
-                    ):
-                        raise
-                payload = receipt.to_dict()
-                exit_code = 0 if receipt.status == "passed_local" else 2
-            except (RepositoryError, WorkspaceError) as exc:
-                reason = exc.reason if isinstance(exc, RepositoryError) else str(exc)
-                payload = {"contract": "sos_qualification_receipt_v1", "status": "invalid", "reasons": [reason]}
+                admission = admit_qualification_plan(args.path, plan, confirmed=True)
+                receipt = execute_admitted_qualification(args.path, plan, admission)
+                payload = receipt
+                exit_code = 0 if receipt["status"] == "passed_local" else 2
+            except (RepositoryError, WorkspaceError, QualificationContractError) as exc:
+                reason = exc.reason if hasattr(exc, "reason") else str(exc)
+                payload = {"contract": "sos_qualify_result_v1", "status": "invalid", "reasons": [reason]}
                 exit_code = 2
     elif args.command == "doctor":
         result = doctor_workspace(args.path)
