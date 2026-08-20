@@ -46,6 +46,28 @@ compares the exact target state with the plan and either completes the same
 transition or returns typed stale/blocked state. It never guesses new patch
 bytes.
 
+## Multi-target composition
+
+An immutable batch binds up to 32 unique journal IDs and exact relative
+targets in one fixed order. It contains only repository identity, stable IDs,
+plan digests, patch kinds and target names; raw bytes and absolute paths remain
+absent. Its two additional Draft 2020-12 contracts are:
+
+- `sos-managed-file-batch-v1.schema.json`;
+- `sos-managed-file-batch-projection-v1.schema.json`.
+
+Forward coordination prepares and applies one target at a time. Explicit or
+failure-driven rollback visits completed targets in strict reverse order. A
+prepared target is never falsely marked applied or rolled back. When a crash,
+drift or consumer failure prevents completion, the read-only batch projection
+returns exactly `integration_incomplete` with `recovery_required=true`.
+
+Recovery probes each target against the sealed before/after digests. It may
+complete one already-prepared exact operation only so the frozen four-state
+journal can immediately traverse reverse rollback. Foreign or ambiguous bytes
+stop recovery unchanged. Consumer callbacks are internal seams and are not
+available through CLI or MCP.
+
 ## Current consumer and residuals
 
 The Codex MCP lifecycle is the first consumer. Its config installation and
@@ -53,8 +75,8 @@ removal use the general journal plus atomic exchange/move-aside target
 operations. Crash recovery is covered before target mutation, after target
 mutation and after rollback.
 
-This slice proves a reusable one-target journal. A composed bootstrap that
-coordinates several target journals, rolls them back in reverse order and
-returns one `integration_incomplete` recovery projection remains a later
-composition gate. Claude parity, update/uninstall composition, cross-server
-qualification, push, publication and release are not claimed here.
+The one-target journal and bounded multi-target coordinator are reusable
+primitives. Codex remains the first concrete client consumer. Wiring the batch
+into the complete bootstrap/update/uninstall journey, broader qualification,
+Claude parity, cross-server verification, push, publication and release are
+not claimed here.
