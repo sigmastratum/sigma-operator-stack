@@ -301,6 +301,8 @@ def _validate_journal_id(value: object) -> None:
 def _validate_target(value: object) -> None:
     if not isinstance(value, str) or len(value.encode("utf-8")) > 512:
         raise ManagedFileError("SOS_MANAGED_FILE_TARGET_INVALID")
+    if any(character in value for character in "*?[]"):
+        raise ManagedFileError("SOS_MANAGED_FILE_TARGET_INVALID")
     path = Path(value)
     if path.is_absolute() or not path.parts or path.parts[0] == ".sigma":
         raise ManagedFileError("SOS_MANAGED_FILE_TARGET_INVALID")

@@ -9,7 +9,7 @@
     "contract": {"const": "sos_managed_file_plan_v1"},
     "journal_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
     "repository_id": {"$ref": "#/$defs/digest"},
-    "target": {"type": "string", "minLength": 1, "maxLength": 512},
+    "target": {"type": "string", "minLength": 1, "maxLength": 512, "not": {"pattern": "[*?\\[\\]]"}},
     "patch_kind": {"enum": ["create_file", "append_suffix"]},
     "before_exists": {"type": "boolean"},
     "before_byte_count": {"type": "integer", "minimum": 0, "maximum": 1048576},

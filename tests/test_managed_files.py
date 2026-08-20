@@ -118,7 +118,15 @@ class ManagedFileJournalTests(unittest.TestCase):
     def test_target_and_plan_shapes_reject_unsafe_or_inconsistent_values(self) -> None:
         temporary, _root, repository_id = self.make_project()
         self.addCleanup(temporary.cleanup)
-        for target in ("/absolute", ".sigma/manifest.json", "../escape", "a/../escape"):
+        for target in (
+            "/absolute",
+            ".sigma/manifest.json",
+            "../escape",
+            "a/../escape",
+            "docs/*.md",
+            "docs/file?.md",
+            "docs/[ab].md",
+        ):
             with self.subTest(target=target), self.assertRaises(ManagedFileError):
                 self.plan(repository_id, target)
         with self.assertRaises(ManagedFileError):
@@ -135,6 +143,21 @@ class ManagedFileJournalTests(unittest.TestCase):
                 after_byte_count=2,
                 after_digest=digest(b"xy"),
             )
+
+    def test_plan_schema_rejects_wildcard_targets(self) -> None:
+        temporary, _root, repository_id = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        plan = self.plan(repository_id)
+        plan["target"] = "docs/*.md"
+        schema_path = (
+            Path(__file__).parents[1]
+            / "src"
+            / "sos"
+            / "schemas"
+            / "sos-managed-file-plan-v1.schema.json"
+        )
+        validator = Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+        self.assertFalse(validator.is_valid(plan))
 
 
 if __name__ == "__main__":
