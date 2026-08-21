@@ -17,6 +17,10 @@ sos qualify [PATH] [--family FAMILY]
 sos doctor [PATH]
 sos recover [PATH]
 sos mcp --root PATH
+sos setup install codex [PATH]
+sos setup status codex [PATH]
+sos setup recover codex [PATH]
+sos setup remove codex [PATH]
 sos client install codex [PATH]
 sos client status codex [PATH]
 sos client remove codex [PATH]
@@ -98,12 +102,17 @@ push, deploy, release or production authority.
 
 The MCP surface is read-only and exposes the same status, doctor, recovery and
 check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
-push, deploy or qualification tool. `sos client install codex` previews and,
-after an observed terminal confirmation, appends one project-scoped server to
-`.codex/config.toml`. The launcher is bound to the exact installed package,
-Python executable, project root and four-tool allow-list. Removal restores the
-original config bytes only when the managed digest is unchanged and never
-removes `.sigma/`. See [Codex MCP integration](docs/codex-mcp-integration.md).
+push, deploy or qualification tool. `sos setup install codex` previews and,
+after one observed terminal confirmation, coordinates two exact managed
+targets: a public-safe recovery block in `AGENTS.md` and one project-scoped MCP
+server in `.codex/config.toml`. Both targets share one batch projection;
+partial application is never reported installed, and recovery rolls back in
+reverse order. The launcher is bound to the exact installed package, Python
+executable, project root and four-tool allow-list. Removal restores both
+original targets byte-for-byte when their managed digests are unchanged and
+never removes `.sigma/`. Existing `sos client ... codex` commands remain a
+bounded compatibility path and route aggregate installs through the same setup
+lifecycle. See [Codex MCP integration](docs/codex-mcp-integration.md).
 
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate

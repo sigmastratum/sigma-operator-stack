@@ -9,7 +9,16 @@ from collections.abc import Sequence
 
 from . import __version__
 from .checks import discover_checks
-from .client_integration import client_status, install_client, preview_client_install, remove_client
+from .client_integration import (
+    client_status,
+    codex_setup_status,
+    install_client,
+    install_codex_setup,
+    preview_client_install,
+    recover_codex_setup,
+    remove_client,
+    remove_codex_setup,
+)
 from .mcp import serve_stdio
 from .qualification_contracts import QualificationContractError
 from .repository import RepositoryError, inspect_repository
@@ -64,6 +73,15 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--json", action="store_true", dest="as_json")
         if operation != "status":
             command.add_argument("--yes", action="store_true")
+    setup = subparsers.add_parser("setup")
+    setup_commands = setup.add_subparsers(dest="setup_command", required=True)
+    for operation in ("install", "status", "recover", "remove"):
+        command = setup_commands.add_parser(operation)
+        command.add_argument("client", choices=("codex",))
+        command.add_argument("path", nargs="?", default=".")
+        command.add_argument("--json", action="store_true", dest="as_json")
+        if operation in {"install", "remove"}:
+            command.add_argument("--yes", action="store_true")
     return parser
 
 
@@ -86,6 +104,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         _print(payload, args.as_json)
         return 0
+    if args.command == "setup":
+        if args.setup_command == "status":
+            result = codex_setup_status(args.path)
+        elif args.setup_command == "recover":
+            result = recover_codex_setup(args.path)
+        elif args.setup_command == "install":
+            confirmed = args.yes or _ask_confirmation(
+                "Install the SOS project-recovery instructions and Codex MCP adapter?"
+            )
+            result = install_codex_setup(
+                args.path,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        else:
+            confirmed = args.yes or _ask_confirmation(
+                "Remove only the exact SOS-managed Codex-first integration?"
+            )
+            result = remove_codex_setup(
+                args.path,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        _print(result.to_dict(), args.as_json)
+        return 0 if result.status == "success" else 2
     if args.command == "client":
         if args.client_command == "status":
             result = client_status(args.path, args.client)

@@ -19,11 +19,17 @@ from typing import Any
 from . import __version__
 from .contracts import digest_value
 from .managed_files import (
+    ManagedFileBatchError,
     ManagedFileError,
+    build_managed_file_batch,
     build_managed_file_plan,
+    coordinate_managed_file_batch,
+    project_managed_file_batch,
     record_managed_file_state,
+    recover_managed_file_batch,
     replay_managed_file_journal,
     require_managed_file_state,
+    rollback_managed_file_batch,
 )
 from .repository import RepositoryError, discover_repository_root
 from .result import Status, TerminalResult
@@ -42,6 +48,23 @@ _BEGIN = "# >>> SOS managed Codex MCP (sos_codex_mcp_v1)"
 _END = "# <<< SOS managed Codex MCP (sos_codex_mcp_v1)"
 _TOOLS = ("sos_status", "sos_doctor", "sos_recover", "sos_check")
 _JOURNAL_ID = "codex-mcp"
+_INSTRUCTION_JOURNAL_ID = "codex-instructions"
+_SETUP_BATCH_ID = "codex-first"
+_SETUP_CONTRACT = "sos_codex_first_setup_manifest_v1"
+_SETUP_MANIFEST = "integrations/codex-first.json"
+_INSTRUCTION_TARGET = "AGENTS.md"
+_INSTRUCTION_BEGIN = "<!-- >>> SOS managed project recovery (sos_codex_first_v1) -->"
+_INSTRUCTION_END = "<!-- <<< SOS managed project recovery (sos_codex_first_v1) -->"
+_INSTRUCTION_BLOCK = (
+    _INSTRUCTION_BEGIN
+    + "\n# SOS project recovery\n\n"
+    + "Before changing this repository, use the project-local SOS MCP tools to read "
+    + "current authority, work, boundaries, checks and recovery state. Treat stale, "
+    + "blocked, invalid, unsupported and not-verified results as stop conditions. "
+    + "SOS tools do not grant acceptance, shell, commit, push, deploy or production authority.\n"
+    + _INSTRUCTION_END
+    + "\n"
+).encode("utf-8")
 _RENAME_NOREPLACE = 1
 _RENAME_EXCHANGE = 2
 
@@ -109,8 +132,12 @@ def preview_client_install(
     if client != _CLIENT:
         return _result(Status.UNSUPPORTED, "SOS_CLIENT_UNSUPPORTED")
     try:
-        root, repository_id = _ready_root(path, allow_stale_installed=True)
+        root = discover_repository_root(path)
         binding = launcher or observe_installed_launcher()
+        setup = _read_setup_manifest(root)
+        if setup is not None and setup["state"] != "removed":
+            return codex_setup_status(os.fspath(root), launcher=binding)
+        root, repository_id = _ready_root(os.fspath(root), allow_stale_installed=True)
         manifest = _read_manifest(root)
         if manifest is None:
             _require_no_orphan_journal(root)
@@ -159,8 +186,12 @@ def install_client(
     if not controlling_tty_observed:
         return _result(Status.OWNER_REQUIRED, "SOS_CLIENT_TTY_REQUIRED")
     try:
-        root, repository_id = _ready_root(path, allow_stale_installed=True)
+        root = discover_repository_root(path)
         binding = launcher or observe_installed_launcher()
+        setup = _read_setup_manifest(root)
+        if setup is not None and setup["state"] != "removed":
+            return codex_setup_status(os.fspath(root), launcher=binding)
+        root, repository_id = _ready_root(os.fspath(root), allow_stale_installed=True)
         existing = _read_manifest(root)
         if existing is None:
             _require_no_orphan_journal(root)
@@ -222,6 +253,9 @@ def client_status(
         return _result(Status.UNSUPPORTED, "SOS_CLIENT_UNSUPPORTED")
     try:
         root = discover_repository_root(path)
+        setup = _read_setup_manifest(root)
+        if setup is not None and setup["state"] != "removed":
+            return codex_setup_status(os.fspath(root), launcher=launcher)
         workspace = workspace_status(os.fspath(root))
         manifest = _read_manifest(root)
         if manifest is None:
@@ -264,7 +298,16 @@ def remove_client(
     if not controlling_tty_observed:
         return _result(Status.OWNER_REQUIRED, "SOS_CLIENT_TTY_REQUIRED")
     try:
-        root, repository_id = _ready_root(path, allow_stale_installed=True)
+        root = discover_repository_root(path)
+        setup = _read_setup_manifest(root)
+        if setup is not None and setup["state"] != "removed":
+            return remove_codex_setup(
+                os.fspath(root),
+                confirmed=True,
+                controlling_tty_observed=controlling_tty_observed,
+                launcher=launcher,
+            )
+        root, repository_id = _ready_root(os.fspath(root), allow_stale_installed=True)
         manifest = _read_manifest(root)
         if manifest is None:
             _require_no_orphan_journal(root)
@@ -313,6 +356,198 @@ def remove_client(
         return _error_result(exc)
 
 
+def preview_codex_setup(
+    path: str = ".", *, launcher: LauncherBinding | None = None
+) -> TerminalResult:
+    """Preview the two-target Codex-first consumer without writing state."""
+    try:
+        root, repository_id = _ready_setup_root(path, require_current=True)
+        binding = launcher or observe_installed_launcher()
+        existing = _read_setup_manifest(root)
+        if existing is not None and existing["state"] != "removed":
+            return codex_setup_status(path, launcher=binding)
+        legacy = _read_manifest(root)
+        if legacy is not None and legacy["state"] != "removed":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_LEGACY_CLIENT_PRESENT", Status.BLOCKED)
+        prepared = _prepare_setup(root, repository_id, binding)
+        return _setup_result(Status.OWNER_REQUIRED, "SOS_CODEX_SETUP_CONFIRMATION_REQUIRED", prepared)
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
+def install_codex_setup(
+    path: str = ".",
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+    launcher: LauncherBinding | None = None,
+) -> TerminalResult:
+    """Install the exact instruction/config batch after one local confirmation."""
+    if not confirmed:
+        return preview_codex_setup(path, launcher=launcher)
+    if not controlling_tty_observed:
+        return _setup_result(Status.OWNER_REQUIRED, "SOS_CODEX_SETUP_TTY_REQUIRED")
+    try:
+        root = discover_repository_root(path)
+        binding = launcher or observe_installed_launcher()
+        existing = _read_setup_manifest(root)
+        if existing is not None and existing["state"] == "installed":
+            _verify_setup(root, existing, binding, expected_state="integrated")
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_ALREADY_INSTALLED", existing)
+        if existing is not None and existing["state"] == "remove_prepared":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        if existing is None or existing["state"] == "removed":
+            root, repository_id = _ready_setup_root(path, require_current=True)
+            legacy = _read_manifest(root)
+            if legacy is not None and legacy["state"] != "removed":
+                raise ClientIntegrationError("SOS_CODEX_SETUP_LEGACY_CLIENT_PRESENT", Status.BLOCKED)
+            prepared = _prepare_setup(root, repository_id, binding)
+            _write_setup_manifest(root, prepared)
+        else:
+            prepared = existing
+            _verify_setup_binding(prepared, binding)
+        projection = project_managed_file_batch(root, prepared["batch"])
+        if projection["state"] == "integration_incomplete":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        apply_step, rollback_step, probe_step = _setup_callbacks(root, prepared, binding)
+        projection = coordinate_managed_file_batch(
+            root,
+            prepared["batch"],
+            prepared["plans"],
+            apply_step=apply_step,
+            rollback_step=rollback_step,
+            probe_step=probe_step,
+        )
+        if projection["state"] != "integrated":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        installed = _with_setup_state(prepared, "installed")
+        _write_setup_manifest(root, installed)
+        return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_INSTALLED", installed, projection)
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
+def codex_setup_status(
+    path: str = ".", *, launcher: LauncherBinding | None = None
+) -> TerminalResult:
+    """Project the aggregate consumer state without repairing or mutating it."""
+    try:
+        root = discover_repository_root(path)
+        manifest = _read_setup_manifest(root)
+        if manifest is None:
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_NOT_INSTALLED")
+        projection = project_managed_file_batch(root, manifest["batch"])
+        if manifest["state"] == "removed" and projection["state"] == "rolled_back":
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_NOT_INSTALLED", manifest, projection)
+        if manifest["state"] != "installed" or projection["state"] != "integrated":
+            return _setup_result(Status.BLOCKED, "SOS_CODEX_SETUP_RECOVERY_REQUIRED", manifest, projection)
+        binding = launcher or observe_installed_launcher()
+        _verify_setup(root, manifest, binding, expected_state="integrated")
+        workspace = workspace_status(os.fspath(root))
+        if workspace.status == Status.INVALID or workspace.details.get("repository_id") != manifest["repository_id"]:
+            raise ClientIntegrationError("SOS_CLIENT_REPOSITORY_MISMATCH", Status.STALE)
+        return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_INSTALLED", manifest, projection)
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
+def recover_codex_setup(
+    path: str = ".", *, launcher: LauncherBinding | None = None
+) -> TerminalResult:
+    """Resolve an interrupted aggregate lifecycle only from exact probes."""
+    try:
+        root = discover_repository_root(path)
+        manifest = _read_setup_manifest(root)
+        if manifest is None:
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_NOT_INSTALLED")
+        binding = launcher or observe_installed_launcher()
+        _verify_setup_binding(manifest, binding)
+        apply_step, rollback_step, probe_step = _setup_callbacks(root, manifest, binding)
+        projection = project_managed_file_batch(root, manifest["batch"])
+        if projection["state"] == "integration_incomplete":
+            projection = recover_managed_file_batch(
+                root,
+                manifest["batch"],
+                apply_step=apply_step,
+                rollback_step=rollback_step,
+                probe_step=probe_step,
+            )
+        if manifest["state"] == "install_prepared" and projection["state"] == "integrated":
+            installed = _with_setup_state(manifest, "installed")
+            _write_setup_manifest(root, installed)
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_INSTALL_RECOVERED", installed, projection)
+        if projection["state"] == "rolled_back" and manifest["state"] in {"install_prepared", "remove_prepared"}:
+            removed = _with_setup_state(manifest, "removed")
+            _write_setup_manifest(root, removed)
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_ROLLBACK_RECOVERED", removed, projection)
+        if manifest["state"] == "installed" and projection["state"] == "integrated":
+            _verify_setup(root, manifest, binding, expected_state="integrated")
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_INSTALLED", manifest, projection)
+        if manifest["state"] == "removed" and projection["state"] == "rolled_back":
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_NOT_INSTALLED", manifest, projection)
+        raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
+def remove_codex_setup(
+    path: str = ".",
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+    launcher: LauncherBinding | None = None,
+) -> TerminalResult:
+    """Remove both exact managed targets while preserving the control plane."""
+    if not confirmed:
+        status = codex_setup_status(path, launcher=launcher)
+        if status.status != Status.SUCCESS or "SOS_CODEX_SETUP_NOT_INSTALLED" in status.reasons:
+            return status
+        return TerminalResult(
+            _RESULT_CONTRACT,
+            Status.OWNER_REQUIRED,
+            ("SOS_CODEX_SETUP_REMOVE_CONFIRMATION_REQUIRED",),
+            status.details,
+        )
+    if not controlling_tty_observed:
+        return _setup_result(Status.OWNER_REQUIRED, "SOS_CODEX_SETUP_TTY_REQUIRED")
+    try:
+        root = discover_repository_root(path)
+        manifest = _read_setup_manifest(root)
+        if manifest is None:
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_ALREADY_REMOVED")
+        if manifest["state"] == "removed":
+            projection = project_managed_file_batch(root, manifest["batch"])
+            if projection["state"] != "rolled_back":
+                raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_ALREADY_REMOVED", manifest, projection)
+        if manifest["state"] == "install_prepared":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        binding = launcher or observe_installed_launcher()
+        _verify_setup_binding(manifest, binding)
+        if manifest["state"] == "installed":
+            _verify_setup(root, manifest, binding, expected_state="integrated")
+            removing = _with_setup_state(manifest, "remove_prepared")
+            _write_setup_manifest(root, removing)
+        elif manifest["state"] == "remove_prepared":
+            removing = manifest
+        else:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+        _, rollback_step, probe_step = _setup_callbacks(root, removing, binding)
+        projection = rollback_managed_file_batch(
+            root,
+            removing["batch"],
+            rollback_step=rollback_step,
+            probe_step=probe_step,
+        )
+        if projection["state"] != "rolled_back":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        removed = _with_setup_state(removing, "removed")
+        _write_setup_manifest(root, removed)
+        return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_REMOVED", removed, projection)
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
 def launcher_config(root: Path, binding: LauncherBinding) -> dict[str, Any]:
     """Return the exact supported Codex configuration without receipt paths."""
     return {
@@ -332,6 +567,239 @@ def launcher_config(root: Path, binding: LauncherBinding) -> dict[str, Any]:
         "enabled_tools": list(_TOOLS),
         "default_tools_approval_mode": "writes",
     }
+
+
+def _ready_setup_root(path: str, *, require_current: bool) -> tuple[Path, str]:
+    root = discover_repository_root(path)
+    status = workspace_status(os.fspath(root))
+    repository_id = status.details.get("repository_id")
+    if not isinstance(repository_id, str):
+        raise ClientIntegrationError(status.reasons[0] if status.reasons else "SOS_WORKSPACE_NOT_READY", status.status)
+    if require_current and status.status != Status.SUCCESS:
+        raise ClientIntegrationError(status.reasons[0] if status.reasons else "SOS_WORKSPACE_NOT_READY", status.status)
+    return root, repository_id
+
+
+def _prepare_setup(root: Path, repository_id: str, binding: LauncherBinding) -> dict[str, Any]:
+    instruction_original, instruction_existed = _read_instruction_target(root)
+    instruction_mode = _read_setup_target_mode(root, _INSTRUCTION_TARGET, instruction_existed, 0o644)
+    if _INSTRUCTION_BEGIN.encode() in instruction_original or _INSTRUCTION_END.encode() in instruction_original:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_COLLISION", Status.BLOCKED)
+    instruction_addition = _render_instruction_addition(instruction_original)
+    instruction_updated = instruction_original + instruction_addition
+    config_original, config_existed, config_parent_existed = _read_target(root)
+    config_mode = _read_setup_target_mode(root, _TARGET, config_existed, 0o600)
+    config_addition = _render_addition(root, binding, config_original)
+    config_updated = config_original + config_addition
+    _validate_toml(config_updated)
+    instruction_plan = _build_setup_plan(
+        journal_id=_INSTRUCTION_JOURNAL_ID,
+        repository_id=repository_id,
+        target=_INSTRUCTION_TARGET,
+        original=instruction_original,
+        existed=instruction_existed,
+        addition=instruction_addition,
+        updated=instruction_updated,
+    )
+    config_plan = _build_setup_plan(
+        journal_id=_JOURNAL_ID,
+        repository_id=repository_id,
+        target=_TARGET,
+        original=config_original,
+        existed=config_existed,
+        addition=config_addition,
+        updated=config_updated,
+    )
+    plans = [instruction_plan, config_plan]
+    seed = digest_value([plan["plan_digest"] for plan in plans]).removeprefix("sha256:")[:16]
+    batch = build_managed_file_batch(
+        batch_id=f"{_SETUP_BATCH_ID}-{seed}", repository_id=repository_id, plans=plans
+    )
+    manifest = {
+        "contract": _SETUP_CONTRACT,
+        "client": _CLIENT,
+        "state": "install_prepared",
+        "repository_id": repository_id,
+        "batch": batch,
+        "plans": plans,
+        "launcher_digest": binding.digest,
+        "package_version": binding.package_version,
+        "config_parent_existed": config_parent_existed,
+        "instruction_mode": instruction_mode,
+        "config_mode": config_mode,
+        "raw_content_serialized": False,
+        "absolute_paths_serialized": False,
+        "strong_authentication_claimed": False,
+        "agent_invocation_prevented": False,
+        "manifest_digest": "sha256:" + "0" * 64,
+    }
+    manifest["manifest_digest"] = _setup_manifest_digest(manifest)
+    _validate_setup_manifest(manifest)
+    return manifest
+
+
+def _build_setup_plan(
+    *,
+    journal_id: str,
+    repository_id: str,
+    target: str,
+    original: bytes,
+    existed: bool,
+    addition: bytes,
+    updated: bytes,
+) -> dict[str, Any]:
+    return build_managed_file_plan(
+        journal_id=journal_id,
+        repository_id=repository_id,
+        target=target,
+        patch_kind="append_suffix" if existed else "create_file",
+        before_exists=existed,
+        before_byte_count=len(original),
+        before_digest=_bytes_digest(original),
+        patch_byte_count=len(addition),
+        patch_digest=_bytes_digest(addition),
+        after_byte_count=len(updated),
+        after_digest=_bytes_digest(updated),
+    )
+
+
+def _render_instruction_addition(original: bytes) -> bytes:
+    separator = b"" if not original else (b"\n" if original.endswith(b"\n") else b"\n\n")
+    return separator + _INSTRUCTION_BLOCK
+
+
+def _setup_callbacks(
+    root: Path, manifest: dict[str, Any], binding: LauncherBinding
+) -> tuple[Any, Any, Any]:
+    plans = {plan["plan_digest"]: plan for plan in manifest["plans"]}
+
+    def probe(plan: dict[str, Any]) -> str:
+        _require_setup_plan(plan, plans)
+        current, existed = _read_setup_target(root, plan["target"])
+        if existed == plan["before_exists"] and len(current) == plan["before_byte_count"] and _bytes_digest(current) == plan["before_digest"]:
+            return "before"
+        if existed and len(current) == plan["after_byte_count"] and _bytes_digest(current) == plan["after_digest"]:
+            return "after"
+        return "drift"
+
+    def apply(plan: dict[str, Any]) -> None:
+        _require_setup_plan(plan, plans)
+        current, existed = _read_setup_target(root, plan["target"])
+        if probe(plan) != "before":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+        if plan["target"] == _INSTRUCTION_TARGET:
+            addition = _render_instruction_addition(current)
+        elif plan["target"] == _TARGET:
+            addition = _render_addition(root, binding, current)
+        else:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_PLAN_INVALID")
+        updated = current + addition
+        _require_setup_payload(plan, current, addition, updated)
+        if plan["target"] == _INSTRUCTION_TARGET:
+            _replace_instruction_target(
+                root,
+                updated,
+                expected=current,
+                expected_existed=existed,
+                mode=manifest["instruction_mode"],
+            )
+        else:
+            _validate_toml(updated)
+            _replace_target(
+                root,
+                updated,
+                expected=current,
+                expected_existed=existed,
+                mode=manifest["config_mode"],
+            )
+
+    def rollback(plan: dict[str, Any]) -> None:
+        _require_setup_plan(plan, plans)
+        current, existed = _read_setup_target(root, plan["target"])
+        if not existed or probe(plan) != "after":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+        original = current[: plan["before_byte_count"]]
+        addition = current[plan["before_byte_count"] :]
+        _require_setup_payload(plan, original, addition, current)
+        if plan["target"] == _INSTRUCTION_TARGET:
+            _restore_instruction_target(
+                root,
+                original,
+                original_existed=plan["before_exists"],
+                expected=current,
+                mode=manifest["instruction_mode"],
+            )
+        else:
+            _restore_target(
+                root,
+                original,
+                original_existed=plan["before_exists"],
+                parent_existed=manifest["config_parent_existed"],
+                expected=current,
+                mode=manifest["config_mode"],
+            )
+
+    return apply, rollback, probe
+
+
+def _require_setup_plan(plan: dict[str, Any], plans: dict[str, dict[str, Any]]) -> None:
+    if plans.get(plan.get("plan_digest")) != plan or plan.get("target") not in {_INSTRUCTION_TARGET, _TARGET}:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_PLAN_INVALID", Status.STALE)
+
+
+def _require_setup_payload(
+    plan: dict[str, Any], original: bytes, addition: bytes, updated: bytes
+) -> None:
+    if (
+        len(original) != plan["before_byte_count"]
+        or _bytes_digest(original) != plan["before_digest"]
+        or len(addition) != plan["patch_byte_count"]
+        or _bytes_digest(addition) != plan["patch_digest"]
+        or len(updated) != plan["after_byte_count"]
+        or _bytes_digest(updated) != plan["after_digest"]
+    ):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_PLAN_STALE", Status.STALE)
+
+
+def _read_setup_target(root: Path, target: str) -> tuple[bytes, bool]:
+    if target == _INSTRUCTION_TARGET:
+        return _read_instruction_target(root)
+    if target == _TARGET:
+        payload, existed, _ = _read_target(root)
+        return payload, existed
+    raise ClientIntegrationError("SOS_CODEX_SETUP_PLAN_INVALID")
+
+
+def _read_setup_target_mode(root: Path, target: str, existed: bool, default: int) -> int:
+    if not existed:
+        return default
+    descriptor = _open_root(root)
+    try:
+        observed = os.stat(target, dir_fd=descriptor, follow_symlinks=False)
+    except OSError as exc:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE) from exc
+    finally:
+        os.close(descriptor)
+    return stat.S_IMODE(observed.st_mode)
+
+
+def _verify_setup(
+    root: Path, manifest: dict[str, Any], binding: LauncherBinding, *, expected_state: str
+) -> None:
+    _verify_setup_binding(manifest, binding)
+    projection = project_managed_file_batch(root, manifest["batch"])
+    if projection["state"] != expected_state:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+    _, _, probe = _setup_callbacks(root, manifest, binding)
+    expected_probe = "after" if expected_state == "integrated" else "before"
+    if any(probe(plan) != expected_probe for plan in manifest["plans"]):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+
+
+def _verify_setup_binding(manifest: dict[str, Any], binding: LauncherBinding) -> None:
+    _validate_setup_manifest(manifest)
+    if manifest["launcher_digest"] != binding.digest or manifest["package_version"] != binding.package_version:
+        raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_STALE", Status.STALE)
 
 
 def _ready_root(path: str, *, allow_stale_installed: bool) -> tuple[Path, str]:
@@ -435,6 +903,124 @@ def _with_state(manifest: dict[str, Any], state: str) -> dict[str, Any]:
     updated["manifest_digest"] = "sha256:" + "0" * 64
     updated["manifest_digest"] = _manifest_digest(updated)
     return updated
+
+
+def _with_setup_state(manifest: dict[str, Any], state: str) -> dict[str, Any]:
+    updated = dict(manifest)
+    updated["state"] = state
+    updated["manifest_digest"] = "sha256:" + "0" * 64
+    updated["manifest_digest"] = _setup_manifest_digest(updated)
+    _validate_setup_manifest(updated)
+    return updated
+
+
+def _read_setup_manifest(root: Path) -> dict[str, Any] | None:
+    try:
+        descriptor = _open_control_directory(root, ("integrations",), create=False)
+    except ClientIntegrationError as exc:
+        if exc.reason == "SOS_CLIENT_MANIFEST_MISSING":
+            return None
+        raise
+    try:
+        try:
+            file_descriptor = os.open("codex-first.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+        except FileNotFoundError:
+            return None
+        try:
+            payload = _read_bounded(file_descriptor, _MAX_CONFIG_BYTES)
+        finally:
+            os.close(file_descriptor)
+    except OSError as exc:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID") from exc
+    finally:
+        os.close(descriptor)
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID") from exc
+    _validate_setup_manifest(value)
+    return value
+
+
+def _write_setup_manifest(root: Path, manifest: dict[str, Any]) -> None:
+    _validate_setup_manifest(manifest)
+    descriptor = _open_control_directory(root, ("integrations",), create=True)
+    temporary = f".codex-first.{os.getpid()}.{os.urandom(8).hex()}"
+    try:
+        file_descriptor = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=descriptor
+        )
+        try:
+            payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            if len(payload) > _MAX_CONFIG_BYTES:
+                raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+            _write_all(file_descriptor, payload)
+            os.fsync(file_descriptor)
+        finally:
+            os.close(file_descriptor)
+        os.replace(temporary, "codex-first.json", src_dir_fd=descriptor, dst_dir_fd=descriptor)
+        os.fsync(descriptor)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=descriptor)
+        except FileNotFoundError:
+            pass
+        os.close(descriptor)
+
+
+def _validate_setup_manifest(value: object) -> None:
+    required = {
+        "contract", "client", "state", "repository_id", "batch", "plans",
+        "launcher_digest", "package_version", "config_parent_existed",
+        "instruction_mode", "config_mode",
+        "raw_content_serialized", "absolute_paths_serialized",
+        "strong_authentication_claimed", "agent_invocation_prevented", "manifest_digest",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if value["contract"] != _SETUP_CONTRACT or value["client"] != _CLIENT:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if value["state"] not in {"install_prepared", "installed", "remove_prepared", "removed"}:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if any(value[field] is not False for field in (
+        "raw_content_serialized", "absolute_paths_serialized",
+        "strong_authentication_claimed", "agent_invocation_prevented",
+    )):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if not isinstance(value["config_parent_existed"], bool):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    for field in ("instruction_mode", "config_mode"):
+        if not isinstance(value[field], int) or isinstance(value[field], bool) or not 0 <= value[field] <= 0o777:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if not isinstance(value["package_version"], str) or not value["package_version"]:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    for field in ("repository_id", "launcher_digest", "manifest_digest"):
+        if not isinstance(value[field], str) or re.fullmatch(r"sha256:[0-9a-f]{64}", value[field]) is None:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    plans = value["plans"]
+    batch = value["batch"]
+    if not isinstance(plans, list) or len(plans) != 2 or not isinstance(batch, dict):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    try:
+        expected = build_managed_file_batch(
+            batch_id=batch["batch_id"], repository_id=value["repository_id"], plans=plans
+        )
+    except (KeyError, ManagedFileError) as exc:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID") from exc
+    if expected != batch:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if [plan.get("journal_id") for plan in plans] != [_INSTRUCTION_JOURNAL_ID, _JOURNAL_ID]:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if [plan.get("target") for plan in plans] != [_INSTRUCTION_TARGET, _TARGET]:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    if value["manifest_digest"] != _setup_manifest_digest(value):
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+
+
+def _setup_manifest_digest(value: dict[str, Any]) -> str:
+    material = dict(value)
+    material["manifest_digest"] = "sha256:" + "0" * 64
+    return digest_value(material)
 
 
 def _read_manifest(root: Path) -> dict[str, Any] | None:
@@ -617,7 +1203,144 @@ def _read_target(root: Path) -> tuple[bytes, bool, bool]:
         os.close(root_descriptor)
 
 
-def _replace_target(root: Path, payload: bytes, *, expected: bytes, expected_existed: bool) -> None:
+def _read_instruction_target(root: Path) -> tuple[bytes, bool]:
+    descriptor = _open_root(root)
+    try:
+        try:
+            file_descriptor = os.open(_INSTRUCTION_TARGET, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+        except FileNotFoundError:
+            return b"", False
+        except OSError as exc:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_INVALID") from exc
+        try:
+            observed = os.fstat(file_descriptor)
+            if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_CONFIG_BYTES:
+                raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_INVALID")
+            return _read_bounded(file_descriptor, _MAX_CONFIG_BYTES), True
+        finally:
+            os.close(file_descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _replace_instruction_target(
+    root: Path, payload: bytes, *, expected: bytes, expected_existed: bool, mode: int
+) -> None:
+    descriptor = _open_root(root)
+    temporary = f".sos-agents.{os.getpid()}.{os.urandom(8).hex()}"
+    try:
+        current = _read_relative_file(descriptor, _INSTRUCTION_TARGET)
+        if (current is not None) != expected_existed or (current or b"") != expected:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+        temporary_descriptor = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=descriptor
+        )
+        try:
+            _write_all(temporary_descriptor, payload)
+            os.fsync(temporary_descriptor)
+            replacement_identity = _file_identity(os.fstat(temporary_descriptor))
+        finally:
+            os.close(temporary_descriptor)
+        preserve_temporary = False
+        try:
+            if expected_existed:
+                outcome = _exchange_if_expected(
+                    descriptor,
+                    temporary,
+                    _INSTRUCTION_TARGET,
+                    expected=expected,
+                    replacement=payload,
+                    replacement_identity=replacement_identity,
+                )
+                if outcome == "rolled_back":
+                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+                if outcome == "recovery_required":
+                    preserve_temporary = True
+                    raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+            else:
+                try:
+                    os.link(
+                        temporary,
+                        _INSTRUCTION_TARGET,
+                        src_dir_fd=descriptor,
+                        dst_dir_fd=descriptor,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as exc:
+                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE) from exc
+                os.unlink(temporary, dir_fd=descriptor)
+            os.fsync(descriptor)
+        finally:
+            if not preserve_temporary:
+                try:
+                    os.unlink(temporary, dir_fd=descriptor)
+                except FileNotFoundError:
+                    pass
+    finally:
+        os.close(descriptor)
+
+
+def _restore_instruction_target(
+    root: Path, original: bytes, *, original_existed: bool, expected: bytes, mode: int
+) -> None:
+    descriptor = _open_root(root)
+    temporary = f".sos-agents.{os.getpid()}.{os.urandom(8).hex()}"
+    try:
+        current = _read_relative_file(descriptor, _INSTRUCTION_TARGET)
+        if current != expected:
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+        if original_existed:
+            temporary_descriptor = os.open(
+                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=descriptor
+            )
+            try:
+                _write_all(temporary_descriptor, original)
+                os.fsync(temporary_descriptor)
+                replacement_identity = _file_identity(os.fstat(temporary_descriptor))
+            finally:
+                os.close(temporary_descriptor)
+            preserve_temporary = False
+            try:
+                outcome = _exchange_if_expected(
+                    descriptor,
+                    temporary,
+                    _INSTRUCTION_TARGET,
+                    expected=expected,
+                    replacement=original,
+                    replacement_identity=replacement_identity,
+                )
+                if outcome == "rolled_back":
+                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+                if outcome == "recovery_required":
+                    preserve_temporary = True
+                    raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+            finally:
+                if not preserve_temporary:
+                    try:
+                        os.unlink(temporary, dir_fd=descriptor)
+                    except FileNotFoundError:
+                        pass
+        else:
+            outcome = _move_away_if_expected(
+                descriptor, _INSTRUCTION_TARGET, temporary, expected=expected
+            )
+            if outcome == "rolled_back":
+                raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+            if outcome == "recovery_required":
+                raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _replace_target(
+    root: Path,
+    payload: bytes,
+    *,
+    expected: bytes,
+    expected_existed: bool,
+    mode: int = 0o600,
+) -> None:
     root_descriptor = _open_root(root)
     parent_created = False
     try:
@@ -636,7 +1359,7 @@ def _replace_target(root: Path, payload: bytes, *, expected: bytes, expected_exi
                 raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
             temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
             descriptor = os.open(
-                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
+                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent
             )
             try:
                 _write_all(descriptor, payload)
@@ -684,7 +1407,13 @@ def _replace_target(root: Path, payload: bytes, *, expected: bytes, expected_exi
 
 
 def _restore_target(
-    root: Path, original: bytes, *, original_existed: bool, parent_existed: bool, expected: bytes
+    root: Path,
+    original: bytes,
+    *,
+    original_existed: bool,
+    parent_existed: bool,
+    expected: bytes,
+    mode: int = 0o600,
 ) -> None:
     root_descriptor = _open_root(root)
     try:
@@ -699,7 +1428,7 @@ def _restore_target(
             if original_existed:
                 temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
                 descriptor = os.open(
-                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
+                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent
                 )
                 try:
                     _write_all(descriptor, original)
@@ -941,6 +1670,73 @@ def _error_result(exc: BaseException) -> TerminalResult:
     if isinstance(exc, OSError):
         return _result(Status.BLOCKED, "SOS_CLIENT_IO_FAILED")
     return _result(Status.INVALID, str(exc))
+
+
+def _setup_details(
+    manifest: dict[str, Any] | None, projection: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "client": _CLIENT,
+        "targets": [_INSTRUCTION_TARGET, _TARGET],
+        "target_count": 2,
+        "absolute_paths_serialized": False,
+        "raw_content_serialized": False,
+        "strong_authentication_claimed": False,
+        "agent_invocation_prevented": False,
+        "acceptance_tools_exposed": False,
+        "arbitrary_shell_exposed": False,
+        "external_action_tools_exposed": False,
+        "client_project_trust_required": True,
+        "client_restart_required": True,
+    }
+    if manifest is not None:
+        details.update(
+            {
+                "integration_state": manifest["state"],
+                "manifest_digest": manifest["manifest_digest"],
+                "batch_digest": manifest["batch"]["batch_digest"],
+                "launcher_digest": manifest["launcher_digest"],
+                "package_version": manifest["package_version"],
+                "currentness_after_install": "stale_until_successor_acceptance",
+                "next_action_after_install": "sos regenerate; accept exact successors in order",
+            }
+        )
+    if projection is not None:
+        details.update(
+            {
+                "batch_state": projection["state"],
+                "recovery_required": projection["recovery_required"],
+                "applied_count": projection["applied_count"],
+                "rolled_back_count": projection["rolled_back_count"],
+            }
+        )
+    return details
+
+
+def _setup_result(
+    status: Status,
+    reason: str,
+    manifest: dict[str, Any] | None = None,
+    projection: dict[str, Any] | None = None,
+) -> TerminalResult:
+    return TerminalResult(_RESULT_CONTRACT, status, (reason,), _setup_details(manifest, projection))
+
+
+def _setup_error_result(exc: BaseException) -> TerminalResult:
+    projection = exc.projection if isinstance(exc, ManagedFileBatchError) else None
+    if isinstance(exc, (ClientIntegrationError, ManagedFileError)):
+        status = exc.status
+        reason = exc.reason
+    elif isinstance(exc, RepositoryError):
+        status = Status.INVALID
+        reason = exc.reason
+    elif isinstance(exc, OSError):
+        status = Status.BLOCKED
+        reason = "SOS_CODEX_SETUP_IO_FAILED"
+    else:
+        status = Status.INVALID
+        reason = "SOS_CODEX_SETUP_INVALID"
+    return _setup_result(status, reason, projection=projection)
 
 
 def _manifest_digest(value: dict[str, Any]) -> str:
