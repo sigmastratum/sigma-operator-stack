@@ -87,8 +87,11 @@ roots; seccomp denies network, child-process, namespace and mount syscalls; the
 environment contains no inherited credentials. Raw test output is never
 serialized. A missing Landlock capability, protected tracked path, unsupported
 file type, failed/skipped/empty suite, timeout or resource-limit result never
-becomes green. See [Qualification isolation](docs/qualification-isolation.md)
-for the exact boundary and residuals.
+becomes green. This is the complete executable qualification profile supported
+by the v0.1 Linux x86_64 vertical; it is not a general sandbox or a claim about
+other languages, runners, architectures or kernels. See
+[Qualification isolation](docs/qualification-isolation.md) for the exact
+supported boundary and excluded claims.
 
 Before execution, `sos qualify` freezes a closed source-bound plan containing
 the exact registered family, fixed argv digest, isolation profile and limits.

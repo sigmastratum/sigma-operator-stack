@@ -88,21 +88,43 @@ process, 1 MiB per written file, 16 MiB total writable bytes, 4,096 writable
 entries and 1 MiB captured output. The parent kills the complete worker process
 group on wall-time or aggregate writable-limit failure.
 
-## Explicit boundary
+## Supported v0.1 boundary
 
-This is a Linux-specific local qualification profile, not a general sandbox.
-It does not install dependencies, execute arbitrary commands, support project
-plugins or claim containment on other kernels/architectures. The source input
-is an immutable snapshot rather than a canonical-repository bind mount; the
-canonical repository is deliberately not visible to project code. Filesystem
-quota enforcement is parent-observed rather than a kernel-mounted per-run
-quota. These differences remain open before a terminal, platform-general P104
-claim.
+This profile is the complete executable qualification profile supported by the
+v0.1 Linux x86_64 vertical. Its support contract is intentionally narrow:
+
+- platform: Linux x86_64 with Landlock ABI 3 or newer and the required seccomp
+  support;
+- family: Python standard-library `unittest` discovered from tracked project
+  files;
+- source: an immutable tracked-file snapshot in a disposable execution root;
+- canonical repository: inaccessible to project code and re-observed before
+  and after execution;
+- side effects: no network, child process, namespace or mount authority, a
+  closed environment without inherited credentials, and one fixed
+  `shell=false` argv;
+- resources: declared time, CPU, address-space, descriptor, output, per-file
+  write, total writable-byte and writable-entry ceilings;
+- integrity: an expiring one-use nonce plus exact source/plan/admission/claim/
+  executor/result digests and fail-closed stale, foreign, forged and replayed
+  receipt handling.
+
+Within that boundary, the immutable snapshot and inaccessible canonical
+repository are the supported source-isolation design; a literal read-only bind
+mount is not required. Total writable quota enforcement is parent-observed
+rather than a kernel-mounted per-run quota. Exceeding it kills the worker and
+cannot produce green.
+
+This is not a general sandbox. It does not install dependencies, execute
+arbitrary commands, support project plugins or claim containment on other
+kernels or architectures. Other languages, runner families and kernels are
+unsupported until separately implemented and qualified.
 
 Like conventional unit-test runners, the profile does not treat the test
 definitions themselves as an attestation authority. A project deliberately
-written to falsify its own test result is outside this initial result-integrity
+written to falsify its own test result is outside the v0.1 result-integrity
 claim and must not be used as trusted evidence. Source binding, immutable
 qualification storage and caller/MCP forgery resistance are enforced by the
 separate receipt-validation chain. A stronger claim against malicious test
-definitions requires a separately trusted runner or independent verifier.
+definitions requires a separately trusted runner or independent verifier and
+is not part of v0.1.
