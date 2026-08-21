@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sos import cli as sos_cli
 from sos.client_integration import (
     ClientIntegrationError,
     LauncherBinding,
@@ -30,6 +31,64 @@ def git(root: Path, *args: str) -> None:
 
 
 class CodexFirstSetupTests(unittest.TestCase):
+    def test_cli_prints_aggregate_preview_before_confirmation(self) -> None:
+        events: list[object] = []
+        preview = mock.Mock(status="owner_required")
+        preview.to_dict.return_value = {
+            "contract": "sos_client_integration_result_v1",
+            "status": "owner_required",
+            "reasons": ["SOS_CODEX_SETUP_CONFIRMATION_REQUIRED"],
+            "details": {"target_count": 2},
+        }
+        installed = mock.Mock(status="success")
+        installed.to_dict.return_value = {
+            "contract": "sos_client_integration_result_v1",
+            "status": "success",
+            "reasons": ["SOS_CODEX_SETUP_INSTALLED"],
+            "details": {"target_count": 2},
+        }
+
+        def observe_preview(path: str):
+            events.append(("preview", path))
+            return preview
+
+        def print_result(payload: object, as_json: bool) -> None:
+            events.append(("print", payload["status"], as_json))
+
+        def confirm(question: str) -> bool:
+            events.append(("confirm", question))
+            return True
+
+        def install(path: str, *, confirmed: bool, controlling_tty_observed: bool):
+            events.append(("install", path, confirmed, controlling_tty_observed))
+            return installed
+
+        synthetic_stdin = mock.Mock()
+        synthetic_stdin.isatty.return_value = True
+        with (
+            mock.patch.object(sos_cli, "preview_codex_setup", side_effect=observe_preview),
+            mock.patch.object(sos_cli, "_print", side_effect=print_result),
+            mock.patch.object(sos_cli, "_ask_confirmation", side_effect=confirm),
+            mock.patch.object(sos_cli, "install_codex_setup", side_effect=install),
+            mock.patch.object(sos_cli.sys, "stdin", synthetic_stdin),
+        ):
+            exit_code = sos_cli.main(["setup", "install", "codex", "/synthetic/project"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            events,
+            [
+                ("preview", "/synthetic/project"),
+                ("print", "owner_required", False),
+                (
+                    "confirm",
+                    "Install the SOS project-recovery instructions and Codex MCP adapter?",
+                ),
+                ("install", "/synthetic/project", True, True),
+                ("print", "success", False),
+            ],
+        )
+
     def fresh_process(self, root: Path, operation: str) -> dict[str, object]:
         script = """
 import json

@@ -15,6 +15,7 @@ from .client_integration import (
     install_client,
     install_codex_setup,
     preview_client_install,
+    preview_codex_setup,
     recover_codex_setup,
     remove_client,
     remove_codex_setup,
@@ -110,6 +111,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.setup_command == "recover":
             result = recover_codex_setup(args.path)
         elif args.setup_command == "install":
+            if not args.yes:
+                preview = preview_codex_setup(args.path)
+                if preview.status != "owner_required":
+                    _print(preview.to_dict(), args.as_json)
+                    return 0 if preview.status == "success" else 2
+                _print(preview.to_dict(), args.as_json)
             confirmed = args.yes or _ask_confirmation(
                 "Install the SOS project-recovery instructions and Codex MCP adapter?"
             )
