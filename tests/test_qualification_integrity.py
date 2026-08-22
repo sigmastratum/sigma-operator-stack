@@ -163,8 +163,17 @@ class QualificationIntegrityTests(unittest.TestCase):
         plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
         admission = admit_qualification_plan(str(root), plan, confirmed=True)
 
-        def run_then_drift(path: str, *, family_id: str | None = None):
-            observation = qualify_supported(path, family_id=family_id)
+        def run_then_drift(
+            path: str,
+            *,
+            family_id: str | None = None,
+            admitted_source_binding: object | None = None,
+        ):
+            observation = qualify_supported(
+                path,
+                family_id=family_id,
+                admitted_source_binding=admitted_source_binding,
+            )
             (root / "README.md").write_text("Synthetic drift during execution.\n", encoding="utf-8")
             return observation
 

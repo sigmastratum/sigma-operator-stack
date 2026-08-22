@@ -17,8 +17,10 @@ from sos.client_integration import (
     remove_codex_setup,
     update_codex_setup,
 )
+from sos.checks import qualify_supported
 from sos.contracts import exclusion_policy_digest
 from sos.dirty import observe_application
+from sos.isolation import isolation_limits
 from sos.lifecycle import (
     execute_one_command_init,
     prepare_one_command_init,
@@ -27,7 +29,7 @@ from sos.lifecycle import (
 )
 from sos.repository import inspect_repository, repository_identity_contract
 from sos.result import Status, TerminalResult
-from sos.workspace import workspace_status
+from sos.workspace import qualify_once, workspace_status
 
 
 def git(root: Path, *args: str) -> None:
@@ -113,6 +115,49 @@ class P106LifecycleTests(unittest.TestCase):
         preflight = project_tool(str(root), "sos_preflight")
         self.assertEqual(preflight.status, "not_verified")
         self.assertEqual(preflight.details["next_action"], "sos qualify")
+
+    def test_managed_dirty_state_requires_admission_and_qualifies_bound_snapshot(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        (root / "pyproject.toml").write_text(
+            "[build-system]\nrequires = []\nbuild-backend = 'synthetic.backend'\n",
+            encoding="utf-8",
+        )
+        (root / "tests").mkdir()
+        (root / "tasks").mkdir()
+        (root / "tasks" / "current.md").write_text(
+            "# Synthetic current work\n",
+            encoding="utf-8",
+        )
+        (root / "tests" / "test_synthetic.py").write_text(
+            "import unittest\n\n"
+            "class Synthetic(unittest.TestCase):\n"
+            "    def test_pass(self):\n"
+            "        self.assertTrue(True)\n",
+            encoding="utf-8",
+        )
+        git(root, "add", "pyproject.toml", "tasks/current.md", "tests/test_synthetic.py")
+        git(root, "commit", "-qm", "add synthetic qualification fixture")
+
+        installed = execute_one_command_init(
+            prepare_one_command_init(str(root), launcher=self.binding()),
+            confirmed=True,
+            controlling_tty_observed=True,
+        )
+        self.assertEqual(installed.status, "success", installed.to_dict())
+        self.assertEqual(inspect_repository(root).application_state, "dirty")
+
+        unadmitted = qualify_supported(str(root), family_id="python.stdlib-unittest")
+        self.assertEqual(unadmitted.status, "blocked")
+        self.assertEqual(unadmitted.reasons, ("SOS_QUALIFICATION_DIRTY_SOURCE",))
+        self.assertEqual(unadmitted.limits, isolation_limits())
+
+        _plan, _admission, receipt = qualify_once(
+            str(root), family_id="python.stdlib-unittest", confirmed=True
+        )
+        self.assertEqual(receipt["status"], "passed_local")
+        preflight = project_tool(str(root), "sos_preflight")
+        self.assertEqual(preflight.status, "success", preflight.to_dict())
 
     def test_crash_after_targets_is_recovered_in_reverse_without_sigma(self) -> None:
         temporary, root = self.make_project()

@@ -10,7 +10,13 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .isolation import PROFILE_ID, isolation_limits, profile_declared_available, run_isolated_unittest
+from .isolation import (
+    PROFILE_ID,
+    AdmittedSourceBinding,
+    isolation_limits,
+    profile_declared_available,
+    run_isolated_unittest,
+)
 from .repository import RepositoryError, discover_repository_root, inspect_repository
 
 
@@ -145,7 +151,12 @@ def discover_checks(path: str = ".") -> CheckPlan:
     )
 
 
-def qualify_supported(path: str = ".", *, family_id: str | None = None) -> QualificationObservation:
+def qualify_supported(
+    path: str = ".",
+    *,
+    family_id: str | None = None,
+    admitted_source_binding: AdmittedSourceBinding | None = None,
+) -> QualificationObservation:
     root = discover_repository_root(path)
     plan = discover_checks(os.fspath(root))
     if family_id is None:
@@ -154,6 +165,12 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
         family = next((item for item in plan.families if item.family_id == family_id), None)
         if family is None:
             raise RepositoryError("SOS_CHECK_FAMILY_UNKNOWN")
+    if admitted_source_binding is not None and (
+        admitted_source_binding.source_tree_digest != plan.source_tree_digest
+        or admitted_source_binding.source_status_digest != plan.source_status_digest
+    ):
+        raise RepositoryError("SOS_QUALIFICATION_SOURCE_BINDING_INVALID")
+    inspection = inspect_repository(root)
     if family.status != "configured" or family.command_id is None:
         return QualificationObservation(
             contract="sos_qualification_observation_v1",
@@ -171,7 +188,10 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
             raw_output_serialized=False,
             limits=_limits(),
         )
-    if inspect_repository(root).application_state != "clean":
+    if (
+        inspection.application_state != "clean"
+        and admitted_source_binding is None
+    ):
         return QualificationObservation(
             contract="sos_qualification_observation_v1",
             status="blocked",
@@ -186,12 +206,38 @@ def qualify_supported(path: str = ".", *, family_id: str | None = None) -> Quali
             output_digest=None,
             output_bytes=0,
             raw_output_serialized=False,
-            limits=_limits(),
+            limits=family_execution_contract(family)["limits"],
+        )
+    if (
+        admitted_source_binding is not None
+        and inspection.application_state != "clean"
+        and family.command_id != "python.unittest.v1"
+    ):
+        return QualificationObservation(
+            contract="sos_qualification_observation_v1",
+            status="blocked",
+            reasons=("SOS_QUALIFICATION_DIRTY_SOURCE",),
+            family_id=family.family_id,
+            command_id=family.command_id,
+            plan_digest=plan.plan_digest,
+            source_tree_digest=plan.source_tree_digest,
+            source_status_digest=plan.source_status_digest,
+            isolation=family.isolation,
+            exit_code=None,
+            output_digest=None,
+            output_bytes=0,
+            raw_output_serialized=False,
+            limits=family_execution_contract(family)["limits"],
         )
     if family.command_id == "python.compile.v1":
         return _run_python_syntax(root, plan, family)
     if family.command_id == "python.unittest.v1":
-        return _run_python_unittest(root, plan, family)
+        return _run_python_unittest(
+            root,
+            plan,
+            family,
+            admitted_source_binding=admitted_source_binding,
+        )
     raise RepositoryError("SOS_CHECK_COMMAND_UNKNOWN")
 
 
@@ -299,8 +345,18 @@ def _run_python_syntax(root: Path, plan: CheckPlan, family: CheckFamily) -> Qual
     )
 
 
-def _run_python_unittest(root: Path, plan: CheckPlan, family: CheckFamily) -> QualificationObservation:
-    isolated = run_isolated_unittest(root, _tracked_paths(root))
+def _run_python_unittest(
+    root: Path,
+    plan: CheckPlan,
+    family: CheckFamily,
+    *,
+    admitted_source_binding: AdmittedSourceBinding | None = None,
+) -> QualificationObservation:
+    isolated = run_isolated_unittest(
+        root,
+        _tracked_paths(root),
+        admitted_source_binding=admitted_source_binding,
+    )
     return QualificationObservation(
         contract="sos_qualification_observation_v1",
         status=isolated.status,

@@ -25,6 +25,7 @@ from .contracts import (
     verify_record,
 )
 from .dirty import observe_application
+from .isolation import AdmittedSourceBinding
 from .qualification_contracts import (
     EXECUTOR_DIGEST,
     QualificationContractError,
@@ -812,7 +813,22 @@ def execute_admitted_qualification(
         claim,
         collision_reason="SOS_QUALIFICATION_ADMISSION_REPLAYED",
     )
-    observation = qualify_supported(os.fspath(root), family_id=plan["family_id"])
+    _bound_root, _bound_inspection, _bound_manifest, bound_replay = _load_and_replay(
+        os.fspath(root)
+    )
+    bound_source = bound_replay["source_observation"]
+    observation = qualify_supported(
+        os.fspath(root),
+        family_id=plan["family_id"],
+        admitted_source_binding=AdmittedSourceBinding(
+            repository_id=admission["repository_id"],
+            source_tree_digest=admission["source_tree_digest"],
+            source_status_digest=admission["source_status_digest"],
+            fingerprint_head=bound_source["head"],
+            exclusion_policy_ref=bound_source["exclusion_policy"]["policy_digest"],
+            application_fingerprint=bound_source["application_state"]["fingerprint"],
+        ),
+    )
     if (
         observation.family_id != admission["family_id"]
         or observation.command_id != admission["command_id"]

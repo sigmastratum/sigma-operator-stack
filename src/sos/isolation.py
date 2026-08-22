@@ -15,8 +15,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from .dirty import sensitive_path_class
-from .repository import RepositoryError, inspect_repository
+from .dirty import observe_application, sensitive_path_class
+from .repository import RepositoryError, RepositoryInspection, inspect_repository
 
 
 PROFILE_ID = "linux-landlock-seccomp-snapshot-v1"
@@ -43,6 +43,16 @@ class IsolatedRun:
     skipped: int
 
 
+@dataclass(frozen=True, slots=True)
+class AdmittedSourceBinding:
+    repository_id: str
+    source_tree_digest: str
+    source_status_digest: str
+    fingerprint_head: str
+    exclusion_policy_ref: str
+    application_fingerprint: str
+
+
 def profile_declared_available() -> bool:
     """Return a zero-execution platform declaration; runtime still probes fail-closed."""
     return sys.platform == "linux" and platform.machine() == "x86_64"
@@ -53,10 +63,15 @@ def run_isolated_unittest(
     tracked_paths: tuple[str, ...],
     *,
     timeout_seconds: int = _TIMEOUT_SECONDS,
+    admitted_source_binding: AdmittedSourceBinding | None = None,
 ) -> IsolatedRun:
     before = inspect_repository(root)
-    if before.application_state != "clean":
+    if admitted_source_binding is None and before.application_state != "clean":
         return _result("blocked", "SOS_QUALIFICATION_DIRTY_SOURCE")
+    if admitted_source_binding is not None and not _source_binding_current(
+        root, before, admitted_source_binding
+    ):
+        return _result("stale", "SOS_QUALIFICATION_SOURCE_CHANGED")
     with tempfile.TemporaryDirectory(prefix="sos-qualify-") as temporary:
         disposable = Path(temporary) / "execution"
         source = disposable / "source"
@@ -68,7 +83,10 @@ def run_isolated_unittest(
         except RepositoryError as exc:
             return _result("blocked", exc.reason)
         after_copy = inspect_repository(root)
-        if _source_changed(before, after_copy):
+        if _source_changed(before, after_copy) or (
+            admitted_source_binding is not None
+            and not _source_binding_current(root, after_copy, admitted_source_binding)
+        ):
             return _result("stale", "SOS_QUALIFICATION_SOURCE_CHANGED")
         worker = Path(__file__).with_name("_isolation_worker.py")
         command = [sys.executable, "-I", os.fspath(worker), os.fspath(disposable)]
@@ -113,7 +131,10 @@ def run_isolated_unittest(
             if not timed_out and not writable_limit_exceeded:
                 writable_limit_exceeded = _writable_budget_exceeded(output)
         after_run = inspect_repository(root)
-        if _source_changed(before, after_run):
+        if _source_changed(before, after_run) or (
+            admitted_source_binding is not None
+            and not _source_binding_current(root, after_run, admitted_source_binding)
+        ):
             return _result("stale", "SOS_QUALIFICATION_SOURCE_CHANGED", exit_code=exit_code)
         output_size = output_path.stat().st_size + error_path.stat().st_size
         if output_size > _MAX_OUTPUT_BYTES:
@@ -360,6 +381,28 @@ def _source_changed(before: object, after: object) -> bool:
     return (
         before.application_tree_digest != after.application_tree_digest
         or before.application_status_digest != after.application_status_digest
+    )
+
+
+def _source_binding_current(
+    root: Path,
+    inspection: RepositoryInspection,
+    binding: AdmittedSourceBinding,
+) -> bool:
+    if (
+        inspection.application_tree_digest != binding.source_tree_digest
+        or inspection.application_status_digest != binding.source_status_digest
+    ):
+        return False
+    observed = observe_application(
+        root,
+        binding.repository_id,
+        binding.fingerprint_head,
+        binding.exclusion_policy_ref,
+    )
+    return (
+        observed.complete
+        and observed.fingerprint == binding.application_fingerprint
     )
 
 
