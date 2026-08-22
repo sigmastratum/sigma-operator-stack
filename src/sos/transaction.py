@@ -7,6 +7,7 @@ import os
 import re
 import ctypes
 import errno
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -159,8 +160,29 @@ def execute_bootstrap_files(
             raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
         normalized[parts] = payload
 
+    create_bootstrap_staging(root, transaction_id, normalized)
+    return commit_bootstrap_staging(root, transaction_id)
+
+
+def create_bootstrap_staging(
+    root: Path,
+    transaction_id: str,
+    files: Mapping[str | tuple[str, ...], bytes],
+) -> Path:
+    """Create one exact sibling staging tree without making it canonical."""
+    if not _TX.fullmatch(transaction_id):
+        raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    if root.is_symlink() or not root.is_dir():
+        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    normalized = _normalize_files(files)
+    if not normalized:
+        raise TransactionError("SOS_BOOTSTRAP_PLAN_EMPTY")
+    target_name = ".sigma"
+    staging_name = f".sigma.init.{transaction_id}"
     root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        if _entry_exists(root_descriptor, target_name):
+            raise TransactionError("SOS_CONTROL_PLANE_COLLISION")
         try:
             os.mkdir(staging_name, mode=0o700, dir_fd=root_descriptor)
         except FileExistsError as exc:
@@ -179,11 +201,133 @@ def execute_bootstrap_files(
             os.fsync(staging_descriptor)
         finally:
             os.close(staging_descriptor)
-        _rename_noreplace(root_descriptor, staging_name, root_descriptor, target_name)
-        os.fsync(root_descriptor)
-        return root / target_name
+        return root / staging_name
     finally:
         os.close(root_descriptor)
+
+
+def extend_bootstrap_staging(
+    root: Path,
+    transaction_id: str,
+    files: Mapping[str | tuple[str, ...], bytes],
+) -> Path:
+    """Append non-colliding files to one exact staging tree."""
+    if not _TX.fullmatch(transaction_id):
+        raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    normalized = _normalize_files(files)
+    staging_name = f".sigma.init.{transaction_id}"
+    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        staging_descriptor = os.open(
+            staging_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor
+        )
+        try:
+            directories = sorted({parts[:depth] for parts in normalized for depth in range(1, len(parts))})
+            for directory_parts in directories:
+                _mkdir_relative(staging_descriptor, directory_parts)
+            for parts, payload in sorted(normalized.items()):
+                _write_relative(staging_descriptor, parts, payload)
+            os.fsync(staging_descriptor)
+        finally:
+            os.close(staging_descriptor)
+        return root / staging_name
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
+    finally:
+        os.close(root_descriptor)
+
+
+def commit_bootstrap_staging(root: Path, transaction_id: str) -> Path:
+    """Atomically admit one fully prepared sibling tree as canonical `.sigma`."""
+    if not _TX.fullmatch(transaction_id):
+        raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    staging_name = f".sigma.init.{transaction_id}"
+    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        staging_descriptor = os.open(
+            staging_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor
+        )
+        os.fsync(staging_descriptor)
+        os.close(staging_descriptor)
+        _rename_noreplace(root_descriptor, staging_name, root_descriptor, ".sigma")
+        os.fsync(root_descriptor)
+        return root / ".sigma"
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
+    finally:
+        os.close(root_descriptor)
+
+
+def discard_bootstrap_staging(root: Path, transaction_id: str) -> None:
+    """Remove only one validated sibling staging tree; never follow symlinks."""
+    if not _TX.fullmatch(transaction_id):
+        raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    staging_name = f".sigma.init.{transaction_id}"
+    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            staging_descriptor = os.open(
+                staging_name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=root_descriptor,
+            )
+        except FileNotFoundError:
+            return
+        try:
+            _discard_directory_contents(staging_descriptor)
+        finally:
+            os.close(staging_descriptor)
+        os.rmdir(staging_name, dir_fd=root_descriptor)
+        os.fsync(root_descriptor)
+    except (NotADirectoryError, OSError) as exc:
+        raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
+    finally:
+        os.close(root_descriptor)
+
+
+def _discard_directory_contents(directory_fd: int) -> None:
+    for name in os.listdir(directory_fd):
+        observed = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(observed.st_mode):
+            child = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
+            )
+            try:
+                _discard_directory_contents(child)
+            finally:
+                os.close(child)
+            os.rmdir(name, dir_fd=directory_fd)
+        else:
+            os.unlink(name, dir_fd=directory_fd)
+
+
+def _normalize_files(
+    files: Mapping[str | tuple[str, ...], bytes],
+) -> dict[tuple[str, ...], bytes]:
+    total = 0
+    normalized: dict[tuple[str, ...], bytes] = {}
+    for relative, payload in files.items():
+        path = Path(*relative) if isinstance(relative, tuple) else Path(relative)
+        parts = path.parts
+        if not isinstance(payload, bytes):
+            raise TransactionError("SOS_BOOTSTRAP_PAYLOAD_INVALID")
+        if path.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
+            raise TransactionError("SOS_BOOTSTRAP_PATH_INVALID")
+        if any("/" in part or "\\" in part or "\x00" in part for part in parts):
+            raise TransactionError("SOS_BOOTSTRAP_PATH_INVALID")
+        total += len(payload)
+        if total > _MAX_BOOTSTRAP_BYTES:
+            raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
+        normalized[parts] = payload
+    return normalized
+
+
+def _entry_exists(directory_fd: int, name: str) -> bool:
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _open_directory_chain(root_descriptor: int, parts: tuple[str, ...]) -> int:

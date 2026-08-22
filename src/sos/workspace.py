@@ -136,41 +136,16 @@ def initialize_workspace(
     transaction_id = secrets.token_hex(32)
     bootstrap_intent_id = "sha256:" + secrets.token_hex(32)
     bootstrap_plan_id = "sha256:" + secrets.token_hex(32)
-    provisional_identity = repository_identity_contract(root)
-    local_nonce = secrets.token_hex(16) if provisional_identity.identity_mode == "local_nonce_bound" else None
-    identity = repository_identity_contract(root, local_repository_nonce=local_nonce)
-    inspection = inspect_repository(root, local_repository_nonce=local_nonce)
-    plan = discover_checks(os.fspath(root))
-    created_at = _timestamp()
-    authority_paths = tuple(candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file())
-    docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
-    task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
     try:
-        source = _source_observation(root, inspection, identity, transaction_id, created_at)
-        actor = _actor()
-        records = _bootstrap_records(
-            inspection=inspection,
-            identity=identity,
-            source=source,
-            actor=actor,
+        provisional_identity = repository_identity_contract(root)
+        local_nonce = secrets.token_hex(16) if provisional_identity.identity_mode == "local_nonce_bound" else None
+        files, configured_count = build_workspace_bootstrap_files(
+            root,
+            transaction_id=transaction_id,
             bootstrap_intent_id=bootstrap_intent_id,
             bootstrap_plan_id=bootstrap_plan_id,
-            created_at=created_at,
-            authority_paths=authority_paths,
-            docs=docs,
-            task_path=task_path,
-            check_plan_digest=plan.plan_digest,
             local_nonce=local_nonce,
         )
-        receipts = _bootstrap_receipts(
-            records,
-            source,
-            actor,
-            bootstrap_intent_id,
-            bootstrap_plan_id,
-            created_at,
-        )
-        schemas = schema_bundle_hashes()
     except ContractError as exc:
         incomplete_observation = exc.reason.startswith("SOS_DIRTY_") or exc.reason in {
             "SOS_PATH_LIMIT_EXCEEDED",
@@ -179,6 +154,65 @@ def initialize_workspace(
         status = Status.NOT_VERIFIED if incomplete_observation else Status.INVALID
         return _failure(status, exc.reason)
 
+    try:
+        execute_bootstrap_files(root, transaction_id, files, confirmed=True)
+    except TransactionError as exc:
+        return _failure(Status.BLOCKED, str(exc))
+    result = workspace_status(os.fspath(root))
+    if result.status != Status.SUCCESS:
+        return TerminalResult("sos_init_result_v1", result.status, result.reasons, result.details)
+    return TerminalResult(
+        contract="sos_init_result_v1",
+        status=Status.SUCCESS,
+        reasons=("SOS_BOOTSTRAP_COMPLETE", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL"),
+        details={
+            **result.details,
+            "configured_check_families": configured_count,
+        },
+    )
+
+
+def build_workspace_bootstrap_files(
+    root: Path,
+    *,
+    transaction_id: str,
+    bootstrap_intent_id: str,
+    bootstrap_plan_id: str,
+    local_nonce: str | None,
+) -> tuple[dict[str, bytes], int]:
+    """Build one exact P101-v2 control plane for the currently observed application."""
+    identity = repository_identity_contract(root, local_repository_nonce=local_nonce)
+    inspection = inspect_repository(root, local_repository_nonce=local_nonce)
+    plan = discover_checks(os.fspath(root))
+    created_at = _timestamp()
+    authority_paths = tuple(candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file())
+    docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
+    task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
+    source = _source_observation(root, inspection, identity, transaction_id, created_at)
+    actor = _actor()
+    records = _bootstrap_records(
+        inspection=inspection,
+        identity=identity,
+        source=source,
+        actor=actor,
+        bootstrap_intent_id=bootstrap_intent_id,
+        bootstrap_plan_id=bootstrap_plan_id,
+        created_at=created_at,
+        authority_paths=authority_paths,
+        docs=docs,
+        task_path=task_path,
+        check_plan_digest=plan.plan_digest,
+        local_nonce=local_nonce,
+    )
+    receipts = _bootstrap_receipts(
+        records,
+        source,
+        actor,
+        bootstrap_intent_id,
+        bootstrap_plan_id,
+        created_at,
+    )
+    schemas = schema_bundle_hashes()
     record_revisions = {name: record["revision_id"] for name, record in records.items()}
     receipt_ids = [receipt["receipt_id"] for receipt in receipts]
     control_plane_digest = _control_plane_digest(record_revisions, receipt_ids, plan.plan_digest, schemas)
@@ -216,22 +250,7 @@ def initialize_workspace(
     }
     for relative, receipt in zip(_RECEIPT_FILES, receipts, strict=True):
         files[relative] = _json_bytes(receipt)
-    try:
-        execute_bootstrap_files(root, transaction_id, files, confirmed=True)
-    except TransactionError as exc:
-        return _failure(Status.BLOCKED, str(exc))
-    result = workspace_status(os.fspath(root))
-    if result.status != Status.SUCCESS:
-        return TerminalResult("sos_init_result_v1", result.status, result.reasons, result.details)
-    return TerminalResult(
-        contract="sos_init_result_v1",
-        status=Status.SUCCESS,
-        reasons=("SOS_BOOTSTRAP_COMPLETE", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL"),
-        details={
-            **result.details,
-            "configured_check_families": sum(family.status == "configured" for family in plan.families),
-        },
-    )
+    return files, sum(family.status == "configured" for family in plan.families)
 
 
 def regenerate_workspace(
@@ -541,6 +560,61 @@ def workspace_status(path: str = ".") -> TerminalResult:
         "sos_workspace_status_v1",
         Status.SUCCESS,
         ("SOS_WORKSPACE_CURRENT", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL"),
+        details,
+    )
+
+
+def project_workspace_application(
+    path: str, *, overlays: dict[str, bytes]
+) -> TerminalResult:
+    """Project exact managed overlays against the integrity-checked accepted source."""
+    try:
+        root, inspection, manifest, replay = _load_and_replay(path)
+        source = replay["source_observation"]
+        application = observe_application(
+            root,
+            inspection.repository_id,
+            source["head"],
+            source["exclusion_policy"]["policy_digest"],
+            overlays=overlays,
+        )
+    except RepositoryError as exc:
+        return _failure(Status.INVALID, exc.reason, contract="sos_application_projection_v1")
+    except (WorkspaceError, ContractError):
+        return _failure(
+            Status.INVALID,
+            "SOS_CONTROL_PLANE_INTEGRITY_INVALID",
+            contract="sos_application_projection_v1",
+        )
+    binding = manifest["source_binding"]
+    details = {
+        "repository_id": inspection.repository_id,
+        "projected_application_fingerprint": application.fingerprint,
+        "application_observation_complete": application.complete,
+        "raw_project_content_serialized": False,
+        "absolute_paths_serialized": False,
+    }
+    if not application.complete:
+        return TerminalResult(
+            "sos_application_projection_v1",
+            Status.NOT_VERIFIED,
+            application.reasons or ("SOS_DIRTY_OBSERVATION_FAILED",),
+            details,
+        )
+    if (
+        binding["tree_digest"] != inspection.application_tree_digest
+        or binding["application_fingerprint"] != application.fingerprint
+    ):
+        return TerminalResult(
+            "sos_application_projection_v1",
+            Status.STALE,
+            ("SOS_SOURCE_STATUS_CHANGED",),
+            details,
+        )
+    return TerminalResult(
+        "sos_application_projection_v1",
+        Status.SUCCESS,
+        ("SOS_APPLICATION_PROJECTION_CURRENT",),
         details,
     )
 

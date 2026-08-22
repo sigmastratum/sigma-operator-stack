@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .client_integration import project_codex_package_update
 from .qualification_contracts import QualificationContractError, canonical_digest
 from .repository import RepositoryError
 from .result import Status, TerminalResult
@@ -45,8 +46,23 @@ def project_tool(root: str, name: str, arguments: dict[str, Any] | None = None) 
     if name == "sos_status":
         return workspace_status(root)
     if name == "sos_preflight":
+        recovery = recover_workspace(root)
+        if recovery.status == Status.SUCCESS and not isinstance(recovery.details.get("qualification"), dict):
+            details = dict(recovery.details)
+            details["qualification_state"] = "not_verified"
+            details["next_action"] = "sos qualify"
+            return TerminalResult(
+                "sos_preflight_result_v1",
+                Status.NOT_VERIFIED,
+                ("SOS_QUALIFICATION_NOT_RUN",),
+                details,
+            )
         checked = doctor_workspace(root)
-        return TerminalResult("sos_preflight_result_v1", checked.status, checked.reasons, checked.details)
+        details = dict(checked.details)
+        if checked.status == Status.NOT_VERIFIED:
+            details["qualification_state"] = "not_verified"
+            details["next_action"] = "sos qualify"
+        return TerminalResult("sos_preflight_result_v1", checked.status, checked.reasons, details)
     if name == "sos_active_task":
         return active_task(root)
     if name == "sos_next_action":
@@ -199,9 +215,9 @@ def propose_update(root: str) -> TerminalResult:
     }
     if current.status != Status.SUCCESS:
         return TerminalResult("sos_update_proposal_v1", current.status, current.reasons, details)
-    return _result(
-        "sos_update_proposal_v1", Status.NOT_VERIFIED, "SOS_UPDATE_NOT_CONFIGURED", details
-    )
+    projected = project_codex_package_update(root)
+    merged = {**details, **projected.details}
+    return TerminalResult("sos_update_proposal_v1", projected.status, projected.reasons, merged)
 
 
 def _result(

@@ -24,6 +24,13 @@ from .client_integration import (
     update_codex_setup,
 )
 from .mcp import serve_stdio
+from .lifecycle import (
+    LifecycleError,
+    execute_one_command_init,
+    prepare_one_command_init,
+    preview_one_command_init,
+    recover_one_command_init,
+)
 from .qualification_contracts import QualificationContractError
 from .repository import RepositoryError
 from .validation import validate_repository
@@ -68,6 +75,8 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--yes", action="store_true")
         subparser.add_argument("--json", action="store_true", dest="as_json")
+        if command == "init":
+            subparser.add_argument("--with-codex", action="store_true")
     qualify = subparsers.add_parser("qualify")
     qualify.add_argument("path", nargs="?", default=".")
     qualify.add_argument("--family")
@@ -211,12 +220,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
-        confirmed = args.yes or _ask_confirmation("Initialize SOS in this repository?")
-        result = initialize_workspace(
-            args.path,
-            confirmed=confirmed,
-            controlling_tty_observed=sys.stdin.isatty(),
-        )
+        if args.with_codex:
+            try:
+                one_command_plan = prepare_one_command_init(args.path)
+            except LifecycleError as exc:
+                if exc.reason == "SOS_P106_RECOVERY_REQUIRED":
+                    recovered = recover_one_command_init(args.path)
+                    if recovered.status != "success":
+                        result = recovered
+                        payload = result.to_dict()
+                        _print(payload, args.as_json)
+                        return 2
+                    one_command_plan = prepare_one_command_init(args.path)
+                else:
+                    result = preview_one_command_init(args.path)
+                    payload = result.to_dict()
+                    _print(payload, args.as_json)
+                    return 0 if result.status == "success" else 2
+            preview = one_command_plan.preview()
+            _print(preview.to_dict(), args.as_json)
+            confirmed = args.yes or _ask_confirmation(
+                "Apply the exact SOS bootstrap and Codex integration plan?"
+            )
+            result = execute_one_command_init(
+                one_command_plan,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        else:
+            confirmed = args.yes or _ask_confirmation("Initialize SOS in this repository?")
+            result = initialize_workspace(
+                args.path,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "regenerate":

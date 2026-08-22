@@ -10,6 +10,7 @@ end-to-end Linux/Git/Python vertical:
 
 ```text
 sos init [PATH]
+sos init --with-codex [PATH]
 sos regenerate [PATH]
 sos accept REVISION [PATH]
 sos check [PATH]
@@ -20,6 +21,7 @@ sos mcp --root PATH
 sos setup install codex [PATH]
 sos setup status codex [PATH]
 sos setup recover codex [PATH]
+sos setup update codex [PATH]
 sos setup remove codex [PATH]
 sos client install codex [PATH]
 sos client status codex [PATH]
@@ -40,6 +42,18 @@ extra prompt but does not bypass that boundary; a non-interactive invocation
 returns `SOS_ACCEPTANCE_TTY_REQUIRED` and writes nothing. This is intentionally
 weak local evidence, not authentication, and SOS does not claim that an agent
 cannot invoke the CLI.
+
+Private-alpha first use is version-pinned and requires a preinstalled `uv`:
+
+```bash
+uv tool install --no-config --no-sources --no-build --no-python-downloads \
+  'sigma-operator-stack==0.1.0.dev0'
+sos init --with-codex PATH
+```
+
+Before package publication, the same flow is qualified from one exact local
+wheel. Package acquisition is the only allowed network phase and finishes
+before SOS starts. SOS performs no network, telemetry or update check.
 
 When application source changes, `sos regenerate` creates one immutable,
 content-safe successor plan without changing accepted state. The plan contains
@@ -123,6 +137,26 @@ original targets byte-for-byte when their managed digests are unchanged and
 never removes `.sigma/`. Existing `sos client ... codex` commands remain a
 bounded compatibility path and route aggregate installs through the same setup
 lifecycle. See [Codex MCP integration](docs/codex-mcp-integration.md).
+
+`sos init --with-codex PATH` composes the canonical bootstrap, managed
+`AGENTS.md`, project `.codex/config.toml`, stable launcher binding and reverse
+rollback into one aggregate preview and one confirmation. It never runs
+qualification. Until `sos qualify` succeeds, `sos_preflight` reports
+`not_verified` and names `sos qualify` as the next action. See the
+[one-command Codex lifecycle](docs/one-command-codex-lifecycle.md).
+
+Pinned update and uninstall ordering is:
+
+```bash
+uv tool install --force --no-config --no-sources --no-build --no-python-downloads \
+  'sigma-operator-stack==<exact-version>'
+sos setup update codex PATH
+
+sos setup remove codex PATH
+uv tool uninstall sigma-operator-stack
+```
+
+Setup removal preserves repository-owned `.sigma` records.
 
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate

@@ -8,6 +8,7 @@ import re
 import shutil
 import stat
 import subprocess
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -94,15 +95,39 @@ def observe_application(
     repository_id: str,
     fingerprint_head: str,
     exclusion_policy_ref: str,
+    *,
+    overlays: Mapping[str, bytes] | None = None,
 ) -> ApplicationObservation:
-    """Observe all Git application changes without serializing content."""
+    """Observe all Git application changes, optionally projecting exact file overlays."""
     bytes_hashed = 0
     try:
         before = _candidate_snapshot(root)
         staged, worktree, untracked, ignored, unmerged = before
+        projected = _validated_overlays(overlays)
+        staged_by_path: dict[str, list[_RawChange]] = {}
+        for change in staged:
+            staged_by_path.setdefault(change.path, []).append(change)
+        worktree_by_path: dict[str, list[_RawChange]] = {}
+        for change in worktree:
+            worktree_by_path.setdefault(change.path, []).append(change)
+        projected_untracked = set(untracked)
+        projected_ignored = set(ignored)
+        for path, payload in projected.items():
+            index_payload = _index_payload(root, path)
+            if index_payload is None:
+                if path not in projected_ignored:
+                    projected_untracked.add(path)
+                worktree_by_path.pop(path, None)
+            elif payload == index_payload:
+                worktree_by_path.pop(path, None)
+                projected_untracked.discard(path)
+            else:
+                mode = _projected_git_mode(root, path)
+                worktree_by_path[path] = [_RawChange(path, mode, mode, "0" * 40, "0" * 40, "M")]
+                projected_untracked.discard(path)
         candidate_paths = {
-            change.path for change in (*staged, *worktree)
-        } | set(untracked) | set(ignored) | {item.path for item in unmerged}
+            change.path for change in staged
+        } | set(worktree_by_path) | projected_untracked | projected_ignored | {item.path for item in unmerged}
         if len(candidate_paths) > MAX_PATHS:
             raise _ObservationFailure("SOS_DIRTY_PATH_LIMIT_EXCEEDED")
         protected_by_path = {
@@ -114,16 +139,13 @@ def observe_application(
         protected: dict[str, dict[str, object]] = {}
         signatures: dict[tuple[str, int], tuple[int, ...] | None] = {}
 
-        staged_by_path: dict[str, list[_RawChange]] = {}
-        for change in staged:
-            staged_by_path.setdefault(change.path, []).append(change)
-        worktree_by_path: dict[str, list[_RawChange]] = {}
-        for change in worktree:
-            worktree_by_path.setdefault(change.path, []).append(change)
-
         submodule_paths = {
+            change.path for change in staged
+            if change.old_mode == 0o160000 or change.new_mode == 0o160000
+        } | {
             change.path
-            for change in (*staged, *worktree)
+            for changes in worktree_by_path.values()
+            for change in changes
             if change.old_mode == 0o160000 or change.new_mode == 0o160000
         } | {item.path for item in unmerged if item.mode == 0o160000}
         if len(submodule_paths) > MAX_SUBMODULES:
@@ -179,12 +201,17 @@ def observe_application(
                     protected[path] = presence
                     signatures[(path, _WORKTREE)] = signature
                 else:
-                    entry, count, signature = _filesystem_entry(root, path, _WORKTREE)
+                    if path in projected:
+                        entry, count = _overlay_entry(root, path, _WORKTREE, projected[path])
+                        signature = None
+                    else:
+                        entry, count, signature = _filesystem_entry(root, path, _WORKTREE)
                     bytes_hashed = _add_bytes(bytes_hashed, count)
                     entries.append(entry)
-                    signatures[(path, _WORKTREE)] = signature
+                    if signature is not None:
+                        signatures[(path, _WORKTREE)] = signature
 
-            if path in untracked:
+            if path in projected_untracked:
                 if sensitive is not None:
                     entry, presence, signature = _protected_entry(
                         root, path, _UNTRACKED, 0, sensitive
@@ -193,12 +220,17 @@ def observe_application(
                     protected[path] = presence
                     signatures[(path, _UNTRACKED)] = signature
                 else:
-                    entry, count, signature = _filesystem_entry(root, path, _UNTRACKED)
+                    if path in projected:
+                        entry, count = _overlay_entry(root, path, _UNTRACKED, projected[path])
+                        signature = None
+                    else:
+                        entry, count, signature = _filesystem_entry(root, path, _UNTRACKED)
                     bytes_hashed = _add_bytes(bytes_hashed, count)
                     entries.append(entry)
-                    signatures[(path, _UNTRACKED)] = signature
+                    if signature is not None:
+                        signatures[(path, _UNTRACKED)] = signature
 
-            if path in ignored and sensitive is not None:
+            if path in projected_ignored and sensitive is not None:
                 entry, presence, signature = _protected_entry(
                     root, path, _PROTECTED_IGNORED, 0, sensitive
                 )
@@ -241,6 +273,56 @@ def observe_application(
             protected_presence=(),
             reasons=(reason,),
         )
+
+
+def _validated_overlays(overlays: Mapping[str, bytes] | None) -> dict[str, bytes]:
+    if overlays is None:
+        return {}
+    if not isinstance(overlays, Mapping) or len(overlays) > MAX_PATHS:
+        raise _ObservationFailure("SOS_DIRTY_PATH_LIMIT_EXCEEDED")
+    projected: dict[str, bytes] = {}
+    total = 0
+    for path, payload in overlays.items():
+        if not isinstance(path, str) or not isinstance(payload, bytes):
+            raise _ObservationFailure("SOS_DIRTY_OVERLAY_INVALID")
+        _validate_path(path)
+        if _excluded(path) or _sensitive_class(path) is not None:
+            raise _ObservationFailure("SOS_DIRTY_OVERLAY_INVALID")
+        if len(payload) > MAX_FILE_BYTES:
+            raise _ObservationFailure("SOS_DIRTY_FILE_LIMIT_EXCEEDED")
+        total = _add_bytes(total, len(payload))
+        projected[path] = payload
+    return projected
+
+
+def _index_payload(root: Path, path: str) -> bytes | None:
+    stages = _parse_index_stages(_git(root, "ls-files", "--stage", "-z", "--", path))
+    stage = next((item for item in stages if item.path == path and item.stage == 0), None)
+    if stage is None:
+        return None
+    if stage.mode == 0o160000:
+        raise _ObservationFailure("SOS_DIRTY_OVERLAY_INVALID")
+    payload = _git(root, "show", f":{path}")
+    if len(payload) > MAX_FILE_BYTES:
+        raise _ObservationFailure("SOS_DIRTY_FILE_LIMIT_EXCEEDED")
+    return payload
+
+
+def _projected_git_mode(root: Path, path: str) -> int:
+    try:
+        observed = (root / path).lstat()
+    except FileNotFoundError:
+        return 0o100644
+    if not stat.S_ISREG(observed.st_mode):
+        raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED")
+    return _git_mode(observed.st_mode)
+
+
+def _overlay_entry(root: Path, path: str, category: int, payload: bytes) -> tuple[_Entry, int]:
+    return (
+        _Entry(path, category, _projected_git_mode(root, path), 0, _FILE_SHA256, hashlib.sha256(payload).digest()),
+        len(payload),
+    )
 
 
 def _candidate_snapshot(

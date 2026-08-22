@@ -413,6 +413,46 @@ def record_managed_file_state(root: Path, plan: dict[str, Any], state: str) -> d
     return event
 
 
+def render_applied_managed_file_batch_files(
+    batch: dict[str, Any], plans: Sequence[dict[str, Any]]
+) -> dict[str, bytes]:
+    """Render a newly applied batch for inclusion in one atomic bootstrap tree."""
+    _validate_batch(batch)
+    if len(plans) != batch["step_count"]:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_PLAN_MISMATCH", Status.STALE)
+    files: dict[str, bytes] = {}
+    files[f"managed-files/batches/{batch['batch_id']}.json"] = _canonical_json_bytes(batch)
+    for step, plan in zip(batch["steps"], plans, strict=True):
+        _validate_plan(plan)
+        _require_batch_step_plan(step, plan)
+        if plan["repository_id"] != batch["repository_id"]:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_REPOSITORY_MISMATCH", Status.STALE)
+        files[f"managed-files/plans/{plan['plan_digest'].removeprefix('sha256:')}.json"] = _canonical_json_bytes(plan)
+        predecessor: str | None = None
+        for ordinal, state in enumerate(("apply_prepared", "applied"), start=1):
+            event = {
+                "contract": _EVENT_CONTRACT,
+                "journal_id": plan["journal_id"],
+                "repository_id": plan["repository_id"],
+                "plan_digest": plan["plan_digest"],
+                "state": state,
+                "sequence_ordinal": ordinal,
+                "predecessor_event": predecessor,
+                "raw_content_serialized": False,
+                "absolute_paths_serialized": False,
+                "event_digest": "sha256:" + "0" * 64,
+            }
+            event["event_digest"] = _sealed_digest(event, "event_digest")
+            _validate_event(event)
+            files[f"managed-files/journals/{plan['journal_id']}/{ordinal:08d}.json"] = _canonical_json_bytes(event)
+            predecessor = event["event_digest"]
+    return files
+
+
+def _canonical_json_bytes(value: dict[str, Any]) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
 def require_managed_file_state(root: Path, plan: dict[str, Any], state: str) -> dict[str, Any]:
     _validate_plan(plan)
     current = replay_managed_file_journal(root, plan["journal_id"])

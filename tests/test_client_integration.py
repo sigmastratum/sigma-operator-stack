@@ -13,6 +13,7 @@ from unittest import mock
 from sos.client_integration import (
     ClientIntegrationError,
     LauncherBinding,
+    _canonical_python_executable,
     client_status,
     install_client,
     preview_client_install,
@@ -27,6 +28,18 @@ def git(root: Path, *args: str) -> None:
 
 
 class CodexClientIntegrationTests(unittest.TestCase):
+    def test_launcher_path_is_stable_across_python_symlink_spellings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            binary = prefix / "bin"
+            binary.mkdir()
+            (binary / "python3").symlink_to(sys.executable)
+            (binary / "python").symlink_to("python3")
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.object(
+                sys, "executable", str(binary / "python")
+            ):
+                self.assertEqual(_canonical_python_executable(), binary / "python3")
+
     def make_project(self, config: bytes | None = None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
@@ -89,7 +102,7 @@ class CodexClientIntegrationTests(unittest.TestCase):
         self.assertEqual(server["cwd"], os.fspath(root))
         self.assertEqual(server["args"][:4], ["-m", "sos", "mcp", "--root"])
         self.assertEqual(server["args"][4], os.fspath(root))
-        self.assertEqual(server["args"][-2:], ["--expected-package-version", "0.1.0.dev0"])
+        self.assertEqual(server["args"][-2:], ["--root", os.fspath(root)])
         self.assertEqual(
             server["enabled_tools"],
             [

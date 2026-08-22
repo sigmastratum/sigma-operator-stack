@@ -8,12 +8,15 @@ share that configuration on the same host. See the official
 
 ## First consumer setup
 
-Install SOS from a non-editable package in the Python environment that should
-serve MCP, initialize the repository, then run:
+Install SOS from a version-pinned non-editable package, then use the preferred
+one-command path:
 
 ```text
-sos setup install codex PATH
+sos init --with-codex PATH
 ```
+
+`sos setup install codex PATH` remains the separately confirmed compatibility
+path for an already initialized repository.
 
 SOS first returns a content-safe preview. Installation requires an observed
 controlling terminal and one aggregate confirmation. `--yes` suppresses the
@@ -35,8 +38,10 @@ new configuration.
 
 The managed Codex block freezes:
 
-- the absolute Python executable used by the installed package;
-- `python -m sos mcp` with an exact expected package version;
+- the stable absolute Python executable used by the installed tool environment;
+- `python -m sos mcp` with the exact project root; package version and
+  executable digest remain bound in the local setup manifest rather than in
+  mutable project config bytes;
 - the exact repository root and working directory;
 - exactly `sos_status`, `sos_preflight`, `sos_active_task`,
   `sos_next_action`, `sos_qualification_plan`, `sos_recover`,
@@ -47,7 +52,9 @@ The managed Codex block freezes:
 The qualification-plan tool executes nothing. The receipt proposal accepts no
 caller-authored receipt and fully replays the current local receipt tip. The
 update proposal is typed `not_configured` until P106 installs an exact package
-binding. The integration exposes no acceptance, regeneration, qualification execution,
+binding; afterward it compares only the local version/launcher digest and
+proposes the exact setup rebind without writing. The integration exposes no
+acceptance, regeneration, qualification execution,
 arbitrary-shell, commit, push, deploy, provider or production tool. The MCP
 tool declarations carry explicit read-only, non-destructive annotations.
 
