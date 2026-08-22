@@ -29,6 +29,21 @@ high-assurance installer claim. `uv` and package acquisition are prerequisites
 outside the SOS entrypoint. SOS itself has no network, telemetry or automatic
 update phase.
 
+The transferable wheel is built from an exact committed tree with one
+repository-owned offline entrypoint:
+
+```text
+python3 tools/build_release_wheel.py \
+  --candidate <exact-40-character-commit> \
+  --output-dir <repository-external-directory>
+```
+
+The builder archives only the exact commit, derives `SOURCE_DATE_EPOCH` from
+that commit, disables indexes, dependency resolution, build isolation and pip
+configuration, and emits the candidate, tree, epoch, filename and SHA-256 as
+canonical JSON. Two builds in independent directories must produce identical
+wheel bytes before the digest enters a transfer or qualification packet.
+
 This candidate has not been qualified on an external or second server.
 Cross-server compatibility, public availability and release readiness remain
 unclaimed until the separately gated packet is executed successfully.
