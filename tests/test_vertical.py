@@ -321,7 +321,19 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
         listed = handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, str(root))
         names = [tool["name"] for tool in listed["result"]["tools"]]
-        self.assertEqual(names, ["sos_status", "sos_doctor", "sos_recover", "sos_check"])
+        self.assertEqual(
+            names,
+            [
+                "sos_status",
+                "sos_preflight",
+                "sos_active_task",
+                "sos_next_action",
+                "sos_qualification_plan",
+                "sos_recover",
+                "sos_propose_qualification_receipt",
+                "sos_propose_update",
+            ],
+        )
         self.assertFalse(any(name in names for name in ("accept", "commit", "push", "deploy", "qualify")))
         response = handle_message(
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "sos_recover", "arguments": {}}},

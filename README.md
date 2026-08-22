@@ -106,15 +106,19 @@ replayed artifacts cannot become local green. These records are
 non-authoritative: they do not modify accepted P101 records or grant commit,
 push, deploy, release or production authority.
 
-The MCP surface is read-only and exposes the same status, doctor, recovery and
-check decisions as the CLI. It has no acceptance, regeneration, shell, commit,
-push, deploy or qualification tool. `sos setup install codex` previews and,
+The MCP surface exposes exactly eight read/proposal tools over the same CLI
+decision core: status, preflight, active task, next action, qualification plan,
+recovery, qualification-receipt proposal and update proposal. It has no
+acceptance, regeneration, shell, commit, push, deploy or qualification-
+execution tool. `sos setup install codex` previews and,
 after one observed terminal confirmation, coordinates two exact managed
 targets: a public-safe recovery block in `AGENTS.md` and one project-scoped MCP
 server in `.codex/config.toml`. Both targets share one batch projection;
 partial application is never reported installed, and recovery rolls back in
 reverse order. The launcher is bound to the exact installed package, Python
-executable, project root and four-tool allow-list. Removal restores both
+executable, project root and eight-tool allow-list. Historical four-tool
+setups are stale and change only through previewed `sos setup update codex`.
+Removal restores both
 original targets byte-for-byte when their managed digests are unchanged and
 never removes `.sigma/`. Existing `sos client ... codex` commands remain a
 bounded compatibility path and route aggregate installs through the same setup

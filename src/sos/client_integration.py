@@ -46,9 +46,20 @@ _MAX_CONFIG_BYTES = 1024 * 1024
 _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _BEGIN = "# >>> SOS managed Codex MCP (sos_codex_mcp_v1)"
 _END = "# <<< SOS managed Codex MCP (sos_codex_mcp_v1)"
-_TOOLS = ("sos_status", "sos_doctor", "sos_recover", "sos_check")
+_TOOLS = (
+    "sos_status",
+    "sos_preflight",
+    "sos_active_task",
+    "sos_next_action",
+    "sos_qualification_plan",
+    "sos_recover",
+    "sos_propose_qualification_receipt",
+    "sos_propose_update",
+)
 _JOURNAL_ID = "codex-mcp"
 _INSTRUCTION_JOURNAL_ID = "codex-instructions"
+_SETUP_JOURNAL_ID = "codex-mcp-v2"
+_SETUP_INSTRUCTION_JOURNAL_ID = "codex-instructions-v2"
 _SETUP_BATCH_ID = "codex-first"
 _SETUP_CONTRACT = "sos_codex_first_setup_manifest_v1"
 _SETUP_MANIFEST = "integrations/codex-first.json"
@@ -58,8 +69,9 @@ _INSTRUCTION_END = "<!-- <<< SOS managed project recovery (sos_codex_first_v1) -
 _INSTRUCTION_BLOCK = (
     _INSTRUCTION_BEGIN
     + "\n# SOS project recovery\n\n"
-    + "Before changing this repository, use the project-local SOS MCP tools to read "
-    + "current authority, work, boundaries, checks and recovery state. Treat stale, "
+    + "Before changing this repository, use only these enabled project-local SOS MCP tools: "
+    + ", ".join(f"`{tool}`" for tool in _TOOLS)
+    + ". Use them to read current authority, work, boundaries, checks and recovery state. Treat stale, "
     + "blocked, invalid, unsupported and not-verified results as stop conditions. "
     + "SOS tools do not grant acceptance, shell, commit, push, deploy or production authority.\n"
     + _INSTRUCTION_END
@@ -381,6 +393,7 @@ def install_codex_setup(
     confirmed: bool,
     controlling_tty_observed: bool = False,
     launcher: LauncherBinding | None = None,
+    require_current: bool = True,
 ) -> TerminalResult:
     """Install the exact instruction/config batch after one local confirmation."""
     if not confirmed:
@@ -397,7 +410,7 @@ def install_codex_setup(
         if existing is not None and existing["state"] == "remove_prepared":
             raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
         if existing is None or existing["state"] == "removed":
-            root, repository_id = _ready_setup_root(path, require_current=True)
+            root, repository_id = _ready_setup_root(path, require_current=require_current)
             legacy = _read_manifest(root)
             if legacy is not None and legacy["state"] != "removed":
                 raise ClientIntegrationError("SOS_CODEX_SETUP_LEGACY_CLIENT_PRESENT", Status.BLOCKED)
@@ -451,6 +464,94 @@ def codex_setup_status(
         return _setup_error_result(exc)
 
 
+def preview_codex_setup_update(
+    path: str = ".", *, launcher: LauncherBinding | None = None
+) -> TerminalResult:
+    """Preview replacement of one exact historical managed setup."""
+    try:
+        root = discover_repository_root(path)
+        binding = launcher or observe_installed_launcher()
+        manifest = _read_setup_manifest(root)
+        if manifest is None or manifest["state"] == "removed":
+            return preview_codex_setup(path, launcher=binding)
+        if manifest["state"] != "installed":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
+        _verify_setup(root, manifest, binding, expected_state="integrated", require_current_contract=False)
+        try:
+            _verify_setup(root, manifest, binding, expected_state="integrated")
+        except ClientIntegrationError as exc:
+            if exc.reason != "SOS_CODEX_SETUP_CONTRACT_STALE":
+                raise
+        else:
+            return _setup_result(Status.SUCCESS, "SOS_CODEX_SETUP_ALREADY_CURRENT", manifest)
+        details = _setup_details(manifest, project_managed_file_batch(root, manifest["batch"]))
+        details.update(
+            {
+                "update_state": "previewed",
+                "one_confirmation": True,
+                "rollback_before_reinstall": True,
+                "enabled_tools": list(_TOOLS),
+            }
+        )
+        return TerminalResult(
+            _RESULT_CONTRACT,
+            Status.OWNER_REQUIRED,
+            ("SOS_CODEX_SETUP_UPDATE_CONFIRMATION_REQUIRED",),
+            details,
+        )
+    except (ClientIntegrationError, ManagedFileBatchError, ManagedFileError, RepositoryError, WorkspaceError, OSError) as exc:
+        return _setup_error_result(exc)
+
+
+def update_codex_setup(
+    path: str = ".",
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+    launcher: LauncherBinding | None = None,
+) -> TerminalResult:
+    """Replace an exact stale setup through one previewed owner action."""
+    if not confirmed:
+        return preview_codex_setup_update(path, launcher=launcher)
+    if not controlling_tty_observed:
+        return _setup_result(Status.OWNER_REQUIRED, "SOS_CODEX_SETUP_TTY_REQUIRED")
+    binding = launcher or observe_installed_launcher()
+    preview = preview_codex_setup_update(path, launcher=binding)
+    if preview.status == Status.SUCCESS:
+        return preview
+    if preview.status != Status.OWNER_REQUIRED:
+        return preview
+    removed = remove_codex_setup(
+        path,
+        confirmed=True,
+        controlling_tty_observed=True,
+        launcher=binding,
+        require_current_contract=False,
+    )
+    if removed.status != Status.SUCCESS:
+        return removed
+    installed = install_codex_setup(
+        path,
+        confirmed=True,
+        controlling_tty_observed=True,
+        launcher=binding,
+        require_current=False,
+    )
+    if installed.status != Status.SUCCESS:
+        details = dict(installed.details)
+        details["update_state"] = "rolled_back_not_installed"
+        details["update_failure_reasons"] = list(installed.reasons)
+        return TerminalResult(
+            _RESULT_CONTRACT,
+            Status.BLOCKED,
+            ("SOS_CODEX_SETUP_UPDATE_INCOMPLETE",),
+            details,
+        )
+    details = dict(installed.details)
+    details["update_state"] = "updated"
+    return TerminalResult(_RESULT_CONTRACT, Status.SUCCESS, ("SOS_CODEX_SETUP_UPDATED",), details)
+
+
 def recover_codex_setup(
     path: str = ".", *, launcher: LauncherBinding | None = None
 ) -> TerminalResult:
@@ -496,6 +597,7 @@ def remove_codex_setup(
     confirmed: bool,
     controlling_tty_observed: bool = False,
     launcher: LauncherBinding | None = None,
+    require_current_contract: bool = True,
 ) -> TerminalResult:
     """Remove both exact managed targets while preserving the control plane."""
     if not confirmed:
@@ -525,7 +627,13 @@ def remove_codex_setup(
         binding = launcher or observe_installed_launcher()
         _verify_setup_binding(manifest, binding)
         if manifest["state"] == "installed":
-            _verify_setup(root, manifest, binding, expected_state="integrated")
+            _verify_setup(
+                root,
+                manifest,
+                binding,
+                expected_state="integrated",
+                require_current_contract=require_current_contract,
+            )
             removing = _with_setup_state(manifest, "remove_prepared")
             _write_setup_manifest(root, removing)
         elif manifest["state"] == "remove_prepared":
@@ -593,7 +701,7 @@ def _prepare_setup(root: Path, repository_id: str, binding: LauncherBinding) -> 
     config_updated = config_original + config_addition
     _validate_toml(config_updated)
     instruction_plan = _build_setup_plan(
-        journal_id=_INSTRUCTION_JOURNAL_ID,
+        journal_id=_SETUP_INSTRUCTION_JOURNAL_ID,
         repository_id=repository_id,
         target=_INSTRUCTION_TARGET,
         original=instruction_original,
@@ -602,7 +710,7 @@ def _prepare_setup(root: Path, repository_id: str, binding: LauncherBinding) -> 
         updated=instruction_updated,
     )
     config_plan = _build_setup_plan(
-        journal_id=_JOURNAL_ID,
+        journal_id=_SETUP_JOURNAL_ID,
         repository_id=repository_id,
         target=_TARGET,
         original=config_original,
@@ -784,7 +892,12 @@ def _read_setup_target_mode(root: Path, target: str, existed: bool, default: int
 
 
 def _verify_setup(
-    root: Path, manifest: dict[str, Any], binding: LauncherBinding, *, expected_state: str
+    root: Path,
+    manifest: dict[str, Any],
+    binding: LauncherBinding,
+    *,
+    expected_state: str,
+    require_current_contract: bool = True,
 ) -> None:
     _verify_setup_binding(manifest, binding)
     projection = project_managed_file_batch(root, manifest["batch"])
@@ -794,6 +907,18 @@ def _verify_setup(
     expected_probe = "after" if expected_state == "integrated" else "before"
     if any(probe(plan) != expected_probe for plan in manifest["plans"]):
         raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+    if require_current_contract and expected_state == "integrated":
+        for plan in manifest["plans"]:
+            current, existed = _read_setup_target(root, plan["target"])
+            if not existed:
+                raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+            original = current[: plan["before_byte_count"]]
+            if plan["target"] == _INSTRUCTION_TARGET:
+                expected = original + _render_instruction_addition(original)
+            else:
+                expected = original + _render_addition(root, binding, original)
+            if current != expected:
+                raise ClientIntegrationError("SOS_CODEX_SETUP_CONTRACT_STALE", Status.STALE)
 
 
 def _verify_setup_binding(manifest: dict[str, Any], binding: LauncherBinding) -> None:
@@ -1009,7 +1134,11 @@ def _validate_setup_manifest(value: object) -> None:
         raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID") from exc
     if expected != batch:
         raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
-    if [plan.get("journal_id") for plan in plans] != [_INSTRUCTION_JOURNAL_ID, _JOURNAL_ID]:
+    journal_ids = [plan.get("journal_id") for plan in plans]
+    if journal_ids not in (
+        [_INSTRUCTION_JOURNAL_ID, _JOURNAL_ID],
+        [_SETUP_INSTRUCTION_JOURNAL_ID, _SETUP_JOURNAL_ID],
+    ):
         raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
     if [plan.get("target") for plan in plans] != [_INSTRUCTION_TARGET, _TARGET]:
         raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")

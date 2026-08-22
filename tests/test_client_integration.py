@@ -90,7 +90,19 @@ class CodexClientIntegrationTests(unittest.TestCase):
         self.assertEqual(server["args"][:4], ["-m", "sos", "mcp", "--root"])
         self.assertEqual(server["args"][4], os.fspath(root))
         self.assertEqual(server["args"][-2:], ["--expected-package-version", "0.1.0.dev0"])
-        self.assertEqual(server["enabled_tools"], ["sos_status", "sos_doctor", "sos_recover", "sos_check"])
+        self.assertEqual(
+            server["enabled_tools"],
+            [
+                "sos_status",
+                "sos_preflight",
+                "sos_active_task",
+                "sos_next_action",
+                "sos_qualification_plan",
+                "sos_recover",
+                "sos_propose_qualification_receipt",
+                "sos_propose_update",
+            ],
+        )
         self.assertEqual(server["default_tools_approval_mode"], "writes")
         self.assertNotIn("accept", json.dumps(server))
         self.assertNotIn("qualify", json.dumps(server))

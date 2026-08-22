@@ -38,11 +38,16 @@ The managed Codex block freezes:
 - the absolute Python executable used by the installed package;
 - `python -m sos mcp` with an exact expected package version;
 - the exact repository root and working directory;
-- only `sos_status`, `sos_doctor`, `sos_recover` and `sos_check`;
+- exactly `sos_status`, `sos_preflight`, `sos_active_task`,
+  `sos_next_action`, `sos_qualification_plan`, `sos_recover`,
+  `sos_propose_qualification_receipt` and `sos_propose_update`;
 - `default_tools_approval_mode = "writes"`, so a future tool not marked
   read-only does not inherit silent approval.
 
-The integration exposes no acceptance, regeneration, qualification,
+The qualification-plan tool executes nothing. The receipt proposal accepts no
+caller-authored receipt and fully replays the current local receipt tip. The
+update proposal is typed `not_configured` until P106 installs an exact package
+binding. The integration exposes no acceptance, regeneration, qualification execution,
 arbitrary-shell, commit, push, deploy, provider or production tool. The MCP
 tool declarations carry explicit read-only, non-destructive annotations.
 
@@ -58,6 +63,7 @@ is deliberate; consumer wiring is never hidden from source currentness.
 ```text
 sos setup status codex PATH
 sos setup recover codex PATH
+sos setup update codex PATH
 sos setup remove codex PATH
 ```
 
@@ -69,6 +75,11 @@ projection. Each target records `apply_prepared` before mutation and `applied`
 after it. Only an `integrated` two-target projection may finalize as installed.
 Status fails closed on repository, package, launcher, manifest, journal, batch
 or target drift.
+
+A historical four-tool setup is typed stale. `setup update` first previews the
+exact replacement, takes one confirmation, rolls back the complete historical
+batch and applies the current eight-tool batch. Failure never overwrites
+foreign bytes and never becomes installed.
 
 Removal requires a controlling terminal and one aggregate confirmation. It
 restores the exact original targets in reverse order only when the complete
@@ -87,6 +98,7 @@ lifecycle.
 
 ## Current boundary
 
-This is the first Codex consumer slice, not a broad compatibility claim.
-Claude, other clients, update semantics and cross-server qualification remain
-separate gates.
+This is the Codex-only Community v0.1 client scope, not a broad compatibility
+claim. Claude and other clients are future compatibility increments.
+Cross-server qualification remains a separate pre-release gate and has not
+been performed for this candidate.

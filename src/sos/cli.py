@@ -8,6 +8,7 @@ import sys
 from collections.abc import Sequence
 
 from . import __version__
+from .agent_api import project_tool
 from .checks import discover_checks
 from .client_integration import (
     client_status,
@@ -16,9 +17,11 @@ from .client_integration import (
     install_codex_setup,
     preview_client_install,
     preview_codex_setup,
+    preview_codex_setup_update,
     recover_codex_setup,
     remove_client,
     remove_codex_setup,
+    update_codex_setup,
 )
 from .mcp import serve_stdio
 from .qualification_contracts import QualificationContractError
@@ -41,10 +44,25 @@ from .workspace import (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sos")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("status", "validate", "check", "doctor", "recover"):
+    for command in (
+        "status",
+        "validate",
+        "check",
+        "doctor",
+        "preflight",
+        "active-task",
+        "next-action",
+        "recover",
+        "propose-qualification-receipt",
+        "propose-update",
+    ):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
         subparser.add_argument("--json", action="store_true", dest="as_json")
+    qualification_plan = subparsers.add_parser("qualification-plan")
+    qualification_plan.add_argument("path", nargs="?", default=".")
+    qualification_plan.add_argument("--family", dest="family_id")
+    qualification_plan.add_argument("--json", action="store_true", dest="as_json")
     for command in ("init", "regenerate"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
@@ -76,12 +94,12 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--yes", action="store_true")
     setup = subparsers.add_parser("setup")
     setup_commands = setup.add_subparsers(dest="setup_command", required=True)
-    for operation in ("install", "status", "recover", "remove"):
+    for operation in ("install", "status", "recover", "update", "remove"):
         command = setup_commands.add_parser(operation)
         command.add_argument("client", choices=("codex",))
         command.add_argument("path", nargs="?", default=".")
         command.add_argument("--json", action="store_true", dest="as_json")
-        if operation in {"install", "remove"}:
+        if operation in {"install", "update", "remove"}:
             command.add_argument("--yes", action="store_true")
     return parser
 
@@ -121,6 +139,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Install the SOS project-recovery instructions and Codex MCP adapter?"
             )
             result = install_codex_setup(
+                args.path,
+                confirmed=confirmed,
+                controlling_tty_observed=sys.stdin.isatty(),
+            )
+        elif args.setup_command == "update":
+            if not args.yes:
+                preview = preview_codex_setup_update(args.path)
+                if preview.status != "owner_required":
+                    _print(preview.to_dict(), args.as_json)
+                    return 0 if preview.status == "success" else 2
+                _print(preview.to_dict(), args.as_json)
+            confirmed = args.yes or _ask_confirmation(
+                "Update the exact SOS-managed Codex integration?"
+            )
+            result = update_codex_setup(
                 args.path,
                 confirmed=confirmed,
                 controlling_tty_observed=sys.stdin.isatty(),
@@ -253,8 +286,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = doctor_workspace(args.path)
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
-    else:
+    elif args.command == "recover":
         result = recover_workspace(args.path)
+        payload = result.to_dict()
+        exit_code = 0 if result.status == "success" else 2
+    else:
+        tool_name = {
+            "preflight": "sos_preflight",
+            "active-task": "sos_active_task",
+            "next-action": "sos_next_action",
+            "qualification-plan": "sos_qualification_plan",
+            "propose-qualification-receipt": "sos_propose_qualification_receipt",
+            "propose-update": "sos_propose_update",
+        }[args.command]
+        arguments = {"family_id": args.family_id} if args.command == "qualification-plan" and args.family_id else {}
+        result = project_tool(args.path, tool_name, arguments)
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     _print(payload, args.as_json)
