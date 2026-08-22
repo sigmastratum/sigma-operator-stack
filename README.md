@@ -93,6 +93,9 @@ other languages, runners, architectures or kernels. See
 [Qualification isolation](docs/qualification-isolation.md) for the exact
 supported boundary and excluded claims.
 
+This candidate has not been qualified on an external or second server. Its
+local qualification results do not establish cross-server compatibility.
+
 Before execution, `sos qualify` freezes a closed source-bound plan containing
 the exact registered family, fixed argv digest, isolation profile and limits.
 One explicit confirmation creates an expiring, one-use admission with a fresh

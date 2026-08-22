@@ -109,6 +109,9 @@ v0.1 Linux x86_64 vertical. Its support contract is intentionally narrow:
   executor/result digests and fail-closed stale, foreign, forged and replayed
   receipt handling.
 
+This candidate has not been qualified on an external or second server. Its
+local qualification results do not establish cross-server compatibility.
+
 Within that boundary, the immutable snapshot and inaccessible canonical
 repository are the supported source-isolation design; a literal read-only bind
 mount is not required. Total writable quota enforcement is parent-observed
