@@ -100,7 +100,7 @@ class RepositoryTests(unittest.TestCase):
     def test_cli_status_and_validate(self) -> None:
         temporary, root = self.make_repo()
         self.addCleanup(temporary.cleanup)
-        self.assertEqual(main(["status", str(root), "--json"]), 0)
+        self.assertEqual(main(["status", str(root), "--json"]), 2)
         self.assertEqual(main(["validate", str(root), "--json"]), 0)
 
     def test_disposable_bootstrap_requires_marker_and_flag(self) -> None:

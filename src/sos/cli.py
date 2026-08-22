@@ -25,7 +25,7 @@ from .client_integration import (
 )
 from .mcp import serve_stdio
 from .qualification_contracts import QualificationContractError
-from .repository import RepositoryError, inspect_repository
+from .repository import RepositoryError
 from .validation import validate_repository
 from .workspace import (
     WorkspaceError,
@@ -203,17 +203,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(result.to_dict(), args.as_json)
         return 0 if result.status == "success" else 2
     if args.command == "status":
-        try:
-            inspection = inspect_repository(args.path)
-            if inspection.control_plane_state == "present_unverified":
-                payload = workspace_status(args.path).to_dict()
-                exit_code = 0 if payload["status"] == "success" else 2
-            else:
-                payload = inspection.to_dict()
-                exit_code = 0
-        except RepositoryError as exc:
-            payload = {"contract": "sos_repository_inspection_v1", "status": "invalid", "reasons": [exc.reason]}
-            exit_code = 2
+        result = project_tool(args.path, "sos_status")
+        payload = result.to_dict()
+        exit_code = 0 if result.status == "success" else 2
     elif args.command == "validate":
         result = validate_repository(args.path)
         payload = result.to_dict()

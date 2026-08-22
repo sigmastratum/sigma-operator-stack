@@ -84,6 +84,25 @@ class P105AgentContractTests(unittest.TestCase):
                 self.assertEqual(cli_payload, response["result"]["structuredContent"])
                 self.assertEqual(cli_payload, project_tool(str(root), tool_name).to_dict())
 
+    def test_uninitialized_status_has_exact_cli_mcp_parity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git(root, "init", "-q")
+            git(root, "config", "user.name", "Synthetic Operator")
+            git(root, "config", "user.email", "synthetic@example.invalid")
+            (root / "README.md").write_text("Synthetic project.\n", encoding="utf-8")
+            git(root, "add", ".")
+            git(root, "commit", "-qm", "synthetic project")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                exit_code = main(["status", str(root), "--json"])
+            cli_payload = json.loads(output.getvalue())
+            mcp_payload = self.call(root, "sos_status", {})["result"]["structuredContent"]
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(cli_payload, mcp_payload)
+            self.assertEqual(cli_payload["status"], "invalid")
+            self.assertEqual(cli_payload["reasons"], ["SOS_CONTROL_PLANE_INTEGRITY_INVALID"])
+
     def test_qualification_plan_is_registered_and_never_executes(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
