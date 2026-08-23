@@ -7,6 +7,7 @@ import sys
 from collections.abc import Iterable
 from typing import Any, TextIO
 
+from . import __version__
 from .agent_api import project_tool
 from .repository import RepositoryError
 from .workspace import WorkspaceError
@@ -84,7 +85,7 @@ def handle_message(message: dict[str, Any], root: str) -> dict[str, Any] | None:
             {
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "sigma-operator-stack", "version": "0.1.0.dev0"},
+                "serverInfo": {"name": "sigma-operator-stack", "version": __version__},
                 "instructions": "Read-only project authority and recovery. No acceptance or action tools are exposed.",
             },
         )

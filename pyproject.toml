@@ -4,19 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sigma-operator-stack"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Local-first repository authority and recovery tools for coding agents"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
+license = {text = "Apache-2.0"}
 dependencies = ["jsonschema>=4.10,<5"]
 authors = [{name = "Sigma Stratum"}]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
+
+[project.urls]
+Documentation = "https://github.com/sigmastratum/sigma-operator-stack#readme"
+Issues = "https://github.com/sigmastratum/sigma-operator-stack/issues"
+Repository = "https://github.com/sigmastratum/sigma-operator-stack"
 
 [project.scripts]
 sos = "sos.cli:main"

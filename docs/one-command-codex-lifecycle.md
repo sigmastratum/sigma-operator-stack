@@ -44,6 +44,7 @@ configuration, and emits the candidate, tree, epoch, filename and SHA-256 as
 canonical JSON. Two builds in independent directories must produce identical
 wheel bytes before the digest enters a transfer or qualification packet.
 
-This candidate has not been qualified on an external or second server.
-Cross-server compatibility, public availability and release readiness remain
-unclaimed until the separately gated packet is executed successfully.
+Cross-server qualification is specific to the exact release artifact. Local
+green alone does not establish broad compatibility. Release evidence binds the
+candidate, wheel digest and exact observed environment; publication and release
+readiness remain separately gated.

@@ -50,6 +50,7 @@ from .workspace import (
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sos")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in (
         "status",

@@ -4,9 +4,8 @@ Sigma Operator Stack (`sos`) is a local-first operating layer for recovering
 repository authority, current work, boundaries and required checks across
 coding-agent sessions.
 
-The repository is pre-alpha and currently private while the public-safe source
-boundary is qualified. The current local candidate composes one narrow,
-end-to-end Linux/Git/Python vertical:
+The `0.1.0a1` public-alpha release candidate composes one narrow, end-to-end
+Linux/Git/Python vertical:
 
 ```text
 sos init [PATH]
@@ -43,11 +42,11 @@ returns `SOS_ACCEPTANCE_TTY_REQUIRED` and writes nothing. This is intentionally
 weak local evidence, not authentication, and SOS does not claim that an agent
 cannot invoke the CLI.
 
-Private-alpha first use is version-pinned and requires a preinstalled `uv`:
+Alpha first use is version-pinned and requires a preinstalled `uv`:
 
 ```bash
 uv tool install --no-config --no-sources --no-build --no-python-downloads \
-  'sigma-operator-stack==0.1.0.dev0'
+  'sigma-operator-stack==0.1.0a1'
 sos init --with-codex PATH
 ```
 
@@ -107,8 +106,9 @@ other languages, runners, architectures or kernels. See
 [Qualification isolation](docs/qualification-isolation.md) for the exact
 supported boundary and excluded claims.
 
-This candidate has not been qualified on an external or second server. Its
-local qualification results do not establish cross-server compatibility.
+Cross-server qualification is specific to the exact release artifact. Local
+green does not establish broad compatibility; each release records the exact
+candidate, artifact digest and observed environment in its release evidence.
 
 Before execution, `sos qualify` freezes a closed source-bound plan containing
 the exact registered family, fixed argv digest, isolation profile and limits.
@@ -158,6 +158,18 @@ uv tool uninstall sigma-operator-stack
 
 Setup removal preserves repository-owned `.sigma` records.
 
+## Supported alpha environment
+
+The supported `0.1.0a1` boundary is Linux x86_64 with Landlock ABI 3 or newer
+and the required seccomp support, Python 3.11 or 3.12, a conventional Git
+repository, a preinstalled `uv`, and the Codex-first eight-tool MCP surface.
+Release evidence records the exact observed Linux, Python, Git, `uv` and Codex
+versions. An observed version is qualification evidence for that artifact, not
+a promise of compatibility with every future client or tool release.
+
+The install command above is a version-pinned convenience path. It is not a
+signed or high-assurance installer claim.
+
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate
 distribution concern.
@@ -169,4 +181,5 @@ schemas cover the qualification plan, one-run command admission, execution
 result and source-bound receipt. Every packaged schema has a frozen SHA-256
 value checked at runtime before validation.
 
-See `PUBLIC_REPOSITORY_BOUNDARY.md` before contributing.
+Licensed under the [Apache License 2.0](LICENSE). See
+`PUBLIC_REPOSITORY_BOUNDARY.md` before contributing.
