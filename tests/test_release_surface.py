@@ -18,6 +18,14 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_workflows.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_release_bundle_retains_checked_first_run_assets(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        finalizer = (root / "tools" / "finalize_release_bundle.py").read_text(encoding="utf-8")
+        release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        for name in ("START-HERE.md", "start-sos-alpha"):
+            self.assertIn(name, finalizer)
+            self.assertIn(name, release)
+
     def run_tool(self, root: Path, name: str) -> dict[str, object]:
         completed = subprocess.run(
             [sys.executable, str(root / "tools" / name), "--repository", str(root)],

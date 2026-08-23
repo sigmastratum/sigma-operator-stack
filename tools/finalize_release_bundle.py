@@ -14,6 +14,10 @@ from pathlib import Path
 
 
 VERSION = "0.1.0a1"
+ONBOARDING_FILES = (
+    ("tools/start_sos_alpha.py", "start-sos-alpha", "text/x-python", 0o755),
+    ("docs/alpha-quickstart.md", "START-HERE.md", "text/markdown", 0o644),
+)
 
 
 def _sha256(path: Path) -> str:
@@ -32,6 +36,23 @@ def _git(repository: Path, *arguments: str) -> str:
         stderr=subprocess.PIPE,
         text=True,
     ).stdout.strip()
+
+
+def _git_bytes(repository: Path, candidate: str, path: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", os.fspath(repository), "show", f"{candidate}:{path}"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+
+
+def _write_exact(path: Path, data: bytes, mode: int) -> None:
+    if path.exists() and (path.is_symlink() or not path.is_file() or path.read_bytes() != data):
+        raise FileExistsError(f"{path.name} exists with different bytes or file type")
+    if not path.exists():
+        path.write_bytes(data)
+    path.chmod(mode)
 
 
 def _verify_wheel(wheel: Path) -> None:
@@ -78,9 +99,20 @@ def finalize(repository: Path, candidate: str, wheel: Path, sbom: Path, output: 
     if properties.get("sos:candidate") != candidate or properties.get("sos:wheel:sha256") != _sha256(wheel):
         raise ValueError("SBOM binding does not match candidate and wheel")
 
+    output.mkdir(parents=True, exist_ok=True)
+    onboarding: list[dict[str, str]] = []
+    for source, filename, media_type, mode in ONBOARDING_FILES:
+        data = _git_bytes(repository, candidate, source)
+        if not data or len(data) > 1024 * 1024 or b"\0" in data:
+            raise ValueError(f"onboarding source is invalid: {source}")
+        target = output / filename
+        _write_exact(target, data, mode)
+        onboarding.append({"filename": filename, "media_type": media_type, "sha256": _sha256(target)})
+
     artifacts = [
         {"filename": wheel.name, "media_type": "application/zip", "sha256": _sha256(wheel)},
         {"filename": sbom.name, "media_type": "application/vnd.cyclonedx+json", "sha256": _sha256(sbom)},
+        *onboarding,
     ]
     manifest = {
         "artifacts": artifacts,
@@ -90,7 +122,6 @@ def finalize(repository: Path, candidate: str, wheel: Path, sbom: Path, output: 
         "tree": tree,
         "version": VERSION,
     }
-    output.mkdir(parents=True, exist_ok=True)
     manifest_path = output / "release-manifest.json"
     encoded = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     if manifest_path.exists() and manifest_path.read_bytes() != encoded:

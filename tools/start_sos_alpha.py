@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""Content-safe, checksum-bound first run for the SOS alpha bundle."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+
+VERSION = "0.1.0a1"
+WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"
+SBOM = f"sigma-operator-stack-{VERSION}.cdx.json"
+EXPECTED_FILES = frozenset(
+    {
+        "START-HERE.md",
+        "release-manifest.json",
+        SBOM,
+        "start-sos-alpha",
+        WHEEL,
+    }
+)
+MAX_FILE_BYTES = {
+    "START-HERE.md": 256 * 1024,
+    "release-manifest.json": 1024 * 1024,
+    SBOM: 16 * 1024 * 1024,
+    "start-sos-alpha": 1024 * 1024,
+    WHEEL: 64 * 1024 * 1024,
+}
+SHA256 = re.compile(r"[0-9a-f]{64}")
+GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
+
+
+@dataclass(frozen=True)
+class StartError(Exception):
+    code: str
+    problem: str
+    correction: str
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _fail(code: str, problem: str, correction: str) -> StartError:
+    return StartError(code, problem, correction)
+
+
+def validate_platform(
+    system: str = platform.system(),
+    machine: str = platform.machine(),
+    python_version: tuple[int, int] = sys.version_info[:2],
+) -> None:
+    if system != "Linux":
+        raise _fail(
+            "SOS_ALPHA_LINUX_REQUIRED",
+            f"This alpha supports Linux only; detected {system or 'unknown'}.",
+            "Use a supported Linux x86_64 machine and run the launcher again.",
+        )
+    if machine != "x86_64":
+        raise _fail(
+            "SOS_ALPHA_ARCHITECTURE_UNSUPPORTED",
+            f"This alpha supports x86_64 only; detected {machine or 'unknown'}.",
+            "Use a Linux x86_64 machine and run the launcher again.",
+        )
+    if python_version not in {(3, 11), (3, 12)}:
+        observed = ".".join(str(item) for item in python_version)
+        raise _fail(
+            "SOS_ALPHA_PYTHON_UNSUPPORTED",
+            f"This alpha requires Python 3.11 or 3.12; detected {observed}.",
+            "Install Python 3.11 or 3.12, then run the launcher with that python3.",
+        )
+
+
+def _required_command(name: str, which: Callable[[str], str | None]) -> str:
+    value = which(name)
+    if value:
+        return value
+    raise _fail(
+        f"SOS_ALPHA_{name.upper()}_MISSING",
+        f"Required command '{name}' was not found.",
+        f"Install {name} from its official distribution, then run the launcher again.",
+    )
+
+
+def find_codex(which: Callable[[str], str | None] = shutil.which, home: Path | None = None) -> Path:
+    direct = which("codex")
+    if direct:
+        return Path(direct)
+    root = (home or Path.home()).resolve()
+    patterns = (
+        ".vscode-server/extensions/openai.chatgpt-*/bin/*/codex",
+        ".vscode/extensions/openai.chatgpt-*/bin/*/codex",
+    )
+    for pattern_value in patterns:
+        for candidate in sorted(root.glob(pattern_value)):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate
+    raise _fail(
+        "SOS_ALPHA_CODEX_MISSING",
+        "Codex was not found in PATH or in a supported VS Code extension location.",
+        "Install or enable Codex for this Linux user, then run the launcher again.",
+    )
+
+
+def _read_checksums(path: Path) -> dict[str, str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise _fail(
+            "SOS_ALPHA_CHECKSUMS_MISSING",
+            "SHA256SUMS is missing or unreadable.",
+            "Download or copy the complete alpha bundle again.",
+        ) from error
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split("  ", 1)
+        if len(parts) != 2 or not SHA256.fullmatch(parts[0]) or "/" in parts[1] or parts[1] in values:
+            raise _fail(
+                "SOS_ALPHA_CHECKSUMS_INVALID",
+                "SHA256SUMS is not in the exact supported format.",
+                "Download or copy the complete alpha bundle again.",
+            )
+        values[parts[1]] = parts[0]
+    if set(values) != EXPECTED_FILES:
+        raise _fail(
+            "SOS_ALPHA_BUNDLE_INCOMPLETE",
+            "The bundle file inventory does not match this alpha.",
+            "Download or copy the complete alpha bundle again.",
+        )
+    return values
+
+
+def verify_bundle(bundle: Path) -> dict[str, object]:
+    try:
+        bundle = bundle.resolve(strict=True)
+    except OSError as error:
+        raise _fail(
+            "SOS_ALPHA_BUNDLE_MISSING",
+            "The alpha bundle directory is missing or unreadable.",
+            "Download or copy the complete alpha bundle again.",
+        ) from error
+    checksums = _read_checksums(bundle / "SHA256SUMS")
+    for filename in sorted(EXPECTED_FILES):
+        path = bundle / filename
+        try:
+            invalid_type = path.is_symlink() or not path.is_file()
+            too_large = not invalid_type and path.stat().st_size > MAX_FILE_BYTES[filename]
+        except OSError as error:
+            raise _fail(
+                "SOS_ALPHA_BUNDLE_FILE_INVALID",
+                f"Bundle file '{filename}' is unreadable.",
+                "Download or copy the complete alpha bundle again.",
+            ) from error
+        if invalid_type:
+            raise _fail(
+                "SOS_ALPHA_BUNDLE_FILE_INVALID",
+                f"Bundle file '{filename}' is missing or has an unsupported file type.",
+                "Download or copy the complete alpha bundle again.",
+            )
+        if too_large:
+            raise _fail(
+                "SOS_ALPHA_BUNDLE_FILE_TOO_LARGE",
+                f"Bundle file '{filename}' exceeds its safety limit.",
+                "Download or copy the complete alpha bundle again.",
+            )
+        try:
+            observed_digest = _sha256(path)
+        except OSError as error:
+            raise _fail(
+                "SOS_ALPHA_BUNDLE_FILE_INVALID",
+                f"Bundle file '{filename}' is unreadable.",
+                "Download or copy the complete alpha bundle again.",
+            ) from error
+        if observed_digest != checksums[filename]:
+            raise _fail(
+                "SOS_ALPHA_CHECKSUM_MISMATCH",
+                f"Checksum verification failed for '{filename}'.",
+                "Do not continue; download or copy the complete alpha bundle again.",
+            )
+    try:
+        manifest = json.loads((bundle / "release-manifest.json").read_text(encoding="utf-8"))
+        if (
+            not isinstance(manifest, dict)
+            or not isinstance(manifest.get("artifacts"), list)
+            or not isinstance(manifest.get("build"), dict)
+        ):
+            raise TypeError("manifest shape")
+        artifact_items = manifest["artifacts"]
+        artifacts = {item["filename"]: item for item in artifact_items}
+    except (KeyError, OSError, TypeError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        raise _fail(
+            "SOS_ALPHA_MANIFEST_INVALID",
+            "The release manifest is malformed.",
+            "Download or copy the complete alpha bundle again.",
+        ) from error
+    expected_artifacts = EXPECTED_FILES.difference({"release-manifest.json"})
+    expected_media = {
+        "START-HERE.md": "text/markdown",
+        SBOM: "application/vnd.cyclonedx+json",
+        "start-sos-alpha": "text/x-python",
+        WHEEL: "application/zip",
+    }
+    if (
+        manifest.get("contract") != "sos_public_release_manifest_v1"
+        or manifest.get("version") != VERSION
+        or not GIT_OBJECT.fullmatch(str(manifest.get("candidate", "")))
+        or not GIT_OBJECT.fullmatch(str(manifest.get("tree", "")))
+        or manifest.get("build", {}).get("network_allowed") is not False
+        or len(artifact_items) != len(expected_artifacts)
+        or set(artifacts) != expected_artifacts
+        or any(
+            artifacts[name].get("sha256") != checksums[name]
+            or artifacts[name].get("media_type") != expected_media[name]
+            or set(artifacts[name]) != {"filename", "media_type", "sha256"}
+            for name in expected_artifacts
+        )
+    ):
+        raise _fail(
+            "SOS_ALPHA_MANIFEST_BINDING_INVALID",
+            "The bundle manifest is not bound to the exact checked artifacts.",
+            "Do not continue; download or copy the complete alpha bundle again.",
+        )
+    return manifest
+
+
+def discover_project_root(
+    project: Path,
+    git: str,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> Path:
+    try:
+        requested = project.resolve(strict=True)
+    except OSError as error:
+        raise _fail(
+            "SOS_ALPHA_PROJECT_MISSING",
+            "The selected project directory does not exist.",
+            "Open a terminal in an existing Git project, then run the launcher again.",
+        ) from error
+    if not requested.is_dir():
+        raise _fail(
+            "SOS_ALPHA_PROJECT_INVALID",
+            "The selected project path is not a directory.",
+            "Open a terminal in an existing Git project, then run the launcher again.",
+        )
+    completed = runner(
+        [git, "-C", os.fspath(requested), "rev-parse", "--show-toplevel"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        raise _fail(
+            "SOS_ALPHA_GIT_REPOSITORY_REQUIRED",
+            "The selected directory is not inside a Git repository.",
+            "Open a terminal in the root of an existing Git project, then run the launcher again.",
+        )
+    try:
+        root = Path(completed.stdout.strip()).resolve(strict=True)
+        requested.relative_to(root)
+    except (OSError, ValueError) as error:
+        raise _fail(
+            "SOS_ALPHA_GIT_ROOT_INVALID",
+            "Git returned a project root that does not contain the selected directory.",
+            "Check the repository and run the launcher from its root.",
+        ) from error
+    return root
+
+
+def run_onboarding(
+    bundle: Path,
+    project: Path,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> Path:
+    validate_platform()
+    git = _required_command("git", which)
+    uv = _required_command("uv", which)
+    find_codex(which=which)
+    manifest = verify_bundle(bundle)
+    root = discover_project_root(project, git, runner)
+    print("SOS alpha checks passed.")
+    print(f"Release: {manifest['version']} ({str(manifest['candidate'])[:12]})")
+    print(f"Project: {root}")
+    print("Installing the exact checked SOS wheel. Project files are not changed yet.")
+    installed = runner(
+        [
+            uv,
+            "tool",
+            "install",
+            "--no-config",
+            "--no-sources",
+            "--no-build",
+            "--no-python-downloads",
+            os.fspath(bundle / WHEEL),
+        ],
+        check=False,
+    )
+    if installed.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_INSTALL_FAILED",
+            "uv could not install the exact SOS wheel.",
+            "Read the uv error above, correct it, then run the launcher again.",
+        )
+    tool_bin = runner(
+        [uv, "tool", "dir", "--bin"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if tool_bin.returncode != 0 or not tool_bin.stdout.strip():
+        raise _fail(
+            "SOS_ALPHA_TOOL_BINDING_MISSING",
+            "uv installed the package but did not report its tool directory.",
+            "Run 'uv tool dir --bin', correct the uv setup, then run the launcher again.",
+        )
+    sos = Path(tool_bin.stdout.strip()) / "sos"
+    if not sos.is_file() or not os.access(sos, os.X_OK):
+        raise _fail(
+            "SOS_ALPHA_TOOL_BINDING_MISSING",
+            "The installed SOS command was not found in the uv tool directory.",
+            "Check 'uv tool dir --bin', then run the launcher again.",
+        )
+    print("\nSOS will now show one complete project plan and ask once before changing files.")
+    initialized = runner([os.fspath(sos), "init", "--with-codex", os.fspath(root)], check=False)
+    if initialized.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_INIT_FAILED",
+            "SOS did not finish project initialization.",
+            "Read the SOS result above, correct the named issue, then run the launcher again.",
+        )
+    print("\nSOS is installed and connected to this project.")
+    print("Next:")
+    print("1. Restart or reopen Codex if the SOS tools are not visible.")
+    print("2. Trust this project when Codex asks you.")
+    print("3. From the project root, run: sos qualify .")
+    print("Qualification is intentionally separate and will ask before running project checks.")
+    return root
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="start-sos-alpha",
+        description="Check and install the exact SOS alpha bundle into one existing Git project.",
+    )
+    parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
+    arguments = parser.parse_args(argv)
+    launcher = Path(__file__).absolute()
+    try:
+        if launcher.is_symlink():
+            raise _fail(
+                "SOS_ALPHA_LAUNCHER_SYMLINK_FORBIDDEN",
+                "The alpha launcher must not be run through a symbolic link.",
+                "Run the checked start-sos-alpha file directly from the extracted bundle.",
+            )
+        run_onboarding(launcher.parent, arguments.project)
+    except StartError as error:
+        print("\nSOS alpha setup stopped.", file=sys.stderr)
+        print(f"Code: {error.code}", file=sys.stderr)
+        print(f"Problem: {error.problem}", file=sys.stderr)
+        print(f"Fix: {error.correction}", file=sys.stderr)
+        return 2
+    except OSError:
+        print("\nSOS alpha setup stopped.", file=sys.stderr)
+        print("Code: SOS_ALPHA_LOCAL_IO_FAILED", file=sys.stderr)
+        print("Problem: A required local command or file could not be accessed.", file=sys.stderr)
+        print("Fix: Check the displayed project and bundle permissions, then run the launcher again.", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

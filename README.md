@@ -4,6 +4,32 @@ Sigma Operator Stack (`sos`) is a local-first operating layer for recovering
 repository authority, current work, boundaries and required checks across
 coding-agent sessions.
 
+## Start here
+
+If you received an alpha bundle, open a terminal in your existing Git project
+and run its checked launcher:
+
+```bash
+/path/to/sos-alpha-bundle/start-sos-alpha
+```
+
+It verifies Linux x86_64, Python 3.11/3.12, Git, `uv`, Codex and every bundle
+checksum before installation. It then installs the exact bundled wheel and
+shows one complete `sos init --with-codex .` preview with one confirmation.
+It does not run project tests automatically.
+
+After success, restart or reopen Codex if needed, trust the project when Codex
+asks, and run the separate qualification step:
+
+```bash
+sos qualify .
+```
+
+See the plain-language [alpha quickstart](docs/alpha-quickstart.md) for the
+prerequisites, expected prompts and exact recovery steps.
+
+## What gets installed
+
 The `0.1.0a1` public-alpha release candidate composes one narrow, end-to-end
 Linux/Git/Python vertical:
 
