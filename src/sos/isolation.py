@@ -44,7 +44,7 @@ class IsolatedRun:
 
 
 @dataclass(frozen=True, slots=True)
-class AdmittedSourceBinding:
+class _AdmittedSourceBinding:
     repository_id: str
     source_tree_digest: str
     source_status_digest: str
@@ -63,7 +63,38 @@ def run_isolated_unittest(
     tracked_paths: tuple[str, ...],
     *,
     timeout_seconds: int = _TIMEOUT_SECONDS,
-    admitted_source_binding: AdmittedSourceBinding | None = None,
+) -> IsolatedRun:
+    """Run the public check path, which never admits dirty source."""
+    return _run_isolated_unittest(
+        root,
+        tracked_paths,
+        timeout_seconds=timeout_seconds,
+        admitted_source_binding=None,
+    )
+
+
+def _run_admitted_isolated_unittest(
+    root: Path,
+    tracked_paths: tuple[str, ...],
+    admitted_source_binding: _AdmittedSourceBinding,
+    *,
+    timeout_seconds: int = _TIMEOUT_SECONDS,
+) -> IsolatedRun:
+    """Run only after workspace admission and exclusive claim consumption."""
+    return _run_isolated_unittest(
+        root,
+        tracked_paths,
+        timeout_seconds=timeout_seconds,
+        admitted_source_binding=admitted_source_binding,
+    )
+
+
+def _run_isolated_unittest(
+    root: Path,
+    tracked_paths: tuple[str, ...],
+    *,
+    timeout_seconds: int,
+    admitted_source_binding: _AdmittedSourceBinding | None,
 ) -> IsolatedRun:
     before = inspect_repository(root)
     if admitted_source_binding is None and before.application_state != "clean":
@@ -387,7 +418,7 @@ def _source_changed(before: object, after: object) -> bool:
 def _source_binding_current(
     root: Path,
     inspection: RepositoryInspection,
-    binding: AdmittedSourceBinding,
+    binding: _AdmittedSourceBinding,
 ) -> bool:
     if (
         inspection.application_tree_digest != binding.source_tree_digest

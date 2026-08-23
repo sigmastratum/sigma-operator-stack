@@ -11,7 +11,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .checks import CheckFamily, CheckPlan, discover_checks, family_execution_contract, qualify_supported
+from .checks import (
+    CheckFamily,
+    CheckPlan,
+    _qualify_admitted_supported,
+    discover_checks,
+    family_execution_contract,
+)
 from .contracts import (
     ContractError,
     digest_value,
@@ -25,7 +31,6 @@ from .contracts import (
     verify_record,
 )
 from .dirty import observe_application
-from .isolation import AdmittedSourceBinding
 from .qualification_contracts import (
     EXECUTOR_DIGEST,
     QualificationContractError,
@@ -813,21 +818,25 @@ def execute_admitted_qualification(
         claim,
         collision_reason="SOS_QUALIFICATION_ADMISSION_REPLAYED",
     )
+    stored_claim = _read_json(
+        root,
+        _qualification_artifact_path("claims", admission["admission_id"]),
+    )
+    if stored_claim != claim:
+        raise WorkspaceError("SOS_QUALIFICATION_ARTIFACT_MISMATCH")
     _bound_root, _bound_inspection, _bound_manifest, bound_replay = _load_and_replay(
         os.fspath(root)
     )
     bound_source = bound_replay["source_observation"]
-    observation = qualify_supported(
+    observation = _qualify_admitted_supported(
         os.fspath(root),
         family_id=plan["family_id"],
-        admitted_source_binding=AdmittedSourceBinding(
-            repository_id=admission["repository_id"],
-            source_tree_digest=admission["source_tree_digest"],
-            source_status_digest=admission["source_status_digest"],
-            fingerprint_head=bound_source["head"],
-            exclusion_policy_ref=bound_source["exclusion_policy"]["policy_digest"],
-            application_fingerprint=bound_source["application_state"]["fingerprint"],
-        ),
+        repository_id=admission["repository_id"],
+        source_tree_digest=admission["source_tree_digest"],
+        source_status_digest=admission["source_status_digest"],
+        fingerprint_head=bound_source["head"],
+        exclusion_policy_ref=bound_source["exclusion_policy"]["policy_digest"],
+        application_fingerprint=bound_source["application_state"]["fingerprint"],
     )
     if (
         observation.family_id != admission["family_id"]

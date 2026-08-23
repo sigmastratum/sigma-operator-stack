@@ -12,7 +12,8 @@ from pathlib import Path
 
 from .isolation import (
     PROFILE_ID,
-    AdmittedSourceBinding,
+    _AdmittedSourceBinding,
+    _run_admitted_isolated_unittest,
     isolation_limits,
     profile_declared_available,
     run_isolated_unittest,
@@ -155,7 +156,42 @@ def qualify_supported(
     path: str = ".",
     *,
     family_id: str | None = None,
-    admitted_source_binding: AdmittedSourceBinding | None = None,
+) -> QualificationObservation:
+    """Qualify through the public direct path, which always rejects dirty source."""
+    return _qualify_supported(path, family_id=family_id, admitted_source_binding=None)
+
+
+def _qualify_admitted_supported(
+    path: str,
+    *,
+    family_id: str,
+    repository_id: str,
+    source_tree_digest: str,
+    source_status_digest: str,
+    fingerprint_head: str,
+    exclusion_policy_ref: str,
+    application_fingerprint: str,
+) -> QualificationObservation:
+    """Internal continuation after persisted admission and claim verification."""
+    return _qualify_supported(
+        path,
+        family_id=family_id,
+        admitted_source_binding=_AdmittedSourceBinding(
+            repository_id=repository_id,
+            source_tree_digest=source_tree_digest,
+            source_status_digest=source_status_digest,
+            fingerprint_head=fingerprint_head,
+            exclusion_policy_ref=exclusion_policy_ref,
+            application_fingerprint=application_fingerprint,
+        ),
+    )
+
+
+def _qualify_supported(
+    path: str,
+    *,
+    family_id: str | None,
+    admitted_source_binding: _AdmittedSourceBinding | None,
 ) -> QualificationObservation:
     root = discover_repository_root(path)
     plan = discover_checks(os.fspath(root))
@@ -350,13 +386,17 @@ def _run_python_unittest(
     plan: CheckPlan,
     family: CheckFamily,
     *,
-    admitted_source_binding: AdmittedSourceBinding | None = None,
+    admitted_source_binding: _AdmittedSourceBinding | None = None,
 ) -> QualificationObservation:
-    isolated = run_isolated_unittest(
-        root,
-        _tracked_paths(root),
-        admitted_source_binding=admitted_source_binding,
-    )
+    tracked_paths = _tracked_paths(root)
+    if admitted_source_binding is None:
+        isolated = run_isolated_unittest(root, tracked_paths)
+    else:
+        isolated = _run_admitted_isolated_unittest(
+            root,
+            tracked_paths,
+            admitted_source_binding,
+        )
     return QualificationObservation(
         contract="sos_qualification_observation_v1",
         status=isolated.status,

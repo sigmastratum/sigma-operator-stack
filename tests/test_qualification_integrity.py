@@ -166,23 +166,42 @@ class QualificationIntegrityTests(unittest.TestCase):
         def run_then_drift(
             path: str,
             *,
-            family_id: str | None = None,
-            admitted_source_binding: object | None = None,
+            family_id: str,
+            **binding: object,
         ):
-            observation = qualify_supported(
+            from sos.checks import _qualify_admitted_supported
+
+            observation = _qualify_admitted_supported(
                 path,
                 family_id=family_id,
-                admitted_source_binding=admitted_source_binding,
+                **binding,
             )
             (root / "README.md").write_text("Synthetic drift during execution.\n", encoding="utf-8")
             return observation
 
-        with patch("sos.workspace.qualify_supported", side_effect=run_then_drift):
+        with patch("sos.workspace._qualify_admitted_supported", side_effect=run_then_drift):
             with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
                 execute_admitted_qualification(str(root), plan, admission)
         claim = root / ".sigma" / "qualification" / "claims" / f"{admission['admission_id'][7:]}.json"
         self.assertTrue(claim.is_file())
         self.assertFalse((root / ".sigma" / "views" / "qualification.json").exists())
+
+    def test_public_dirty_qualification_cannot_supply_admission_authority(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        (root / "README.md").write_text("Synthetic managed state.\n", encoding="utf-8")
+
+        ordinary = qualify_supported(str(root), family_id="python.stdlib-unittest")
+        self.assertEqual(ordinary.status, "blocked")
+        with self.assertRaises(TypeError):
+            qualify_supported(
+                str(root),
+                family_id="python.stdlib-unittest",
+                admitted_source_binding=object(),  # type: ignore[call-arg]
+            )
+        qualification_root = root / ".sigma" / "qualification"
+        self.assertFalse((qualification_root / "admissions").exists())
+        self.assertFalse((qualification_root / "claims").exists())
 
     def test_receipt_history_is_monotonic_and_rejects_rollback(self) -> None:
         temporary, root = self.make_project()
