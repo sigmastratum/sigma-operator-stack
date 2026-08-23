@@ -171,6 +171,15 @@ class AlphaOnboardingTests(unittest.TestCase):
         self.assertNotIn('"qualify"', launcher)
         self.assertNotIn("curl | sh", launcher)
 
+    def test_alpha_quickstart_explains_unpack_before_launcher(self) -> None:
+        quickstart = (ROOT / "docs" / "alpha-quickstart.md").read_text(encoding="utf-8")
+        unpack = "tar -xzf sigma-operator-stack-0.1.0a1-linux-x86_64-alpha.tar.gz"
+        launcher = "/path/to/sigma-operator-stack-0.1.0a1-alpha/start-sos-alpha"
+        self.assertIn("its SHA-256 value with the checksum supplied by your inviter", quickstart)
+        self.assertIn(unpack, quickstart)
+        self.assertIn(launcher, quickstart)
+        self.assertLess(quickstart.index(unpack), quickstart.index(launcher))
+
 
 if __name__ == "__main__":
     unittest.main()

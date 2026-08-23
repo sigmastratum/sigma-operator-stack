@@ -16,18 +16,34 @@ Use a Linux x86_64 machine with:
 The launcher checks these requirements. It never installs or reconfigures
 Python, Git, `uv` or Codex for you.
 
-## Start
+## Download and unpack
 
-Keep every downloaded bundle file together. Open a terminal in your Git
-project and run the launcher by its downloaded path:
+Download `sigma-operator-stack-0.1.0a1-linux-x86_64-alpha.tar.gz` and compare
+its SHA-256 value with the checksum supplied by your inviter. Do not continue
+if the values differ.
+
+Extract the archive with your file manager or run:
 
 ```bash
-/path/to/sos-alpha-bundle/start-sos-alpha
+tar -xzf sigma-operator-stack-0.1.0a1-linux-x86_64-alpha.tar.gz
+```
+
+Keep every extracted file together. The resulting directory is
+`sigma-operator-stack-0.1.0a1-alpha`.
+
+## Start
+
+Open a terminal in your Git project and run the launcher by its extracted
+path:
+
+```bash
+/path/to/sigma-operator-stack-0.1.0a1-alpha/start-sos-alpha
 ```
 
 Alternatively, run it from the bundle directory and provide the project:
 
 ```bash
+cd sigma-operator-stack-0.1.0a1-alpha
 ./start-sos-alpha /path/to/your-project
 ```
 
