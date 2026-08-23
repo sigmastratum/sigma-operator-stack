@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import unittest
+from importlib import metadata
 from pathlib import Path
 
+import sos
 from sos import __version__
 from sos.cli import main
 from sos.mcp import handle_message
@@ -34,6 +37,12 @@ class PublicReleaseContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(response)
         self.assertEqual(response["result"]["serverInfo"]["version"], EXPECTED_VERSION)
+
+        if os.environ.get("SOS_REQUIRE_INSTALLED") == "1":
+            repository = Path(__file__).resolve().parents[1]
+            imported = Path(sos.__file__).resolve()
+            self.assertNotIn(repository, imported.parents)
+            self.assertEqual(metadata.version("sigma-operator-stack"), EXPECTED_VERSION)
 
     def test_public_metadata_and_support_truth_are_frozen(self) -> None:
         root = Path(__file__).resolve().parents[1]

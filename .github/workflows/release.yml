@@ -1,0 +1,93 @@
+name: Publish public alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact qualified 40-character candidate SHA
+        required: true
+        type: string
+
+jobs:
+  publish:
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      github.ref_name == 'v0.1.0a1' &&
+      github.sha == inputs.candidate &&
+      vars.SOS_RELEASE_APPROVED_CANDIDATE == inputs.candidate
+    runs-on: ubuntu-24.04
+    environment: public-alpha
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Verify immutable tag and clean exact source
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate }}"
+          test "$(git rev-parse v0.1.0a1^{commit})" = "${{ inputs.candidate }}"
+          test -z "$(git status --short)"
+          grep -qx 'version = "0.1.0a1"' pyproject.toml
+      - name: Install exact release tooling
+        run: python -m pip install --disable-pip-version-check -r requirements/release.txt
+      - name: Requalify and build twice
+        run: |
+          PYTHONPATH=src python tools/run_zero_skip_tests.py
+          python tools/check_public_release.py --repository .
+          python tools/check_workflows.py --repository .
+          mkdir -p "$RUNNER_TEMP/a" "$RUNNER_TEMP/b" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/publish"
+          python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/a"
+          python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/b"
+          cmp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" "$RUNNER_TEMP/b/sigma_operator_stack-0.1.0a1-py3-none-any.whl"
+          cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" "$RUNNER_TEMP/publish/"
+      - name: Fresh installed-wheel qualification and SBOM
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --disable-pip-version-check -r requirements/release.txt
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl"
+          cd "$RUNNER_TEMP"
+          SOS_REQUIRE_INSTALLED=1 "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/tools/run_zero_skip_tests.py" --tests "$GITHUB_WORKSPACE/tests"
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl" --output "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a1.cdx.json"
+          python tools/finalize_release_bundle.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl" --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a1.cdx.json" --output-dir "$RUNNER_TEMP/dist"
+          cp "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl" "$RUNNER_TEMP/dist/"
+          cd "$RUNNER_TEMP/dist"
+          sha256sum -c SHA256SUMS
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: ${{ runner.temp }}/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl
+      - name: Create or verify draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.1.0a1 >/dev/null 2>&1; then
+            mkdir -p "$RUNNER_TEMP/existing"
+            gh release download v0.1.0a1 --dir "$RUNNER_TEMP/existing"
+            for name in SHA256SUMS release-manifest.json sigma-operator-stack-0.1.0a1.cdx.json sigma_operator_stack-0.1.0a1-py3-none-any.whl; do
+              cmp "$RUNNER_TEMP/existing/$name" "$RUNNER_TEMP/dist/$name"
+            done
+          else
+            gh release create v0.1.0a1 "$RUNNER_TEMP/dist/"* --draft --verify-tag --title 'Sigma Operator Stack 0.1.0a1' --notes-file CHANGELOG.md
+          fi
+      - name: Check immutable PyPI state
+        id: pypi
+        run: |
+          python tools/check_pypi_state.py --project sigma-operator-stack --version 0.1.0a1 --filename sigma_operator_stack-0.1.0a1-py3-none-any.whl --sha256 "$(sha256sum "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a1-py3-none-any.whl" | cut -d' ' -f1)" --github-output "$GITHUB_OUTPUT"
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+        if: steps.pypi.outputs.publish_required == 'true'
+        with:
+          packages-dir: ${{ runner.temp }}/publish
+          attestations: true
+      - name: Publish verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit v0.1.0a1 --draft=false --latest=false
