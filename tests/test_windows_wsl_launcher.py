@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +17,22 @@ class WindowsWslLauncherContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.text = LAUNCHER.read_text(encoding="utf-8")
+        match = re.search(
+            r"\$Script:ResolveTargetProgram = @'\n(?P<program>.*?)\n'@",
+            cls.text,
+            re.DOTALL,
+        )
+        if match is None:
+            raise AssertionError("embedded target resolver is missing")
+        cls.resolve_target_program = match.group("program")
+
+    def run_target_resolver(self, target: Path, home: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", self.resolve_target_program, os.fspath(target), os.fspath(home)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
     def test_launcher_is_host_only_and_never_provisions_or_elevates(self) -> None:
         self.assertIn('if ($env:OS -cne "Windows_NT")', self.text)
@@ -33,10 +53,41 @@ class WindowsWslLauncherContractTests(unittest.TestCase):
 
     def test_canonical_workspace_is_native_linux_and_windows_mounts_are_artifacts_only(self) -> None:
         self.assertIn('/.local/share/sos/workspaces/', self.text)
-        self.assertIn('if ($Script:LinuxRoot -match \'^/mnt/\')', self.text)
+        self.assertIn('target == "/mnt" or target.startswith("/mnt/")', self.text)
+        self.assertIn('os.path.commonpath((home, target)) == home', self.text)
+        self.assertIn('Resolve-CheckedWslTarget -Target $requestedLinuxRoot', self.text)
         self.assertNotRegex(self.text, r'LinuxRoot\s*=\s*"/mnt/')
         self.assertIn('wslpath", "-u", $temporaryBundle', self.text)
         self.assertIn('wslpath", "-u", $bundle', self.text)
+
+    def test_existing_local_symlink_into_windows_mount_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home" / "tester"
+            home.mkdir(parents=True)
+            (home / ".local").symlink_to("/mnt/sos-windows-target-regression")
+            target = home / ".local" / "share" / "sos" / "workspaces" / "project-id"
+
+            result = self.run_target_resolver(target, home)
+
+        self.assertEqual(result.returncode, 8)
+        self.assertTrue(result.stdout.strip().startswith("/mnt/"))
+
+    def test_native_target_is_rechecked_immediately_before_import(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home" / "tester"
+            home.mkdir(parents=True)
+            target = home / ".local" / "share" / "sos" / "workspaces" / "project-id"
+
+            result = self.run_target_resolver(target, home)
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), os.path.realpath(target))
+        recheck = (
+            "Resolve-CheckedWslTarget -Target $Script:LinuxRoot "
+            "-NativeHome $homeProbe.Output -Expected $Script:LinuxRoot"
+        )
+        self.assertIn(recheck, self.text)
+        self.assertLess(self.text.index(recheck), self.text.index('Invoke-Wsl -Arguments @("git", "clone"'))
 
     def test_import_requires_clean_exact_git_and_never_copies_a_worktree(self) -> None:
         required = (

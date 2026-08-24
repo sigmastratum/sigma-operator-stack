@@ -47,6 +47,20 @@ $Script:MaxFileBytes = @{
     "start-sos-windows.ps1" = 1048576
     "sigma_operator_stack-0.1.0a1-py3-none-any.whl" = 67108864
 }
+$Script:ResolveTargetProgram = @'
+import os
+import sys
+
+target = os.path.realpath(sys.argv[1])
+home = os.path.realpath(sys.argv[2])
+try:
+    inside_home = os.path.commonpath((home, target)) == home
+except ValueError:
+    inside_home = False
+windows_backed = target == "/mnt" or target.startswith("/mnt/")
+print(target)
+raise SystemExit(0 if inside_home and target != home and not windows_backed else 8)
+'@
 
 function Stop-SosWindows {
     param(
@@ -101,6 +115,24 @@ function Invoke-Wsl {
 function Test-SafeToken {
     param([Parameter(Mandatory = $true)][string]$Value)
     return $Value -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+}
+
+function Resolve-CheckedWslTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$NativeHome,
+        [string]$Expected
+    )
+    $probe = Invoke-Wsl -Arguments @(
+        "python3", "-c", $Script:ResolveTargetProgram, $Target, $NativeHome
+    ) -Capture -AllowFailure
+    if ($probe.ExitCode -ne 0 -or $probe.Output -notmatch '^/[^\x00-\x1f]+$') {
+        Stop-SosWindows "SOS_WINDOWS_CANONICAL_PATH_UNSAFE" "The resolved SOS workspace is outside the native WSL home or is Windows-backed." "Repair the WSL home path so every workspace ancestor remains on its native Linux filesystem."
+    }
+    if ($Expected -and $probe.Output -cne $Expected) {
+        Stop-SosWindows "SOS_WINDOWS_CANONICAL_PATH_DRIFT" "The resolved SOS workspace changed after the plan was confirmed." "Preserve both locations and repair the WSL path or symlink drift before retrying."
+    }
+    return $probe.Output
 }
 
 function Get-ProjectId {
@@ -312,10 +344,8 @@ foreach ($prerequisite in @("git", "uv", "codex")) {
         Stop-SosWindows "SOS_WSL_PREREQUISITE_MISSING" "Required command '$prerequisite' was not found inside '$Distro'." "Install $prerequisite for the same WSL user, then rerun."
     }
 }
-$Script:LinuxRoot = "$($homeProbe.Output.TrimEnd('/'))/.local/share/sos/workspaces/$leaf-$($Script:ProjectId)"
-if ($Script:LinuxRoot -match '^/mnt/') {
-    Stop-SosWindows "SOS_WINDOWS_CANONICAL_PATH_UNSAFE" "The computed SOS workspace is Windows-backed." "Use a WSL distribution with a native Linux home filesystem."
-}
+$requestedLinuxRoot = "$($homeProbe.Output.TrimEnd('/'))/.local/share/sos/workspaces/$leaf-$($Script:ProjectId)"
+$Script:LinuxRoot = Resolve-CheckedWslTarget -Target $requestedLinuxRoot -NativeHome $homeProbe.Output
 
 $localData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
 if (-not $localData) {
@@ -409,6 +439,7 @@ if (-not $targetExists) {
             Stop-SosWindows "SOS_WINDOWS_IMPORT_RECOVERY_REQUIRED" "A prior bounded import staging directory still exists." "Preserve it and request bounded recovery; this launcher will not delete it automatically."
         }
         Invoke-Wsl -Arguments @("mkdir", "-p", $parent) | Out-Null
+        Resolve-CheckedWslTarget -Target $Script:LinuxRoot -NativeHome $homeProbe.Output -Expected $Script:LinuxRoot | Out-Null
         Invoke-Wsl -Arguments @("git", "clone", "--no-checkout", $wslBundle.Output, $staging) | Out-Null
         Invoke-Wsl -Arguments @("git", "-C", $staging, "checkout", "-B", $Script:SourceBranch, $Script:SourceHead) | Out-Null
         Invoke-Wsl -Arguments @("git", "-C", $staging, "remote", "remove", "origin") -AllowFailure | Out-Null
