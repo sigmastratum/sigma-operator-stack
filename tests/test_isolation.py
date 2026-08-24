@@ -218,6 +218,37 @@ class IsolationContract(unittest.TestCase):
         self.assertEqual(receipt.reasons, ("SOS_QUALIFICATION_PROTECTED_PATH_PRESENT",))
         self.assertIsNone(receipt.output_digest)
 
+    def test_public_environment_template_and_sql_source_enter_snapshot(self) -> None:
+        fixture, root = self.make_project(
+            "import unittest\n\nclass Pass(unittest.TestCase):\n"
+            "    def test_pass(self):\n        self.assertTrue(True)\n"
+        )
+        self.addCleanup(fixture.cleanup)
+        (root / ".env.example").write_text("SYNTHETIC_NAME=example\n", encoding="utf-8")
+        (root / "catalog.sql").write_text("CREATE TABLE synthetic_entry (id INTEGER);\n", encoding="utf-8")
+        migrations = root / "migrations"
+        migrations.mkdir()
+        (migrations / "001.sql").write_text("CREATE TABLE synthetic_log (id INTEGER);\n", encoding="utf-8")
+        git(root, "add", ".env.example", "catalog.sql", "migrations/001.sql")
+        git(root, "commit", "-qm", "add synthetic public source files")
+        receipt = qualify_supported(str(root), family_id="python.stdlib-unittest")
+        self.assertEqual(receipt.status, "passed_local")
+        self.assertEqual(receipt.tests_run, 1)
+
+    def test_named_sql_dump_blocks_before_project_execution(self) -> None:
+        fixture, root = self.make_project(
+            "import unittest\n\nclass Pass(unittest.TestCase):\n"
+            "    def test_pass(self):\n        self.assertTrue(True)\n"
+        )
+        self.addCleanup(fixture.cleanup)
+        (root / "database-backup.sql").write_text("SYNTHETIC DUMP MARKER\n", encoding="utf-8")
+        git(root, "add", "database-backup.sql")
+        git(root, "commit", "-qm", "add synthetic protected SQL dump")
+        receipt = qualify_supported(str(root), family_id="python.stdlib-unittest")
+        self.assertEqual(receipt.status, "blocked")
+        self.assertEqual(receipt.reasons, ("SOS_QUALIFICATION_PROTECTED_PATH_PRESENT",))
+        self.assertIsNone(receipt.output_digest)
+
     def test_tracked_symlink_is_blocked_before_project_execution(self) -> None:
         fixture, root = self.make_project(
             "import unittest\n\nclass Pass(unittest.TestCase):\n"

@@ -139,6 +139,34 @@ class DirtyApplicationObserverTests(unittest.TestCase):
         protected.chmod(0)
         self.assertEqual(self.observation(root).fingerprint, first)
 
+    def test_sensitive_name_grammar_distinguishes_public_sources_from_private_material(self) -> None:
+        expected = {
+            ".env": "environment_or_secret",
+            ".env.local": "environment_or_secret",
+            ".env.production": "environment_or_secret",
+            "private/.env.example/value": "environment_or_secret",
+            "database.dump": "production_or_database_dump",
+            "prod_dump.sql": "production_or_database_dump",
+            "database-backup.sql": "production_or_database_dump",
+            "snapshot.sql": "production_or_database_dump",
+        }
+        for path, classification in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(dirty.sensitive_path_class(path), classification)
+
+        for path in (
+            ".env.example",
+            ".env.sample",
+            ".env.template",
+            ".env.dist",
+            "catalog.sql",
+            "schema.sql",
+            "migrations/001.sql",
+            ".codex/config.toml",
+        ):
+            with self.subTest(path=path):
+                self.assertIsNone(dirty.sensitive_path_class(path))
+
     def test_protected_directory_type_is_presence_bound(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)

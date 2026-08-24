@@ -23,6 +23,12 @@ _MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024
 _SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 _GIT_EXECUTABLE = shutil.which("git", path=_SAFE_PATH)
 _STAGING_ROOT = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}(?:/|$)")
+_PUBLIC_ENV_TEMPLATE_BASENAMES = frozenset(
+    {".env.dist", ".env.example", ".env.sample", ".env.template"}
+)
+_PROTECTED_SQL_TOKENS = frozenset(
+    {"backup", "dump", "export", "prod", "production", "snapshot"}
+)
 
 _INDEX = 0x01
 _WORKTREE = 0x02
@@ -681,10 +687,16 @@ def _sensitive_class(path: str) -> str | None:
     parts = path.split("/")
     if (
         basename == ".env"
-        or basename.startswith(".env.")
+        or (
+            basename.startswith(".env.")
+            and basename not in _PUBLIC_ENV_TEMPLATE_BASENAMES
+        )
         or basename.endswith(".secret")
         or basename.endswith(".secrets")
-        or any(part == ".env" or part.startswith(".env.") for part in parts)
+        or any(
+            part == ".env" or part.startswith(".env.")
+            for part in parts[:-1]
+        )
     ):
         return "environment_or_secret"
     if basename in {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"} or basename.endswith((".pem", ".key", ".p12", ".pfx")):
@@ -693,7 +705,14 @@ def _sensitive_class(path: str) -> str | None:
         return "credential_store"
     if any(marker in basename for marker in ("conversation", "transcript", "chat_export", "messages_export")):
         return "raw_conversation_export"
-    if basename.endswith((".db", ".sqlite", ".sqlite3", ".dump", ".sql")) or "production_dump" in basename or "prod_dump" in basename:
+    sql_tokens = (
+        frozenset(re.split(r"[._-]", basename[:-4]))
+        if basename.endswith(".sql")
+        else frozenset()
+    )
+    if basename.endswith((".db", ".sqlite", ".sqlite3", ".dump")) or sql_tokens.intersection(
+        _PROTECTED_SQL_TOKENS
+    ):
         return "production_or_database_dump"
     if basename in {".npmrc", ".pypirc", "settings.xml", "pip.conf"} or parts[:2] == [".config", "gcloud"]:
         return "authenticated_remote_configuration"

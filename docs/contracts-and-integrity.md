@@ -94,13 +94,17 @@ filesystem type and stable class ID remain fingerprint-bound. Consequently a
 protected file's byte-only change is deliberately unobserved, while its
 creation, deletion, rename, type or classification change alters currentness.
 Matching is case-sensitive with no Unicode normalization. The built-in v2
-set is exact and public: `.env`, `.env.*`, `*.secret`, `*.secrets`; the
+set is exact and public: `.env`, `.env.*` except the exact public template
+basenames `.env.example`, `.env.sample`, `.env.template` and `.env.dist`, plus
+`*.secret`, `*.secrets`; the
 `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` basenames and `.pem`, `.key`,
 `.p12`, `.pfx` suffixes; `credentials`, `credentials.json`, `.netrc`,
 `.git-credentials` and paths below exact `.aws` or `.ssh` components; basenames
 containing `conversation`, `transcript`, `chat_export` or `messages_export`;
-`.db`, `.sqlite`, `.sqlite3`, `.dump`, `.sql` suffixes or basenames containing
-`production_dump`/`prod_dump`; and exact `.npmrc`, `.pypirc`, `settings.xml`,
+`.db`, `.sqlite`, `.sqlite3` and `.dump` suffixes; `.sql` basenames whose
+pre-suffix value, split only on ASCII `.`, `_` and `-`, has an exact token
+`dump`, `backup`, `export`, `snapshot`, `production` or `prod`; and exact
+`.npmrc`, `.pypirc`, `settings.xml`,
 `pip.conf` or `.config/gcloud/**` paths. User-declared protected patterns and
 explicit byte consent remain separate future policy operations; bootstrap does
 not infer them.
