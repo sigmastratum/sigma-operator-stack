@@ -16,6 +16,7 @@ from pathlib import Path
 VERSION = "0.1.0a1"
 ONBOARDING_FILES = (
     ("tools/start_sos_alpha.py", "start-sos-alpha", "text/x-python", 0o755),
+    ("tools/start_sos_windows.ps1", "start-sos-windows.ps1", "text/x-powershell", 0o644),
     ("docs/alpha-quickstart.md", "START-HERE.md", "text/markdown", 0o644),
 )
 

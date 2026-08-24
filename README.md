@@ -21,10 +21,12 @@ It does not run project tests automatically.
 Windows and macOS are not direct execution targets for this alpha. Do not run
 SOS against a Windows drive, Docker bind mount, WSL `/mnt/<drive>` path or VM
 shared folder: those filesystems are not admitted for canonical `.sigma`
-state. The planned Windows path runs SOS and Codex inside WSL2 with the project
-stored in the WSL native Linux filesystem. The planned macOS path uses a
-version-pinned lightweight Linux VM. Until those host launchers are qualified,
-use a supported Linux machine or Linux-native volume.
+state. The bundle includes `start-sos-windows.ps1`, a Windows host launcher
+that requires an existing WSL2 Ubuntu environment and imports one exactly clean
+Git repository into a stable native-Linux workspace before running SOS and
+Codex there. It never installs WSL, elevates, copies a dirty worktree or runs
+qualification. macOS remains pending a separately qualified lightweight-Linux-
+VM launcher.
 
 After success, restart or reopen Codex if needed, trust the project when Codex
 asks, and run the separate qualification step:

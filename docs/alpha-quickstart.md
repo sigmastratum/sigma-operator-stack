@@ -14,11 +14,16 @@ Use a Linux x86_64 machine with:
 - an existing conventional Git project.
 
 If your computer runs Windows, do not use native PowerShell Python, a Docker
-bind mount or a project under WSL `/mnt/<drive>`. The current safe manual path
-is to keep the project under the WSL native Linux home filesystem and run both
-SOS and Codex from that same WSL environment. The one-step Windows/WSL2 host
-launcher is not part of this artifact yet. macOS requires a separately
-qualified Linux-VM launcher and is also not supported by this artifact.
+bind mount or a project under WSL `/mnt/<drive>`. Use the checked Windows/WSL2
+launcher described below. It imports an exactly clean committed Git repository
+through a verified Git bundle into the WSL native Linux home, then runs SOS and
+Codex in that same Linux workspace. It does not copy working-tree files,
+install WSL, elevate privileges, accept a reboot or run qualification.
+Ignored local files and machine-specific environments are not imported; recreate
+them inside WSL after setup.
+
+macOS requires a separately qualified Linux-VM launcher and is not supported
+by this artifact.
 
 The launcher checks these requirements. It never installs or reconfigures
 Python, Git, `uv` or Codex for you.
@@ -39,6 +44,40 @@ Keep every extracted file together. The resulting directory is
 `sigma-operator-stack-0.1.0a1-alpha`.
 
 ## Start
+
+### Windows with WSL2
+
+Prerequisites are explicit: Windows PowerShell 5.1 or newer, Git for Windows,
+an installed x86_64 WSL2 Ubuntu distribution, and Python 3.11/3.12, Git, `uv`
+and Codex inside that distribution. Complete WSL first-run user setup yourself.
+The launcher never enables Windows features, installs a distribution or asks
+for administrator elevation.
+
+Commit or otherwise safely preserve every tracked and untracked project change,
+then open PowerShell in the extracted bundle and run:
+
+```powershell
+.\start-sos-windows.ps1 -Project 'C:\path\to\your-project'
+```
+
+For a distribution whose registered name is not `Ubuntu`, pass it exactly:
+
+```powershell
+.\start-sos-windows.ps1 -Project 'C:\path\to\your-project' -Distro 'Ubuntu-24.04'
+```
+
+The launcher verifies the complete bundle, WSL2 kernel and source commit. It
+shows one JSON plan and asks once for `INSTALL`. The canonical project is a
+native Linux workspace under `~/.local/share/sos/workspaces`; the Windows
+working copy is never used as SOS state. A stable local mapping makes reruns
+idempotent. Mapping drift, a dirty source, submodules, target collision or an
+interrupted staging import stops with one typed next action.
+
+After SOS succeeds, the launcher opens `codex -C <exact-linux-workspace>` in
+the same WSL2 distribution. Use `-NoOpenCodex` if you only want installation.
+Use `-PlanOnly` for a read-only plan without confirmation or mutation.
+
+### Linux
 
 Open a terminal in your Git project and run the launcher by its extracted
 path:

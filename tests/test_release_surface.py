@@ -22,7 +22,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         finalizer = (root / "tools" / "finalize_release_bundle.py").read_text(encoding="utf-8")
         release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        for name in ("START-HERE.md", "start-sos-alpha"):
+        for name in ("START-HERE.md", "start-sos-alpha", "start-sos-windows.ps1"):
             self.assertIn(name, finalizer)
             self.assertIn(name, release)
 
