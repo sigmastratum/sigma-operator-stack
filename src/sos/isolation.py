@@ -15,6 +15,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .capabilities import (
+    LANDLOCK_ABI_TOO_OLD,
+    LANDLOCK_SYSCALL_UNAVAILABLE,
+    NO_NEW_PRIVS_UNAVAILABLE,
+    PLATFORM_UNSUPPORTED,
+    SECCOMP_FILTER_UNAVAILABLE,
+)
 from .dirty import observe_application, sensitive_path_class
 from .repository import RepositoryError, RepositoryInspection, inspect_repository
 
@@ -28,6 +35,13 @@ _MAX_OUTPUT_BYTES = 1024 * 1024
 _MAX_WRITABLE_BYTES = 16 * 1024 * 1024
 _MAX_WRITABLE_ENTRIES = 4096
 _TIMEOUT_SECONDS = 30
+_CAPABILITY_FAILURES = {
+    PLATFORM_UNSUPPORTED,
+    LANDLOCK_SYSCALL_UNAVAILABLE,
+    LANDLOCK_ABI_TOO_OLD,
+    NO_NEW_PRIVS_UNAVAILABLE,
+    SECCOMP_FILTER_UNAVAILABLE,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +70,13 @@ class _AdmittedSourceBinding:
 def profile_declared_available() -> bool:
     """Return a zero-execution platform declaration; runtime still probes fail-closed."""
     return sys.platform == "linux" and platform.machine() == "x86_64"
+
+
+def _capability_failure_reason(report: dict[str, object]) -> str:
+    reported_reason = report.get("reason")
+    if isinstance(reported_reason, str) and reported_reason in _CAPABILITY_FAILURES:
+        return reported_reason
+    return "SOS_ISOLATION_PROFILE_UNAVAILABLE"
 
 
 def run_isolated_unittest(
@@ -211,9 +232,10 @@ def _run_isolated_unittest(
                 output_bytes=output_size,
             )
         if report.get("status") == "unsupported" and exit_code == 78:
+            reason = _capability_failure_reason(report)
             return _result(
                 "unsupported",
-                "SOS_ISOLATION_PROFILE_UNAVAILABLE",
+                reason,
                 exit_code=exit_code,
                 output_digest=output_digest,
                 output_bytes=output_size,

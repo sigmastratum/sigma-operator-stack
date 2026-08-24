@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from . import __version__
 from .agent_api import project_tool
+from .capabilities import probe_isolation_capabilities
 from .checks import discover_checks
 from .compatibility import compatibility_status
 from .client_integration import (
@@ -54,6 +55,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sos")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    capabilities = subparsers.add_parser("capabilities")
+    capabilities.add_argument("--json", action="store_true", dest="as_json")
     for command in (
         "status",
         "validate",
@@ -123,6 +126,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "capabilities":
+        report = probe_isolation_capabilities()
+        _print(report.to_dict(), args.as_json)
+        return 0 if report.status == "supported" else 2
     filesystem_admission = _filesystem_admission_for_command(args)
     if filesystem_admission is not None and filesystem_admission.status != "success":
         _print(filesystem_admission.to_dict(), getattr(args, "as_json", False))

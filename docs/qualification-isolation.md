@@ -54,6 +54,15 @@ commit, push, deploy, release, provider or production authority.
 admission still fails closed unless Landlock ABI 3 or newer and the seccomp
 filter can be installed.
 
+`sos capabilities --json` performs a repository-independent, zero-project-code
+probe in fixed-argument child processes. It reports the observed Landlock ABI,
+`no_new_privs` admission and seccomp-filter admission separately. The report is
+content-safe and digest-bound; it contains no repository path, environment
+value, credential or hostname. Unsupported capability exits `2` and cannot
+become green. The execution worker repeats the same decision immediately before
+project tests and records the exact typed capability failure with internal exit
+`78` if the environment changed.
+
 For one run SOS:
 
 1. requires a clean application-source observation;

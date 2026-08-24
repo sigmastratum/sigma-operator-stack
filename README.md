@@ -35,6 +35,18 @@ asks, and run the separate qualification step:
 sos qualify .
 ```
 
+Before executable qualification, inspect the exact host-kernel capability
+decision without opening the project or running project code:
+
+```bash
+sos capabilities --json
+```
+
+Exit `0` means the complete named Landlock/seccomp profile is available. Exit
+`2` is a fail-closed unsupported result that distinguishes platform, Landlock
+ABI, `no_new_privs` and seccomp admission. Installation or control-plane
+success does not imply executable-test support on that host.
+
 See the plain-language [alpha quickstart](docs/alpha-quickstart.md) for the
 prerequisites, expected prompts and exact recovery steps.
 
@@ -50,6 +62,7 @@ sos init --with-codex [PATH]
 sos regenerate [PATH]
 sos accept REVISION [PATH]
 sos check [PATH]
+sos capabilities
 sos qualify [PATH] [--family FAMILY]
 sos doctor [PATH]
 sos recover [PATH]

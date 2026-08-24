@@ -10,12 +10,11 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .capabilities import PROFILE_ID, probe_isolation_capabilities
 from .isolation import (
-    PROFILE_ID,
     _AdmittedSourceBinding,
     _run_admitted_isolated_unittest,
     isolation_limits,
-    profile_declared_available,
     run_isolated_unittest,
 )
 from .repository import RepositoryError, discover_repository_root, inspect_repository
@@ -112,7 +111,8 @@ def discover_checks(path: str = ".") -> CheckPlan:
             reasons=("SOS_CHECK_NOT_CONFIGURED",),
         )
     if python_project and unittest_tests:
-        if profile_declared_available():
+        capability_report = probe_isolation_capabilities()
+        if capability_report.status == "supported":
             unittest_family = CheckFamily(
                 family_id="python.stdlib-unittest",
                 status="configured",
@@ -126,7 +126,7 @@ def discover_checks(path: str = ".") -> CheckPlan:
                 status="unsupported",
                 command_id=None,
                 isolation="unavailable",
-                reasons=("SOS_PROJECT_EXECUTION_PROFILE_NOT_QUALIFIED",),
+                reasons=capability_report.reasons,
             )
     else:
         unittest_family = CheckFamily(

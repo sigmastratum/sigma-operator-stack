@@ -52,10 +52,23 @@ _DENIED_SYSCALLS_X86_64 = (
     308, 321, 322, 435,
 )
 _MAX_CAPTURED_OUTPUT_BYTES = 1024 * 1024
+_CAPABILITY_PREFIX = "SOS_CAPABILITY_COMPONENT="
+
+_PLATFORM_UNSUPPORTED = "SOS_CAPABILITY_PLATFORM_UNSUPPORTED"
+_LANDLOCK_SYSCALL_UNAVAILABLE = "SOS_LANDLOCK_SYSCALL_UNAVAILABLE"
+_LANDLOCK_ABI_TOO_OLD = "SOS_LANDLOCK_ABI_TOO_OLD"
+_NO_NEW_PRIVS_UNAVAILABLE = "SOS_NO_NEW_PRIVS_UNAVAILABLE"
+_SECCOMP_FILTER_UNAVAILABLE = "SOS_SECCOMP_FILTER_UNAVAILABLE"
 
 
 class _OutputLimitExceeded(RuntimeError):
     pass
+
+
+class _CapabilityUnavailable(RuntimeError):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class _BoundedTextSink(io.TextIOBase):
@@ -116,6 +129,41 @@ def _landlock_access(abi: int) -> int:
     return access
 
 
+def _query_landlock_abi() -> int:
+    try:
+        return _syscall(444, 0, 0, _LANDLOCK_CREATE_RULESET_VERSION)
+    except OSError as exc:
+        raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
+
+
+def _set_no_new_privs() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+def _probe_landlock_ruleset(abi: int) -> None:
+    handled = _landlock_access(abi)
+    ruleset_attr = _RulesetAttr(handled)
+    try:
+        ruleset_fd = _syscall(444, ctypes.byref(ruleset_attr), ctypes.sizeof(ruleset_attr), 0)
+    except OSError as exc:
+        raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
+    try:
+        with tempfile.TemporaryDirectory(prefix="sos-capability-") as temporary:
+            try:
+                _add_landlock_path(
+                    ruleset_fd,
+                    Path(temporary),
+                    (_LL_READ_FILE | _LL_READ_DIR) & handled,
+                )
+            except OSError as exc:
+                raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
+    finally:
+        os.close(ruleset_fd)
+
+
 def _add_landlock_path(ruleset_fd: int, path: Path, access: int) -> None:
     if not path.exists():
         return
@@ -128,33 +176,42 @@ def _add_landlock_path(ruleset_fd: int, path: Path, access: int) -> None:
 
 
 def _restrict_filesystem(source: Path, output: Path) -> int:
-    abi = _syscall(444, 0, 0, _LANDLOCK_CREATE_RULESET_VERSION)
+    abi = _query_landlock_abi()
     if abi < 3:
-        raise OSError(errno.ENOSYS, "Landlock ABI 3 is required")
+        raise _CapabilityUnavailable(_LANDLOCK_ABI_TOO_OLD)
     handled = _landlock_access(abi)
     ruleset_attr = _RulesetAttr(handled)
-    ruleset_fd = _syscall(444, ctypes.byref(ruleset_attr), ctypes.sizeof(ruleset_attr), 0)
     try:
-        read_execute = _LL_EXECUTE | _LL_READ_FILE | _LL_READ_DIR
-        for system_root in (Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")):
-            _add_landlock_path(ruleset_fd, system_root, read_execute & handled)
-        _add_landlock_path(ruleset_fd, Path("/etc/ld.so.cache"), _LL_READ_FILE & handled)
-        _add_landlock_path(
-            ruleset_fd,
-            Path("/dev/null"),
-            (_LL_READ_FILE | _LL_WRITE_FILE) & handled,
-        )
-        source_access = (_LL_READ_FILE | _LL_READ_DIR) & handled
-        _add_landlock_path(ruleset_fd, source, source_access)
-        output_access = handled & ~(
-            _LL_EXECUTE | _LL_MAKE_CHAR | _LL_MAKE_SOCK | _LL_MAKE_BLOCK
-        )
-        _add_landlock_path(ruleset_fd, output, output_access)
-        libc = ctypes.CDLL(None, use_errno=True)
-        if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
-            error = ctypes.get_errno()
-            raise OSError(error, os.strerror(error))
-        _syscall(446, ruleset_fd, 0)
+        ruleset_fd = _syscall(444, ctypes.byref(ruleset_attr), ctypes.sizeof(ruleset_attr), 0)
+    except OSError as exc:
+        raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
+    try:
+        try:
+            read_execute = _LL_EXECUTE | _LL_READ_FILE | _LL_READ_DIR
+            for system_root in (Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")):
+                _add_landlock_path(ruleset_fd, system_root, read_execute & handled)
+            _add_landlock_path(ruleset_fd, Path("/etc/ld.so.cache"), _LL_READ_FILE & handled)
+            _add_landlock_path(
+                ruleset_fd,
+                Path("/dev/null"),
+                (_LL_READ_FILE | _LL_WRITE_FILE) & handled,
+            )
+            source_access = (_LL_READ_FILE | _LL_READ_DIR) & handled
+            _add_landlock_path(ruleset_fd, source, source_access)
+            output_access = handled & ~(
+                _LL_EXECUTE | _LL_MAKE_CHAR | _LL_MAKE_SOCK | _LL_MAKE_BLOCK
+            )
+            _add_landlock_path(ruleset_fd, output, output_access)
+        except OSError as exc:
+            raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
+        try:
+            _set_no_new_privs()
+        except OSError as exc:
+            raise _CapabilityUnavailable(_NO_NEW_PRIVS_UNAVAILABLE) from exc
+        try:
+            _syscall(446, ruleset_fd, 0)
+        except OSError as exc:
+            raise _CapabilityUnavailable(_LANDLOCK_SYSCALL_UNAVAILABLE) from exc
     finally:
         os.close(ruleset_fd)
     return abi
@@ -162,7 +219,7 @@ def _restrict_filesystem(source: Path, output: Path) -> int:
 
 def _deny_network_process_and_namespace_syscalls() -> None:
     if platform.machine() != "x86_64":
-        raise OSError(errno.ENOSYS, "unsupported architecture")
+        raise _CapabilityUnavailable(_PLATFORM_UNSUPPORTED)
     instructions: list[_SockFilter] = [
         _SockFilter(_BPF_LD_W_ABS, 0, 0, 4),
         _SockFilter(_BPF_JMP_JEQ_K, 1, 0, _AUDIT_ARCH_X86_64),
@@ -180,7 +237,48 @@ def _deny_network_process_and_namespace_syscalls() -> None:
     array_type = _SockFilter * len(instructions)
     filters = array_type(*instructions)
     program = _SockFprog(len(instructions), filters)
-    _syscall(317, _SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(program))
+    try:
+        _syscall(317, _SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(program))
+    except OSError as exc:
+        raise _CapabilityUnavailable(_SECCOMP_FILTER_UNAVAILABLE) from exc
+
+
+def _probe_component(component: str) -> int:
+    status = "supported"
+    reason: str | None = None
+    observed_abi: int | None = None
+    try:
+        if platform.system().lower() != "linux" or platform.machine() != "x86_64":
+            raise _CapabilityUnavailable(_PLATFORM_UNSUPPORTED)
+        if component == "landlock":
+            observed_abi = _query_landlock_abi()
+            if observed_abi < 3:
+                raise _CapabilityUnavailable(_LANDLOCK_ABI_TOO_OLD)
+            _probe_landlock_ruleset(observed_abi)
+        elif component == "no_new_privs":
+            try:
+                _set_no_new_privs()
+            except OSError as exc:
+                raise _CapabilityUnavailable(_NO_NEW_PRIVS_UNAVAILABLE) from exc
+        elif component == "seccomp":
+            try:
+                _set_no_new_privs()
+            except OSError as exc:
+                raise _CapabilityUnavailable(_SECCOMP_FILTER_UNAVAILABLE) from exc
+            _deny_network_process_and_namespace_syscalls()
+        else:
+            return 64
+    except _CapabilityUnavailable as exc:
+        status = "unsupported"
+        reason = exc.reason
+    payload = {
+        "component": component,
+        "status": status,
+        "reason": reason,
+        "observed_abi": observed_abi,
+    }
+    print(_CAPABILITY_PREFIX + json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    return 0 if status == "supported" else 78
 
 
 def _apply_limits(output: Path) -> None:
@@ -236,6 +334,8 @@ def _emit(report_fd: int, payload: dict[str, object]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
+    if len(arguments) == 2 and arguments[0] == "--probe":
+        return _probe_component(arguments[1])
     if len(arguments) != 1:
         return 64
     execution_root = Path(arguments[0]).resolve()
@@ -252,8 +352,11 @@ def main(argv: list[str] | None = None) -> int:
     os.close(sink_fd)
     try:
         _apply_limits(output)
-        abi = _restrict_filesystem(source, output)
-        _deny_network_process_and_namespace_syscalls()
+        try:
+            abi = _restrict_filesystem(source, output)
+            _deny_network_process_and_namespace_syscalls()
+        except _CapabilityUnavailable:
+            raise
         report = _run_tests(source)
         report["isolation_profile"] = "linux-landlock-seccomp-snapshot-v1"
         report["landlock_abi"] = abi
@@ -275,6 +378,18 @@ def main(argv: list[str] | None = None) -> int:
             }),
         )
         return 1
+    except _CapabilityUnavailable as exc:
+        _emit(
+            report_fd,
+            _seal({
+                "contract": "sos_isolated_unittest_result_v1",
+                "status": "unsupported",
+                "reason": exc.reason,
+                "isolation_profile": "linux-landlock-seccomp-snapshot-v1",
+                "raw_output_serialized": False,
+            }),
+        )
+        return 78
     except OSError as exc:
         if exc.errno == errno.EFBIG:
             _emit(
@@ -292,25 +407,25 @@ def main(argv: list[str] | None = None) -> int:
             report_fd,
             _seal({
                 "contract": "sos_isolated_unittest_result_v1",
-                "status": "unsupported",
-                "reason": "SOS_ISOLATION_PROFILE_UNAVAILABLE",
+                "status": "failed",
+                "reason": "SOS_QUALIFICATION_RUNNER_FAILED",
                 "isolation_profile": "linux-landlock-seccomp-snapshot-v1",
                 "raw_output_serialized": False,
             }),
         )
-        return 78
+        return 1
     except (ValueError, unittest.SkipTest):
         _emit(
             report_fd,
             _seal({
                 "contract": "sos_isolated_unittest_result_v1",
-                "status": "unsupported",
-                "reason": "SOS_ISOLATION_PROFILE_UNAVAILABLE",
+                "status": "failed",
+                "reason": "SOS_QUALIFICATION_RUNNER_FAILED",
                 "isolation_profile": "linux-landlock-seccomp-snapshot-v1",
                 "raw_output_serialized": False,
             }),
         )
-        return 78
+        return 1
     finally:
         os.close(report_fd)
 
