@@ -185,13 +185,32 @@ def build_workspace_bootstrap_files(
     bootstrap_intent_id: str,
     bootstrap_plan_id: str,
     local_nonce: str | None,
+    primary_authority_id: str | None = None,
+    compatibility_discovery_digest: str | None = None,
+    recognized_authority_paths: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, bytes], int]:
     """Build one exact P101-v2 control plane for the currently observed application."""
     identity = repository_identity_contract(root, local_repository_nonce=local_nonce)
     inspection = inspect_repository(root, local_repository_nonce=local_nonce)
     plan = discover_checks(os.fspath(root))
     created_at = _timestamp()
-    authority_paths = tuple(candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file())
+    if recognized_authority_paths is None:
+        authority_paths = tuple(
+            candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file()
+        )
+    else:
+        authority_paths = tuple(
+            dict.fromkeys(
+                (
+                    *recognized_authority_paths,
+                    *(
+                        candidate
+                        for candidate in _AUTHORITY_CANDIDATES
+                        if (root / candidate).is_file()
+                    ),
+                )
+            )
+        )
     docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
     task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
     source = _source_observation(root, inspection, identity, transaction_id, created_at)
@@ -209,6 +228,8 @@ def build_workspace_bootstrap_files(
         task_path=task_path,
         check_plan_digest=plan.plan_digest,
         local_nonce=local_nonce,
+        primary_authority_id=primary_authority_id,
+        compatibility_discovery_digest=compatibility_discovery_digest,
     )
     receipts = _bootstrap_receipts(
         records,
@@ -1696,6 +1717,8 @@ def _bootstrap_records(
     task_path: str | None,
     check_plan_digest: str,
     local_nonce: str | None,
+    primary_authority_id: str | None,
+    compatibility_discovery_digest: str | None,
 ) -> dict[str, dict[str, Any]]:
     context = {
         "authority_paths": list(authority_paths),
@@ -1707,6 +1730,12 @@ def _bootstrap_records(
     }
     if local_nonce is not None:
         context["local_repository_nonce"] = local_nonce
+    if compatibility_discovery_digest is not None:
+        context["compatibility_discovery_digest"] = compatibility_discovery_digest
+        context["primary_authority_id"] = primary_authority_id
+        context["authority_selection_state"] = (
+            "selected" if primary_authority_id is not None else "not_detected"
+        )
     authority_lineage = _lineage("authority_bootstrap", bootstrap_intent_id, bootstrap_plan_id)
     authority = seal_record(
         _record_envelope(
@@ -2694,6 +2723,10 @@ def _recovery_payload(
         "authority": {
             "state": context.get("authority_state"),
             "paths": context.get("authority_paths", []),
+            "primary_authority_id": context.get("primary_authority_id"),
+            "compatibility_discovery_digest": context.get(
+                "compatibility_discovery_digest"
+            ),
             "revision": authority.get("revision_id"),
         },
         "current_work": {

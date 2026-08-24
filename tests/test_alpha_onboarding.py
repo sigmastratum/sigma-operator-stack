@@ -105,6 +105,20 @@ class AlphaOnboardingTests(unittest.TestCase):
                 if arguments[1:] == ["tool", "dir", "--bin"]:
                     return subprocess.CompletedProcess(arguments, 0, f"{tool_bin}\n", "")
                 if arguments[0] == os.fspath(tool_bin / "sos"):
+                    if arguments[1] == "compatibility":
+                        return subprocess.CompletedProcess(
+                            arguments,
+                            0,
+                            json.dumps(
+                                {
+                                    "contract": "sos_compatibility_projection_v1",
+                                    "status": "success",
+                                    "reasons": ["SOS_COMPATIBILITY_READY"],
+                                    "details": {},
+                                }
+                            ),
+                            "",
+                        )
                     return subprocess.CompletedProcess(arguments, 0, "", "")
                 raise AssertionError(arguments)
 
@@ -114,6 +128,15 @@ class AlphaOnboardingTests(unittest.TestCase):
             commands = [arguments for arguments, _ in calls]
             install = next(arguments for arguments in commands if arguments[1:3] == ["tool", "install"])
             self.assertEqual(install[-1], os.fspath(bundle / alpha.WHEEL))
+            self.assertEqual(
+                commands[-2],
+                [
+                    os.fspath(tool_bin / "sos"),
+                    "compatibility",
+                    os.fspath(project),
+                    "--json",
+                ],
+            )
             self.assertEqual(commands[-1], [os.fspath(tool_bin / "sos"), "init", "--with-codex", os.fspath(project)])
             self.assertFalse(any("qualify" in arguments for arguments in commands))
             self.assertFalse(any(kwargs.get("shell") for _, kwargs in calls))
@@ -125,6 +148,70 @@ class AlphaOnboardingTests(unittest.TestCase):
             with self.assertRaises(alpha.StartError) as raised:
                 alpha.verify_bundle(bundle)
             self.assertEqual(raised.exception.code, "SOS_ALPHA_CHECKSUM_MISMATCH")
+
+    def test_competing_authorities_stop_launcher_before_init(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = self.make_bundle(root)
+            project = root / "project"
+            project.mkdir()
+            tool_bin = root / "tool-bin"
+            tool_bin.mkdir()
+            calls: list[list[str]] = []
+
+            def which(name: str) -> str | None:
+                return (
+                    f"/synthetic/bin/{name}"
+                    if name in {"git", "uv", "codex"}
+                    else None
+                )
+
+            def runner(
+                arguments: list[str], **_: object
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(arguments)
+                if arguments[-2:] == ["rev-parse", "--show-toplevel"]:
+                    return subprocess.CompletedProcess(arguments, 0, f"{project}\n", "")
+                if arguments[1:3] == ["tool", "install"]:
+                    sos = tool_bin / "sos"
+                    sos.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                    sos.chmod(0o755)
+                    return subprocess.CompletedProcess(arguments, 0, "", "")
+                if arguments[1:] == ["tool", "dir", "--bin"]:
+                    return subprocess.CompletedProcess(arguments, 0, f"{tool_bin}\n", "")
+                if arguments[0] == os.fspath(tool_bin / "sos"):
+                    return subprocess.CompletedProcess(
+                        arguments,
+                        2,
+                        json.dumps(
+                            {
+                                "contract": "sos_compatibility_projection_v1",
+                                "status": "owner_required",
+                                "reasons": ["SOS_PRIMARY_AUTHORITY_REQUIRED"],
+                                "details": {
+                                    "authority_candidates": [
+                                        {"authority_id": "agents:AGENTS.md"},
+                                        {"authority_id": "openspec:openspec"},
+                                    ]
+                                },
+                            }
+                        ),
+                        "",
+                    )
+                raise AssertionError(arguments)
+
+            with self.assertRaises(alpha.StartError) as raised:
+                alpha.run_onboarding(bundle, project, which=which, runner=runner)
+
+            self.assertEqual(
+                raised.exception.code,
+                "SOS_ALPHA_PRIMARY_AUTHORITY_REQUIRED",
+            )
+            self.assertIn("agents:AGENTS.md", raised.exception.problem)
+            self.assertFalse(
+                any("init" in arguments for arguments in calls),
+                calls,
+            )
 
     def test_missing_uv_fails_before_install_or_project_mutation(self) -> None:
         calls: list[list[str]] = []

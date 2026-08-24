@@ -285,6 +285,7 @@ def run_onboarding(
     bundle: Path,
     project: Path,
     *,
+    primary_authority_id: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
@@ -337,8 +338,79 @@ def run_onboarding(
             "The installed SOS command was not found in the uv tool directory.",
             "Check 'uv tool dir --bin', then run the launcher again.",
         )
+    compatibility_command = [
+        os.fspath(sos),
+        "compatibility",
+        os.fspath(root),
+        "--json",
+    ]
+    if primary_authority_id is not None:
+        compatibility_command.extend(["--primary-authority", primary_authority_id])
+    compatibility = runner(
+        compatibility_command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        compatibility_result = json.loads(compatibility.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise _fail(
+            "SOS_ALPHA_COMPATIBILITY_INVALID",
+            "SOS did not return a valid existing-project compatibility result.",
+            "Read the SOS error, correct the named issue, then run the launcher again.",
+        ) from error
+    if (
+        not isinstance(compatibility_result, dict)
+        or compatibility_result.get("contract")
+        != "sos_compatibility_projection_v1"
+    ):
+        raise _fail(
+            "SOS_ALPHA_COMPATIBILITY_INVALID",
+            "SOS returned an unexpected existing-project compatibility contract.",
+            "Stop and verify the exact installed SOS package before retrying.",
+        )
+    compatibility_status = compatibility_result.get("status")
+    if compatibility_status == "owner_required":
+        details = compatibility_result.get("details")
+        candidates = (
+            details.get("authority_candidates", [])
+            if isinstance(details, dict)
+            else []
+        )
+        candidate_ids = [
+            value.get("authority_id")
+            for value in candidates
+            if isinstance(value, dict)
+            and isinstance(value.get("authority_id"), str)
+        ]
+        choices = ", ".join(candidate_ids) or "no valid IDs returned"
+        raise _fail(
+            "SOS_ALPHA_PRIMARY_AUTHORITY_REQUIRED",
+            f"This project has more than one possible authority: {choices}.",
+            "Choose the primary one and rerun: start-sos-alpha "
+            "--primary-authority '<exact-discovered-id>' /path/to/project",
+        )
+    if compatibility.returncode != 0 or compatibility_status != "success":
+        reasons = compatibility_result.get("reasons")
+        reason = (
+            reasons[0]
+            if isinstance(reasons, list) and reasons
+            else "unknown blocker"
+        )
+        raise _fail(
+            "SOS_ALPHA_COMPATIBILITY_BLOCKED",
+            f"SOS stopped before changing project files: {reason}.",
+            "Correct the reported compatibility issue, then run the launcher again.",
+        )
+    print("Existing project compatibility check passed.")
     print("\nSOS will now show one complete project plan and ask once before changing files.")
-    initialized = runner([os.fspath(sos), "init", "--with-codex", os.fspath(root)], check=False)
+    init_command = [os.fspath(sos), "init", "--with-codex"]
+    if primary_authority_id is not None:
+        init_command.extend(["--primary-authority", primary_authority_id])
+    init_command.append(os.fspath(root))
+    initialized = runner(init_command, check=False)
     if initialized.returncode != 0:
         raise _fail(
             "SOS_ALPHA_INIT_FAILED",
@@ -360,6 +432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Check and install the exact SOS alpha bundle into one existing Git project.",
     )
     parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
+    parser.add_argument("--primary-authority")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
     try:
@@ -369,7 +442,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "The alpha launcher must not be run through a symbolic link.",
                 "Run the checked start-sos-alpha file directly from the extracted bundle.",
             )
-        run_onboarding(launcher.parent, arguments.project)
+        run_onboarding(
+            launcher.parent,
+            arguments.project,
+            primary_authority_id=arguments.primary_authority,
+        )
     except StartError as error:
         print("\nSOS alpha setup stopped.", file=sys.stderr)
         print(f"Code: {error.code}", file=sys.stderr)

@@ -6,6 +6,26 @@ Community v0.1 supports one client path:
 sos init --with-codex PATH
 ```
 
+For an existing mature repository, inspect the zero-write compatibility
+projection first:
+
+```text
+sos compatibility PATH
+```
+
+The projection reports `preserve`, `append`, `create` or `block` for existing
+agent instructions, Codex/SOS state and the bounded OpenSpec, BMAD, spec-kit
+and governance-root grammar. Multiple recognized authority systems return
+`owner_required`. Continue only with one exact ID from that projection:
+
+```text
+sos init --with-codex --primary-authority '<discovered-id>' PATH
+```
+
+The selection and discovery digest are bound into the aggregate plan and the
+canonical authority record. A changed directory, file, selection or managed
+target makes the preview stale before any write.
+
 The command computes an overlay-aware post-managed application fingerprint,
 shows one aggregate preview, and asks once. That confirmation binds the
 canonical bootstrap subplan, exact two-target Codex setup, launcher/package

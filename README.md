@@ -35,6 +35,7 @@ Linux/Git/Python vertical:
 
 ```text
 sos init [PATH]
+sos compatibility [PATH]
 sos init --with-codex [PATH]
 sos regenerate [PATH]
 sos accept REVISION [PATH]
@@ -170,6 +171,24 @@ rollback into one aggregate preview and one confirmation. It never runs
 qualification. Until `sos qualify` succeeds, `sos_preflight` reports
 `not_verified` and names `sos qualify` as the next action. See the
 [one-command Codex lifecycle](docs/one-command-codex-lifecycle.md).
+
+Before that confirmation, SOS performs a bounded read-only compatibility
+preflight. It identifies existing root and nested `AGENTS.md`, `.codex`,
+`.sigma`, OpenSpec, BMAD, spec-kit and recognized governance roots, then shows
+`preserve`, `append`, `create` or `block` for each relevant surface. Existing
+project bytes are never printed. The two managed files include exact
+before/patch/after digests and byte counts in the preview. If more than one
+recognized authority system exists, SOS writes nothing and asks for one exact
+discovered ID:
+
+```bash
+sos compatibility PATH
+sos init --with-codex --primary-authority '<discovered-id>' PATH
+```
+
+SOS never chooses between competing governance systems or merges their
+policies. Unknown frameworks are preserved but are outside the alpha
+compatibility claim.
 
 Pinned update and uninstall ordering is:
 

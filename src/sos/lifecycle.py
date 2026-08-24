@@ -25,6 +25,11 @@ from .client_integration import (
     rollback_codex_bootstrap_setup,
 )
 from .contracts import ContractError, digest_value, exclusion_policy_digest
+from .compatibility import (
+    CompatibilityError,
+    CompatibilityProjection,
+    discover_compatibility,
+)
 from .dirty import observe_application
 from .repository import (
     RepositoryError,
@@ -50,10 +55,16 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class LifecycleError(RuntimeError):
-    def __init__(self, reason: str, status: Status = Status.INVALID) -> None:
+    def __init__(
+        self,
+        reason: str,
+        status: Status = Status.INVALID,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(reason)
         self.reason = reason
         self.status = status
+        self.details = details or {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +76,7 @@ class OneCommandPlan:
     local_nonce: str | None
     repository_id: str
     setup: CodexBootstrapSetup
+    compatibility: CompatibilityProjection
     expected_application_fingerprint: str
     expected_application_state: str
     aggregate_plan_digest: str
@@ -79,6 +91,8 @@ class OneCommandPlan:
             "repository_id": self.repository_id,
             "setup_manifest": self.setup.manifest,
             "setup_plan_digest": self.setup.plan_digest,
+            "compatibility_discovery_digest": self.compatibility.discovery_digest,
+            "primary_authority_id": self.compatibility.primary_authority_id,
             "expected_application_fingerprint": self.expected_application_fingerprint,
             "expected_application_state": self.expected_application_state,
             "aggregate_plan_digest": self.aggregate_plan_digest,
@@ -101,6 +115,7 @@ class OneCommandPlan:
                 }
             ),
             "codex_setup_plan_digest": self.setup.plan_digest,
+            "compatibility": self.compatibility.details(self.setup.manifest["plans"]),
             "expected_application_fingerprint": self.expected_application_fingerprint,
             "expected_application_state": self.expected_application_state,
             "managed_targets": ["AGENTS.md", ".codex/config.toml"],
@@ -123,7 +138,10 @@ class OneCommandPlan:
 
 
 def prepare_one_command_init(
-    path: str = ".", *, launcher: LauncherBinding | None = None
+    path: str = ".",
+    *,
+    launcher: LauncherBinding | None = None,
+    primary_authority_id: str | None = None,
 ) -> OneCommandPlan:
     root = discover_repository_root(path)
     preliminary = inspect_repository(root)
@@ -141,9 +159,19 @@ def prepare_one_command_init(
     provisional = repository_identity_contract(root)
     local_nonce = secrets.token_hex(16) if provisional.identity_mode == "local_nonce_bound" else None
     identity = repository_identity_contract(root, local_repository_nonce=local_nonce)
+    compatibility = discover_compatibility(
+        root, primary_authority_id=primary_authority_id
+    )
     setup = prepare_codex_bootstrap_setup(
         os.fspath(root), identity.repository_id, launcher=launcher or observe_installed_launcher()
     )
+    compatibility_details = compatibility.details(setup.manifest["plans"])
+    if compatibility.status != Status.SUCCESS:
+        raise LifecycleError(
+            compatibility.reasons[0],
+            compatibility.status,
+            compatibility_details,
+        )
     exclusion = {
         "contract": "sos_bootstrap_exclusion_policy_v2",
         "schema_major": 2,
@@ -169,6 +197,8 @@ def prepare_one_command_init(
         "bootstrap_intent_id": bootstrap_intent_id,
         "bootstrap_plan_id": bootstrap_plan_id,
         "codex_setup_plan_digest": setup.plan_digest,
+        "compatibility_discovery_digest": compatibility.discovery_digest,
+        "primary_authority_id": compatibility.primary_authority_id,
         "expected_application_fingerprint": projected.fingerprint,
         "package_version": setup.binding.package_version,
         "launcher_digest": setup.binding.digest,
@@ -182,6 +212,7 @@ def prepare_one_command_init(
         local_nonce,
         identity.repository_id,
         setup,
+        compatibility,
         projected.fingerprint,
         projected.state,
         digest_value(aggregate),
@@ -189,10 +220,17 @@ def prepare_one_command_init(
 
 
 def preview_one_command_init(
-    path: str = ".", *, launcher: LauncherBinding | None = None
+    path: str = ".",
+    *,
+    launcher: LauncherBinding | None = None,
+    primary_authority_id: str | None = None,
 ) -> TerminalResult:
     try:
-        return prepare_one_command_init(path, launcher=launcher).preview()
+        return prepare_one_command_init(
+            path,
+            launcher=launcher,
+            primary_authority_id=primary_authority_id,
+        ).preview()
     except LifecycleError as exc:
         if exc.reason == "SOS_ALREADY_INITIALIZED":
             current = workspace_status(path)
@@ -204,9 +242,11 @@ def preview_one_command_init(
                     ("SOS_P106_ALREADY_INSTALLED",),
                     {**current.details, "codex_setup_state": "installed"},
                 )
-        return TerminalResult("sos_p106_init_result_v1", exc.status, (exc.reason,), {})
-    except (RepositoryError, ClientIntegrationError) as exc:
-        status = exc.status if isinstance(exc, ClientIntegrationError) else Status.INVALID
+        return TerminalResult(
+            "sos_p106_init_result_v1", exc.status, (exc.reason,), exc.details
+        )
+    except (RepositoryError, ClientIntegrationError, CompatibilityError) as exc:
+        status = exc.status if hasattr(exc, "status") else Status.INVALID
         reason = exc.reason
         return TerminalResult("sos_p106_init_result_v1", status, (reason,), {})
 
@@ -254,6 +294,9 @@ def execute_one_command_init(
             bootstrap_intent_id=plan.bootstrap_intent_id,
             bootstrap_plan_id=plan.bootstrap_plan_id,
             local_nonce=plan.local_nonce,
+            primary_authority_id=plan.compatibility.primary_authority_id,
+            compatibility_discovery_digest=plan.compatibility.discovery_digest,
+            recognized_authority_paths=plan.compatibility.authority_paths,
         )
         files.update(render_codex_bootstrap_control_files(plan.setup))
         files[_RECEIPT] = _json_bytes(
@@ -263,6 +306,8 @@ def execute_one_command_init(
                 "repository_id": plan.repository_id,
                 "application_fingerprint": actual.fingerprint,
                 "codex_setup_plan_digest": plan.setup.plan_digest,
+                "compatibility_discovery_digest": plan.compatibility.discovery_digest,
+                "primary_authority_id": plan.compatibility.primary_authority_id,
                 "launcher_digest": plan.setup.binding.digest,
                 "package_version": plan.setup.binding.package_version,
                 "qualification_performed": False,
@@ -272,6 +317,9 @@ def execute_one_command_init(
             }
         )
         extend_bootstrap_staging(plan.root, plan.transaction_id, files)
+        final_actual = _actual_application(plan)
+        if final_actual.fingerprint != plan.expected_application_fingerprint:
+            raise LifecycleError("SOS_P106_PREVIEW_STALE", Status.STALE)
         _call_fault(fault, "staging_complete")
         commit_bootstrap_staging(plan.root, plan.transaction_id)
         committed = True
@@ -288,6 +336,8 @@ def execute_one_command_init(
                 **current_status.details,
                 "aggregate_plan_digest": plan.aggregate_plan_digest,
                 "codex_setup_state": "installed",
+                "compatibility_discovery_digest": plan.compatibility.discovery_digest,
+                "primary_authority_id": plan.compatibility.primary_authority_id,
                 "configured_check_families": configured_count,
                 "qualification_state": "not_verified",
                 "qualification_next_action": "sos qualify",
@@ -377,16 +427,20 @@ def recover_one_command_init(
         return TerminalResult("sos_p106_recovery_result_v1", status, (reason,), {})
 
 
-def _stable_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str]:
+def _stable_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str, str, str | None]:
     return (
         plan.repository_id,
         plan.setup.plan_digest,
         plan.expected_application_fingerprint,
         plan.setup.binding.digest,
+        plan.compatibility.discovery_digest,
+        plan.compatibility.primary_authority_id,
     )
 
 
-def _revalidated_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str]:
+def _revalidated_plan_inputs(
+    plan: OneCommandPlan,
+) -> tuple[str, str, str, str, str, str | None]:
     inspection = inspect_repository(plan.root, local_repository_nonce=plan.local_nonce)
     if inspection.control_plane_state != "absent" or inspection.staging_roots:
         raise LifecycleError("SOS_P106_PREVIEW_STALE", Status.STALE)
@@ -394,6 +448,12 @@ def _revalidated_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str]:
     setup = prepare_codex_bootstrap_setup(
         os.fspath(plan.root), identity.repository_id, launcher=plan.setup.binding
     )
+    compatibility = discover_compatibility(
+        plan.root,
+        primary_authority_id=plan.compatibility.primary_authority_id,
+    )
+    if compatibility.status != Status.SUCCESS:
+        raise LifecycleError("SOS_P106_PREVIEW_STALE", Status.STALE)
     exclusion = {
         "contract": "sos_bootstrap_exclusion_policy_v2",
         "schema_major": 2,
@@ -412,7 +472,14 @@ def _revalidated_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str]:
     )
     if not observed.complete or observed.fingerprint is None:
         raise LifecycleError("SOS_P106_PREVIEW_STALE", Status.STALE)
-    return identity.repository_id, setup.plan_digest, observed.fingerprint, setup.binding.digest
+    return (
+        identity.repository_id,
+        setup.plan_digest,
+        observed.fingerprint,
+        setup.binding.digest,
+        compatibility.discovery_digest,
+        compatibility.primary_authority_id,
+    )
 
 
 def _actual_application(plan: OneCommandPlan):
@@ -491,6 +558,7 @@ def _read_pending(root: Path, staging_name: str) -> dict[str, Any]:
     required = {
         "contract", "transaction_id", "bootstrap_intent_id", "bootstrap_plan_id",
         "local_nonce", "repository_id", "setup_manifest", "setup_plan_digest",
+        "compatibility_discovery_digest", "primary_authority_id",
         "expected_application_fingerprint", "expected_application_state",
         "aggregate_plan_digest", "raw_project_content_serialized",
         "absolute_paths_serialized", "qualification_included", "network_performed",
@@ -499,6 +567,7 @@ def _read_pending(root: Path, staging_name: str) -> dict[str, Any]:
         raise LifecycleError("SOS_P106_PENDING_INVALID")
     for field in (
         "bootstrap_intent_id", "bootstrap_plan_id", "repository_id", "setup_plan_digest",
+        "compatibility_discovery_digest",
         "expected_application_fingerprint", "aggregate_plan_digest",
     ):
         if not isinstance(value[field], str) or _DIGEST.fullmatch(value[field]) is None:
@@ -506,6 +575,15 @@ def _read_pending(root: Path, staging_name: str) -> dict[str, Any]:
     if re.fullmatch(r"[0-9a-f]{64}", value["transaction_id"]) is None:
         raise LifecycleError("SOS_P106_PENDING_INVALID")
     if value["local_nonce"] is not None and re.fullmatch(r"[0-9a-f]{32}", value["local_nonce"]) is None:
+        raise LifecycleError("SOS_P106_PENDING_INVALID")
+    if value["primary_authority_id"] is not None and (
+        not isinstance(value["primary_authority_id"], str)
+        or re.fullmatch(
+            r"[a-z][a-z0-9-]*:[A-Za-z0-9._/-]+",
+            value["primary_authority_id"],
+        )
+        is None
+    ):
         raise LifecycleError("SOS_P106_PENDING_INVALID")
     if any(value[field] is not False for field in (
         "raw_project_content_serialized", "absolute_paths_serialized", "qualification_included", "network_performed"

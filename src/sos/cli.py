@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from . import __version__
 from .agent_api import project_tool
 from .checks import discover_checks
+from .compatibility import compatibility_status
 from .client_integration import (
     client_status,
     codex_setup_status,
@@ -71,6 +72,10 @@ def _parser() -> argparse.ArgumentParser:
     qualification_plan.add_argument("path", nargs="?", default=".")
     qualification_plan.add_argument("--family", dest="family_id")
     qualification_plan.add_argument("--json", action="store_true", dest="as_json")
+    compatibility = subparsers.add_parser("compatibility")
+    compatibility.add_argument("path", nargs="?", default=".")
+    compatibility.add_argument("--primary-authority")
+    compatibility.add_argument("--json", action="store_true", dest="as_json")
     for command in ("init", "regenerate"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("path", nargs="?", default=".")
@@ -78,6 +83,7 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--json", action="store_true", dest="as_json")
         if command == "init":
             subparser.add_argument("--with-codex", action="store_true")
+            subparser.add_argument("--primary-authority")
     qualify = subparsers.add_parser("qualify")
     qualify.add_argument("path", nargs="?", default=".")
     qualify.add_argument("--family")
@@ -220,10 +226,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = validate_repository(args.path)
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
+    elif args.command == "compatibility":
+        result = compatibility_status(
+            args.path,
+            primary_authority_id=args.primary_authority,
+        )
+        payload = result.to_dict()
+        exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
+        if args.primary_authority is not None and not args.with_codex:
+            payload = {
+                "contract": "sos_init_result_v1",
+                "status": "invalid",
+                "reasons": ["SOS_PRIMARY_AUTHORITY_WITHOUT_CODEX_INIT"],
+            }
+            _print(payload, args.as_json)
+            return 2
         if args.with_codex:
             try:
-                one_command_plan = prepare_one_command_init(args.path)
+                one_command_plan = prepare_one_command_init(
+                    args.path,
+                    primary_authority_id=args.primary_authority,
+                )
             except LifecycleError as exc:
                 if exc.reason == "SOS_P106_RECOVERY_REQUIRED":
                     recovered = recover_one_command_init(args.path)
@@ -232,9 +256,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                         payload = result.to_dict()
                         _print(payload, args.as_json)
                         return 2
-                    one_command_plan = prepare_one_command_init(args.path)
+                    one_command_plan = prepare_one_command_init(
+                        args.path,
+                        primary_authority_id=args.primary_authority,
+                    )
                 else:
-                    result = preview_one_command_init(args.path)
+                    result = preview_one_command_init(
+                        args.path,
+                        primary_authority_id=args.primary_authority,
+                    )
                     payload = result.to_dict()
                     _print(payload, args.as_json)
                     return 0 if result.status == "success" else 2

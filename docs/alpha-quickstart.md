@@ -51,6 +51,16 @@ The launcher first checks the machine, project, bundle inventory and every
 SHA-256 digest. If a check fails, it stops before installing SOS and prints one
 specific correction.
 
+It then performs a read-only compatibility check for existing agent
+instructions, Codex/SOS state and recognized governance systems. Most projects
+continue automatically. If more than one possible authority is found, the
+launcher changes nothing and prints the exact IDs. Choose one and rerun:
+
+```bash
+/path/to/sigma-operator-stack-0.1.0a1-alpha/start-sos-alpha \
+  --primary-authority '<exact-discovered-id>' /path/to/your-project
+```
+
 If the checks pass, it installs the exact wheel from that bundle and shows one
 complete SOS preview. Read the preview, then answer the single confirmation.
 SOS preserves existing project files and refuses conflicting or changed
