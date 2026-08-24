@@ -274,7 +274,14 @@ def build_workspace_bootstrap_files(
         "created_at": created_at,
     }
     project_map = _project_map_markdown(authority_paths, docs, task_path, plan)
-    recovery = _recovery_payload(manifest, records, plan, None, status="not_verified")
+    recovery = _recovery_payload(
+        manifest,
+        records,
+        plan,
+        None,
+        "absent",
+        status="not_verified",
+    )
     files: dict[str, bytes] = {
         "manifest.json": _json_bytes(manifest),
         "records/authority.json": _json_bytes(records["authority"]),
@@ -670,6 +677,7 @@ def recover_workspace(path: str = ".") -> TerminalResult:
         replay["records"],
         replay["plan"],
         replay["qualification"],
+        replay["qualification_integrity"],
         status=status.status.value,
     )
     reasons = status.reasons if status.status == Status.STALE else ("SOS_RECOVERY_READY",)
@@ -702,6 +710,21 @@ def doctor_workspace(path: str = ".") -> TerminalResult:
             "sos_doctor_result_v1",
             Status.NOT_VERIFIED,
             ("SOS_QUALIFICATION_NOT_RUN",),
+            recovery.details,
+        )
+    qualification_integrity = recovery.details.get("qualification_integrity")
+    if qualification_integrity == "valid_stale":
+        return TerminalResult(
+            "sos_doctor_result_v1",
+            Status.STALE,
+            ("SOS_QUALIFICATION_STALE",),
+            recovery.details,
+        )
+    if qualification_integrity != "valid":
+        return TerminalResult(
+            "sos_doctor_result_v1",
+            Status.INVALID,
+            ("SOS_CONTROL_PLANE_INTEGRITY_INVALID",),
             recovery.details,
         )
     recovery_binding = recovery.details.get("source_binding", {})
@@ -2724,6 +2747,7 @@ def _recovery_payload(
     records: dict[str, dict[str, Any]],
     plan: CheckPlan | dict[str, Any],
     qualification: dict[str, Any] | None,
+    qualification_integrity: str,
     *,
     status: str,
 ) -> dict[str, Any]:
@@ -2761,6 +2785,7 @@ def _recovery_payload(
         },
         "checks": plan_value,
         "qualification": qualification,
+        "qualification_integrity": qualification_integrity,
         "receipt_tip": manifest.get("receipt_tip"),
         "control_plane_integrity": "valid",
         "control_plane_digest": manifest.get("control_plane_digest"),

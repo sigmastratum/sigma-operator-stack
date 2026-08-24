@@ -4,6 +4,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from sos.agent_api import project_tool
-from sos.checks import qualify_supported
+from sos.checks import discover_checks, qualify_supported
 from sos.qualification_contracts import schema_hashes, seal_contract, validate_contract
 from sos.workspace import (
     WorkspaceError,
@@ -304,6 +305,30 @@ class QualificationIntegrityTests(unittest.TestCase):
             ),
             test_receipt,
         )
+
+    def test_live_discovery_drift_is_non_green_on_recovery_doctor_and_preflight(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        qualify_once(str(root), family_id="python.syntax", confirmed=True)
+        discovered = discover_checks(str(root))
+        drifted = replace(discovered, plan_digest="sha256:" + "f" * 64)
+
+        with patch("sos.workspace.discover_checks", return_value=drifted):
+            status = workspace_status(str(root))
+            self.assertEqual(status.status.value, "success", status.to_dict())
+            self.assertEqual(status.details["qualification_integrity"], "valid_stale")
+
+            recovery = recover_workspace(str(root))
+            self.assertEqual(recovery.status.value, "success", recovery.to_dict())
+            self.assertEqual(recovery.details["qualification_integrity"], "valid_stale")
+
+            doctor = doctor_workspace(str(root))
+            self.assertEqual(doctor.status.value, "stale", doctor.to_dict())
+            self.assertEqual(doctor.reasons, ("SOS_QUALIFICATION_STALE",))
+
+            preflight = project_tool(str(root), "sos_preflight")
+            self.assertEqual(preflight.status.value, "stale", preflight.to_dict())
+            self.assertEqual(preflight.reasons, ("SOS_QUALIFICATION_STALE",))
 
     def test_foreign_and_validly_resealed_forged_receipts_fail_closed(self) -> None:
         first_temporary, first_root = self.make_project()
