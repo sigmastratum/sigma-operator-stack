@@ -157,9 +157,21 @@ def _filesystem_for_path(path: Path, mountinfo_text: str) -> str:
 
 
 def _unescape_mount_field(value: str) -> str:
-    for encoded, decoded in (("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\")):
-        value = value.replace(encoded, decoded)
-    return value
+    escapes = {"040": " ", "011": "\t", "012": "\n", "134": "\\"}
+    decoded: list[str] = []
+    cursor = 0
+    while cursor < len(value):
+        escape = value.find("\\", cursor)
+        if escape < 0:
+            decoded.append(value[cursor:])
+            break
+        decoded.append(value[cursor:escape])
+        code = value[escape + 1 : escape + 4]
+        if len(code) != 3 or code not in escapes:
+            raise ValueError("mount field escape invalid")
+        decoded.append(escapes[code])
+        cursor = escape + 4
+    return "".join(decoded)
 
 
 def _details(**values: object) -> dict[str, object]:

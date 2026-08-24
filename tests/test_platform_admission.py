@@ -101,6 +101,25 @@ assert 'sos.managed_files' not in sys.modules
         self.assertEqual(result.status, Status.NOT_VERIFIED)
         self.assertEqual(result.reasons, ("SOS_FILESYSTEM_PROFILE_NOT_VERIFIED",))
 
+    def test_malformed_more_specific_escape_cannot_fall_back_to_parent(self) -> None:
+        parent = "36 25 0:32 / /project rw,relatime - ext4 /dev/root rw\n"
+        for malformed in ("\\999", "\\04", "\\"):
+            with self.subTest(malformed=malformed):
+                mountinfo = (
+                    parent
+                    + f"37 36 0:45 / /project{malformed}shared rw,relatime - 9p drvfs rw\n"
+                )
+                result = admit_project_filesystem(
+                    "/project/shared",
+                    platform_name="linux",
+                    mountinfo_text=mountinfo,
+                )
+                self.assertEqual(result.status, Status.NOT_VERIFIED)
+                self.assertEqual(
+                    result.reasons,
+                    ("SOS_FILESYSTEM_PROFILE_NOT_VERIFIED",),
+                )
+
     def test_cli_rejects_before_confirmation_or_project_write(self) -> None:
         from sos import cli
 
