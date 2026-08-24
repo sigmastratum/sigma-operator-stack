@@ -1012,6 +1012,16 @@ def store_qualification(path: str, receipt: dict[str, Any]) -> None:
         collision_reason="SOS_QUALIFICATION_RECEIPT_REPLAYED",
     )
     _replace_view_json(root, "views/qualification.json", receipt)
+    published, integrity = _replay_qualification(
+        root,
+        {
+            "tree_digest": status.details["source_tree_digest"],
+            "status_digest": status.details["source_status_digest"],
+        },
+        status.details["repository_id"],
+    )
+    if published != receipt or integrity != "valid":
+        raise WorkspaceError("SOS_QUALIFICATION_STALE")
 
 
 def _load_and_replay(
@@ -1164,7 +1174,6 @@ def _replay_integrity(
     )
     qualification, qualification_integrity = _replay_qualification(
         root,
-        plan,
         successor["source_binding"],
         identity.repository_id,
     )
@@ -1420,7 +1429,6 @@ def _validate_record_lineage(
 
 def _replay_qualification(
     root: Path,
-    discovery_plan: dict[str, Any],
     source_binding: dict[str, Any],
     repository_id: str,
 ) -> tuple[dict[str, Any] | None, str]:
@@ -1437,16 +1445,18 @@ def _replay_qualification(
     _validate_receipt_history(root, view)
     _validate_qualification_tip_ledger(root, view)
     plan = _read_json(root, _qualification_artifact_path("plans", view["plan_digest"]))
-    if (
-        plan.get("discovery_plan_digest") != discovery_plan.get("plan_digest")
-        or view.get("repository_id") != repository_id
-    ):
+    if view.get("repository_id") != repository_id:
         raise ContractError()
-    current = (
+    source_current = (
         view.get("source_tree_digest") == source_binding.get("tree_digest")
         and view.get("source_status_digest") == source_binding.get("status_digest")
     )
-    return view, "valid" if current else "valid_stale"
+    if not source_current:
+        return view, "valid_stale"
+    live_discovery_plan = discover_checks(os.fspath(root))
+    if plan.get("discovery_plan_digest") != live_discovery_plan.plan_digest:
+        return view, "valid_stale"
+    return view, "valid"
 
 
 def _validate_qualification_payload(payload: dict[str, Any]) -> None:

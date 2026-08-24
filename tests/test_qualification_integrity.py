@@ -11,16 +11,20 @@ from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
+from sos.agent_api import project_tool
 from sos.checks import qualify_supported
 from sos.qualification_contracts import schema_hashes, seal_contract, validate_contract
 from sos.workspace import (
     WorkspaceError,
+    accept_proposal,
     admit_qualification_plan,
+    doctor_workspace,
     execute_admitted_qualification,
     initialize_workspace,
     prepare_qualification_plan,
     qualify_once,
     recover_workspace,
+    regenerate_workspace,
     store_qualification,
     workspace_status,
 )
@@ -231,6 +235,75 @@ class QualificationIntegrityTests(unittest.TestCase):
         observed = workspace_status(str(root))
         self.assertEqual(observed.status.value, "invalid")
         self.assertEqual(observed.reasons, ("SOS_CONTROL_PLANE_INTEGRITY_INVALID",))
+
+    def test_successor_source_qualification_does_not_wedge_bootstrap_check_plan(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        bootstrap_plan = json.loads(
+            (root / ".sigma" / "checks" / "plan.json").read_text(encoding="utf-8")
+        )
+
+        (root / "README.md").write_text(
+            "Synthetic qualification project after accepted successor.\n",
+            encoding="utf-8",
+        )
+        git(root, "add", "README.md")
+        git(root, "commit", "-qm", "synthetic accepted source successor")
+        self.assertEqual(workspace_status(str(root)).status.value, "stale")
+
+        regeneration = regenerate_workspace(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
+        self.assertEqual(regeneration.status.value, "success")
+        for revision in regeneration.details["acceptance_order"]:
+            accepted = accept_proposal(
+                str(root),
+                revision,
+                confirmed=True,
+                controlling_tty_observed=True,
+            )
+            self.assertEqual(accepted.status.value, "success", accepted.to_dict())
+        self.assertEqual(workspace_status(str(root)).status.value, "success")
+
+        syntax_plan, _syntax_admission, syntax_receipt = qualify_once(
+            str(root), family_id="python.syntax", confirmed=True
+        )
+        self.assertNotEqual(
+            syntax_plan["discovery_plan_digest"],
+            bootstrap_plan["plan_digest"],
+        )
+        self.assertEqual(syntax_receipt["status"], "passed_local")
+
+        status = workspace_status(str(root))
+        self.assertEqual(status.status.value, "success", status.to_dict())
+        self.assertEqual(status.details["qualification_integrity"], "valid")
+        doctor = doctor_workspace(str(root))
+        self.assertEqual(doctor.status.value, "success", doctor.to_dict())
+        preflight = project_tool(str(root), "sos_preflight")
+        self.assertEqual(preflight.status.value, "success", preflight.to_dict())
+
+        _test_plan, _test_admission, test_receipt = qualify_once(
+            str(root), family_id="python.stdlib-unittest", confirmed=True
+        )
+        self.assertEqual(test_receipt["status"], "passed_local")
+        self.assertEqual(test_receipt["sequence_ordinal"], 2)
+        self.assertEqual(
+            test_receipt["predecessor_receipt"], syntax_receipt["receipt_digest"]
+        )
+        tip = json.loads(
+            (root / ".sigma" / "qualification" / "tips" / "00000002.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(tip["receipt_digest"], test_receipt["receipt_digest"])
+        self.assertEqual(
+            json.loads(
+                (root / ".sigma" / "views" / "qualification.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            test_receipt,
+        )
 
     def test_foreign_and_validly_resealed_forged_receipts_fail_closed(self) -> None:
         first_temporary, first_root = self.make_project()
