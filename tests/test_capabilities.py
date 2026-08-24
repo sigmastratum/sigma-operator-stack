@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -20,6 +21,9 @@ from sos.capabilities import (
     PROFILE_AVAILABLE,
     SECCOMP_FILTER_UNAVAILABLE,
     CapabilityComponent,
+    _BoundedOutputExceeded,
+    _BoundedProcessResult,
+    _run_bounded_process,
     _run_component,
     _seal_report,
     clear_capability_cache,
@@ -138,8 +142,7 @@ class IsolationCapabilityTests(unittest.TestCase):
             "reason": None,
             "observed_abi": 4,
         }
-        completed = subprocess.CompletedProcess(
-            args=[],
+        completed = _BoundedProcessResult(
             returncode=0,
             stdout=b"SOS_CAPABILITY_COMPONENT="
             + json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -148,7 +151,7 @@ class IsolationCapabilityTests(unittest.TestCase):
         )
         os.environ["SYNTHETIC_PRIVATE_VALUE"] = "must-not-cross"
         try:
-            with patch("sos.capabilities.subprocess.run", return_value=completed) as runner:
+            with patch("sos.capabilities._run_bounded_process", return_value=completed) as runner:
                 result = _run_component("landlock")
         finally:
             os.environ.pop("SYNTHETIC_PRIVATE_VALUE", None)
@@ -156,13 +159,21 @@ class IsolationCapabilityTests(unittest.TestCase):
         args, kwargs = runner.call_args
         self.assertEqual(args[0][1], "-I")
         self.assertEqual(args[0][-2:], ["--probe", "landlock"])
-        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
-        self.assertFalse(kwargs["shell"])
         self.assertEqual(
             set(kwargs["env"]),
             {"HOME", "LANG", "LC_ALL", "PATH", "PYTHONDONTWRITEBYTECODE", "PYTHONHASHSEED"},
         )
         self.assertNotIn("SYNTHETIC_PRIVATE_VALUE", kwargs["env"])
+
+    def test_parent_enforces_output_limit_while_child_is_running(self) -> None:
+        command = [
+            sys.executable,
+            "-I",
+            "-c",
+            "import os; os.write(1, b'x' * 20000)",
+        ]
+        with self.assertRaises(_BoundedOutputExceeded):
+            _run_bounded_process(command, env={"PATH": "/usr/bin:/bin"})
 
     def test_cli_exit_and_json_match_report(self) -> None:
         supported = _seal_report(

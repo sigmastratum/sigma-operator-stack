@@ -7,8 +7,10 @@ import json
 import os
 import platform
 import re
+import selectors
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -41,6 +43,17 @@ _REASON_PRECEDENCE = (
 class CapabilityComponent:
     status: str
     observed_abi: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _BoundedProcessResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+class _BoundedOutputExceeded(subprocess.SubprocessError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,13 +127,8 @@ def _run_component(component: str) -> dict[str, object]:
     worker = Path(__file__).with_name("_isolation_worker.py")
     command = [sys.executable, "-I", os.fspath(worker), "--probe", component]
     try:
-        completed = subprocess.run(
+        completed = _run_bounded_process(
             command,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=_PROBE_TIMEOUT_SECONDS,
             env={
                 "HOME": "/nonexistent",
                 "LANG": "C.UTF-8",
@@ -129,7 +137,6 @@ def _run_component(component: str) -> dict[str, object]:
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONHASHSEED": "0",
             },
-            shell=False,
         )
     except (OSError, subprocess.SubprocessError):
         return _component_failure(component)
@@ -169,6 +176,67 @@ def _run_component(component: str) -> dict[str, object]:
         "reason": reason,
         "observed_abi": observed_abi,
     }
+
+
+def _run_bounded_process(
+    command: list[str],
+    *,
+    env: dict[str, str],
+) -> _BoundedProcessResult:
+    """Capture at most the declared aggregate output while the child runs."""
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        shell=False,
+    )
+    if process.stdout is None or process.stderr is None:  # pragma: no cover
+        process.kill()
+        process.wait()
+        raise subprocess.SubprocessError("capability probe pipes unavailable")
+    selector = selectors.DefaultSelector()
+    streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    selector.register(process.stdout, selectors.EVENT_READ)
+    selector.register(process.stderr, selectors.EVENT_READ)
+    deadline = time.monotonic() + _PROBE_TIMEOUT_SECONDS
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, _PROBE_TIMEOUT_SECONDS)
+            events = selector.select(remaining)
+            if not events:
+                raise subprocess.TimeoutExpired(command, _PROBE_TIMEOUT_SECONDS)
+            for key, _ in events:
+                stream = key.fileobj
+                captured = sum(len(value) for value in streams.values())
+                chunk = os.read(
+                    stream.fileno(),
+                    min(4096, _MAX_COMPONENT_OUTPUT - captured + 1),
+                )
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                streams[stream].extend(chunk)
+                if sum(len(value) for value in streams.values()) > _MAX_COMPONENT_OUTPUT:
+                    raise _BoundedOutputExceeded("capability probe output exceeded limit")
+        remaining = max(0.0, deadline - time.monotonic())
+        returncode = process.wait(timeout=remaining)
+    except (subprocess.SubprocessError, OSError):
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        selector.close()
+        process.stdout.close()
+        process.stderr.close()
+    return _BoundedProcessResult(
+        returncode=returncode,
+        stdout=bytes(streams[process.stdout]),
+        stderr=bytes(streams[process.stderr]),
+    )
 
 
 def _component_failure(component: str) -> dict[str, object]:
