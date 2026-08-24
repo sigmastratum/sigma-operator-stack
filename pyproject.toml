@@ -27,7 +27,7 @@ Issues = "https://github.com/sigmastratum/sigma-operator-stack/issues"
 Repository = "https://github.com/sigmastratum/sigma-operator-stack"
 
 [project.scripts]
-sos = "sos.cli:main"
+sos = "sos.entrypoint:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

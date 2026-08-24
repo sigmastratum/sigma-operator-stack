@@ -33,6 +33,7 @@ from .lifecycle import (
     recover_one_command_init,
 )
 from .qualification_contracts import QualificationContractError
+from .platform_admission import admit_project_filesystem
 from .repository import RepositoryError
 from .validation import validate_repository
 from .workspace import (
@@ -122,6 +123,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    filesystem_admission = _filesystem_admission_for_command(args)
+    if filesystem_admission is not None and filesystem_admission.status != "success":
+        _print(filesystem_admission.to_dict(), getattr(args, "as_json", False))
+        return 2
     if args.command == "mcp":
         if args.expected_package_version is not None and args.expected_package_version != __version__:
             print("SOS_MCP_PACKAGE_VERSION_MISMATCH", file=sys.stderr)
@@ -372,6 +377,20 @@ def _ask_confirmation(question: str) -> bool:
         return False
     answer = input(question + " [y/N] ").strip().lower()
     return answer in {"y", "yes"}
+
+
+def _filesystem_admission_for_command(
+    args: argparse.Namespace,
+):
+    command = args.command
+    requires_admission = command in {"init", "regenerate", "accept", "qualify"}
+    if command == "setup":
+        requires_admission = args.setup_command in {"install", "recover", "update", "remove"}
+    elif command == "client":
+        requires_admission = args.client_command in {"install", "remove"}
+    if not requires_admission:
+        return None
+    return admit_project_filesystem(args.path)
 
 
 def _print(payload: object, as_json: bool) -> None:

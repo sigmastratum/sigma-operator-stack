@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from .platform_admission import FilesystemAdmissionError, require_project_filesystem
+
 
 _TX = re.compile(r"^[0-9a-f]{64}$")
 _DISPOSABLE_MARKER = ".sos-disposable-root"
@@ -79,6 +81,7 @@ def execute_disposable_bootstrap(root: Path, plan: BootstrapPlan, records: dict[
         raise TransactionError("SOS_DISPOSABLE_AUTHORITY_REQUIRED")
     if root.is_symlink() or not root.is_dir():
         raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    _require_admitted_filesystem(root)
     target = root / ".sigma"
     staging = root / f".sigma.init.{plan.transaction_id}"
     if target.exists() or target.is_symlink() or staging.exists() or staging.is_symlink():
@@ -174,6 +177,7 @@ def create_bootstrap_staging(
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
     if root.is_symlink() or not root.is_dir():
         raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    _require_admitted_filesystem(root)
     normalized = _normalize_files(files)
     if not normalized:
         raise TransactionError("SOS_BOOTSTRAP_PLAN_EMPTY")
@@ -214,6 +218,7 @@ def extend_bootstrap_staging(
     """Append non-colliding files to one exact staging tree."""
     if not _TX.fullmatch(transaction_id):
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    _require_admitted_filesystem(root)
     normalized = _normalize_files(files)
     staging_name = f".sigma.init.{transaction_id}"
     root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -241,6 +246,7 @@ def commit_bootstrap_staging(root: Path, transaction_id: str) -> Path:
     """Atomically admit one fully prepared sibling tree as canonical `.sigma`."""
     if not _TX.fullmatch(transaction_id):
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
+    _require_admitted_filesystem(root)
     staging_name = f".sigma.init.{transaction_id}"
     root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -299,6 +305,13 @@ def _discard_directory_contents(directory_fd: int) -> None:
             os.rmdir(name, dir_fd=directory_fd)
         else:
             os.unlink(name, dir_fd=directory_fd)
+
+
+def _require_admitted_filesystem(root: Path) -> None:
+    try:
+        require_project_filesystem(root)
+    except FilesystemAdmissionError as exc:
+        raise TransactionError(exc.reason) from exc
 
 
 def _normalize_files(

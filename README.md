@@ -18,6 +18,14 @@ checksum before installation. It then installs the exact bundled wheel and
 shows one complete `sos init --with-codex .` preview with one confirmation.
 It does not run project tests automatically.
 
+Windows and macOS are not direct execution targets for this alpha. Do not run
+SOS against a Windows drive, Docker bind mount, WSL `/mnt/<drive>` path or VM
+shared folder: those filesystems are not admitted for canonical `.sigma`
+state. The planned Windows path runs SOS and Codex inside WSL2 with the project
+stored in the WSL native Linux filesystem. The planned macOS path uses a
+version-pinned lightweight Linux VM. Until those host launchers are qualified,
+use a supported Linux machine or Linux-native volume.
+
 After success, restart or reopen Codex if needed, trust the project when Codex
 asks, and run the separate qualification step:
 
@@ -214,6 +222,11 @@ a promise of compatibility with every future client or tool release.
 
 The install command above is a version-pinned convenience path. It is not a
 signed or high-assurance installer claim.
+
+The CLI fails closed before mutation when the project filesystem is not an
+admitted native-Linux profile. Native Windows receives a typed
+`SOS_LINUX_SUBSTRATE_REQUIRED` result before POSIX-only modules are loaded;
+known Windows-backed mounts receive `SOS_FILESYSTEM_PROFILE_UNSUPPORTED`.
 
 No command performs provider, commit, push, deploy or production actions. The
 default product path is local and offline; package acquisition is a separate

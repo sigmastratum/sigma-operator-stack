@@ -117,6 +117,16 @@ def initialize_workspace(
 ) -> TerminalResult:
     try:
         root = discover_repository_root(path)
+        from .platform_admission import admit_project_filesystem
+
+        admission = admit_project_filesystem(root)
+        if admission.status != Status.SUCCESS:
+            return TerminalResult(
+                "sos_init_result_v1",
+                admission.status,
+                admission.reasons,
+                admission.details,
+            )
         preliminary = inspect_repository(root)
     except RepositoryError as exc:
         return _failure(Status.INVALID, exc.reason)

@@ -13,6 +13,13 @@ Use a Linux x86_64 machine with:
 - Codex installed for the same Linux user;
 - an existing conventional Git project.
 
+If your computer runs Windows, do not use native PowerShell Python, a Docker
+bind mount or a project under WSL `/mnt/<drive>`. The current safe manual path
+is to keep the project under the WSL native Linux home filesystem and run both
+SOS and Codex from that same WSL environment. The one-step Windows/WSL2 host
+launcher is not part of this artifact yet. macOS requires a separately
+qualified Linux-VM launcher and is also not supported by this artifact.
+
 The launcher checks these requirements. It never installs or reconfigures
 Python, Git, `uv` or Codex for you.
 

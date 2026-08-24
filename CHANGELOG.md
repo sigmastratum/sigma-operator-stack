@@ -14,10 +14,13 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Codex-first eight-tool read/proposal MCP surface.
 - Reversible `sos init --with-codex` lifecycle with one aggregate preview.
 - Reproducible wheel, content-safety, SBOM and release-manifest tooling.
+- Typed host and filesystem admission for the Linux execution substrate.
 
 ### Security
 
 - Fail-closed handling for foreign, forged, replayed, stale and incomplete
   authority, qualification and managed-file state.
+- Unsupported native hosts and Windows-backed/shared mounts fail before
+  preview, confirmation or canonical bootstrap mutation.
 
 [0.1.0a1]: https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a1

@@ -31,6 +31,7 @@ from .compatibility import (
     discover_compatibility,
 )
 from .dirty import observe_application
+from .platform_admission import admit_project_filesystem
 from .repository import (
     RepositoryError,
     discover_repository_root,
@@ -144,6 +145,11 @@ def prepare_one_command_init(
     primary_authority_id: str | None = None,
 ) -> OneCommandPlan:
     root = discover_repository_root(path)
+    admission = admit_project_filesystem(root)
+    if admission.status != Status.SUCCESS:
+        raise LifecycleError(
+            admission.reasons[0], admission.status, admission.details
+        )
     preliminary = inspect_repository(root)
     if preliminary.control_plane_state != "absent":
         raise LifecycleError("SOS_ALREADY_INITIALIZED", Status.SUCCESS)

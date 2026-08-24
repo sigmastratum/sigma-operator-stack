@@ -1,6 +1,6 @@
 """Run the installed SOS package with ``python -m sos``."""
 
-from .cli import main
+from .entrypoint import main
 
 
 raise SystemExit(main())
