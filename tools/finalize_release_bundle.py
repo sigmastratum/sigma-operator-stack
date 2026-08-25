@@ -63,7 +63,8 @@ def _verify_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
         metadata_name = f"sigma_operator_stack-{VERSION}.dist-info/METADATA"
-        if metadata_name not in names or f"sigma_operator_stack-{VERSION}.dist-info/LICENSE" not in names:
+        license_name = f"sigma_operator_stack-{VERSION}.dist-info/licenses/LICENSE"
+        if metadata_name not in names or license_name not in names:
             raise ValueError("wheel metadata or license is missing")
         value = archive.read(metadata_name).decode("utf-8")
         for required in ("Version: 0.1.0a1", "Requires-Python: <3.13,>=3.11", "License: Apache-2.0"):

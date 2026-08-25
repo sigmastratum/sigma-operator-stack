@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -48,6 +49,11 @@ class ReproducibleReleaseWheelTests(unittest.TestCase):
                 self.assertEqual(result["candidate"], candidate)
                 self.assertEqual(result["sha256"], digest)
                 self.assertFalse(result["network_allowed"])
+                with zipfile.ZipFile(wheel) as archive:
+                    self.assertIn(
+                        "sigma_operator_stack-0.1.0a1.dist-info/licenses/LICENSE",
+                        archive.namelist(),
+                    )
                 results.append(result)
                 digests.append(digest)
 
