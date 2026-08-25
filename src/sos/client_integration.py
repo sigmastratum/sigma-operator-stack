@@ -709,7 +709,7 @@ def project_codex_package_update(
                 "setup_update_command": "sos setup update codex PATH" if changed else None,
                 "agent_restart_required": changed,
                 "qualification_integrity": workspace.details.get("qualification_integrity"),
-                "qualification_rerun_required": changed,
+                "qualification_rerun_required": workspace.details.get("qualification_integrity") != "valid",
                 "affected_project_scope": manifest["repository_id"],
                 "tool_environment_inventory": "not_available",
                 "other_projects_fail_closed_on_next_open": changed,

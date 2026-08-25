@@ -85,7 +85,27 @@ def package_execution_identity() -> dict[str, Any]:
             payload = candidate.read_bytes()
         except OSError as exc:
             raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID") from exc
-        if len(payload) != observed.st_size:
+        try:
+            verified = os.lstat(candidate)
+        except OSError as exc:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_DRIFT") from exc
+        observed_identity = (
+            observed.st_dev,
+            observed.st_ino,
+            observed.st_mode,
+            observed.st_size,
+            observed.st_mtime_ns,
+            observed.st_ctime_ns,
+        )
+        verified_identity = (
+            verified.st_dev,
+            verified.st_ino,
+            verified.st_mode,
+            verified.st_size,
+            verified.st_mtime_ns,
+            verified.st_ctime_ns,
+        )
+        if len(payload) != observed.st_size or observed_identity != verified_identity:
             raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_DRIFT")
         files.append(
             {
