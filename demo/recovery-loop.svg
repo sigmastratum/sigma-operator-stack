@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="180" viewBox="0 0 1120 180" role="img" aria-labelledby="title desc">
+  <title id="title">SOS fresh-agent recovery loop</title>
+  <desc id="desc">Discover, preview, install, qualify, recover, detect stale source, and continue safely.</desc>
+  <rect width="1120" height="180" fill="#0b1020"/>
+  <g fill="#e8eefc" font-family="monospace" font-size="16" text-anchor="middle">
+    <g fill="#18243f" stroke="#6ea8fe" stroke-width="2">
+      <rect x="20" y="60" width="130" height="58" rx="10"/><rect x="180" y="60" width="130" height="58" rx="10"/>
+      <rect x="340" y="60" width="130" height="58" rx="10"/><rect x="500" y="60" width="130" height="58" rx="10"/>
+      <rect x="660" y="60" width="130" height="58" rx="10"/><rect x="820" y="60" width="130" height="58" rx="10"/>
+      <rect x="980" y="60" width="120" height="58" rx="10"/>
+    </g>
+    <text x="85" y="95">discover</text><text x="245" y="95">preview</text>
+    <text x="405" y="95">install</text><text x="565" y="95">qualify</text>
+    <text x="725" y="95">recover</text><text x="885" y="95">stale</text>
+    <text x="1040" y="86">safe next</text><text x="1040" y="106">action</text>
+  </g>
+  <g stroke="#9cbcff" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M150 89H175"/><path d="M310 89H335"/><path d="M470 89H495"/>
+    <path d="M630 89H655"/><path d="M790 89H815"/><path d="M950 89H975"/>
+  </g>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9cbcff"/></marker></defs>
+</svg>

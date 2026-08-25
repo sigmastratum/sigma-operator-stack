@@ -1,0 +1,1 @@
+discover -> preview -> install -> qualify -> recover -> stale -> safe next action

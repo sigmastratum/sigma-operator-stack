@@ -1,0 +1,18 @@
+{
+  "contract": "sos_fresh_agent_recovery_expected_v1",
+  "steps": [
+    {"name": "compatibility", "exit_code": 2, "status": "owner_required", "reason": "SOS_PRIMARY_AUTHORITY_REQUIRED"},
+    {"name": "init", "exit_code": 0, "status": "success", "reason": "SOS_P106_INSTALLED"},
+    {"name": "preflight_before_qualification", "exit_code": 2, "status": "not_verified", "reason": "SOS_QUALIFICATION_NOT_RUN"},
+    {"name": "qualify_python_unittest", "exit_code": 0, "status": "passed_local", "reason": "SOS_QUALIFICATION_PASSED"},
+    {"name": "fresh_recovery", "exit_code": 0, "status": "success", "reason": "SOS_WORKSPACE_CURRENT"},
+    {"name": "source_change", "exit_code": 2, "status": "stale", "reason": "SOS_SOURCE_STATUS_CHANGED"},
+    {"name": "safe_next_action", "exit_code": 2, "status": "stale", "reason": "SOS_SOURCE_STATUS_CHANGED"}
+  ],
+  "constraints": {
+    "provider_calls": 0,
+    "network_calls": 0,
+    "raw_project_content_serialized": false,
+    "hidden_confirmation": false
+  }
+}
