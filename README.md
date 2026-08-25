@@ -137,6 +137,7 @@ only. It intentionally excludes private planning and commercial commitments.
 ## Contributing and support
 
 - Reproducible bugs and bounded proposals: GitHub Issues.
+- Alpha feedback: [`docs/alpha-feedback.md`](docs/alpha-feedback.md).
 - Security reports: GitHub private vulnerability reporting only.
 - Contribution rules: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - Support boundary: [`SUPPORT.md`](SUPPORT.md).

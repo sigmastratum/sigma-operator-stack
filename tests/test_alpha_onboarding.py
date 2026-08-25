@@ -28,7 +28,6 @@ class AlphaOnboardingTests(unittest.TestCase):
             "START-HERE.md": b"# Start here\n",
             alpha.SBOM: b'{"bomFormat":"CycloneDX"}\n',
             "start-sos-alpha": b"#!/usr/bin/env python3\n",
-            "start-sos-windows.ps1": b"#requires -Version 5.1\n",
             alpha.WHEEL: b"synthetic-wheel",
         }
         for name, data in payloads.items():
@@ -40,7 +39,6 @@ class AlphaOnboardingTests(unittest.TestCase):
                     "START-HERE.md": "text/markdown",
                     alpha.SBOM: "application/vnd.cyclonedx+json",
                     "start-sos-alpha": "text/x-python",
-                    "start-sos-windows.ps1": "text/x-powershell",
                     alpha.WHEEL: "application/zip",
                 }[name],
                 "sha256": hashlib.sha256(data).hexdigest(),

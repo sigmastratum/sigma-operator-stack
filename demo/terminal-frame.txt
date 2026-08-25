@@ -1,0 +1,16 @@
+synthetic release demo — zero provider calls
+
+$ sos compatibility . --json
+owner_required  SOS_PRIMARY_AUTHORITY_REQUIRED
+$ sos init --with-codex --primary-authority agents:AGENTS.md .
+success         SOS_P106_INSTALLED
+$ sos preflight . --json
+not_verified    SOS_QUALIFICATION_NOT_RUN
+$ sos qualify . --family python.stdlib-unittest
+passed_local    SOS_QUALIFICATION_PASSED
+$ sos status . --json
+success         SOS_WORKSPACE_CURRENT
+$ sos status . --json  # after synthetic source change
+stale           SOS_SOURCE_STATUS_CHANGED
+$ sos next-action . --json
+stale           SOS_SOURCE_STATUS_CHANGED

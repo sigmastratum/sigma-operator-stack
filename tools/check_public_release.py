@@ -43,8 +43,11 @@ REQUIRED_FILES = {
     "demo/capture.sh",
     "demo/recovery-loop.png",
     "demo/recovery-loop.svg",
+    "demo/recovery-terminal.png",
+    "demo/terminal-frame.txt",
     "demo/transcript.md",
     "docs/architecture.md",
+    "docs/alpha-feedback.md",
     "docs/roadmap.md",
     "docs/threat-model.md",
     "docs/troubleshooting.md",
@@ -171,7 +174,25 @@ def _expected_demo_png() -> bytes:
     return buffer.getvalue()
 
 
-def _check_media_bytes(name: str, data: bytes, failures: list[str]) -> None:
+def _expected_terminal_png(repository: Path) -> bytes:
+    lines = (repository / "demo" / "terminal-frame.txt").read_text(encoding="utf-8").splitlines()
+    image = Image.new("RGB", (1200, 650), "#090d18")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=18)
+    draw.rounded_rectangle((24, 24, 1176, 626), radius=14, fill="#111827", outline="#334155", width=2)
+    for index, line in enumerate(lines):
+        color = "#a7f3d0" if line.startswith(("success", "passed_local")) else "#e5e7eb"
+        if line.startswith(("owner_required", "not_verified", "stale")):
+            color = "#fbbf24"
+        if line.startswith("$"):
+            color = "#93c5fd"
+        draw.text((52, 48 + index * 34), line, font=font, fill=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def _check_media_bytes(name: str, data: bytes, failures: list[str], repository: Path | None = None) -> None:
     suffix = PurePosixPath(name).suffix.lower()
     raw_text = data.decode("latin-1", errors="ignore")
     for pattern in FORBIDDEN_TEXT:
@@ -190,6 +211,20 @@ def _check_media_bytes(name: str, data: bytes, failures: list[str]) -> None:
             failures.append(f"SOS_PUBLIC_MEDIA_PARSE_FAILED:{name}")
             return
         if data != _expected_demo_png():
+            failures.append(f"SOS_PUBLIC_MEDIA_RENDERED_TEXT_UNVERIFIED:{name}")
+        return
+    if name == "demo/recovery-terminal.png" and repository is not None:
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+                if image.format != "PNG" or image.mode != "RGB" or image.size != (1200, 650):
+                    failures.append(f"SOS_PUBLIC_MEDIA_SHAPE_INVALID:{name}")
+                if image.info or len(image.getexif()) != 0:
+                    failures.append(f"SOS_PUBLIC_MEDIA_METADATA_FORBIDDEN:{name}")
+        except (OSError, ValueError):
+            failures.append(f"SOS_PUBLIC_MEDIA_PARSE_FAILED:{name}")
+            return
+        if data != _expected_terminal_png(repository):
             failures.append(f"SOS_PUBLIC_MEDIA_RENDERED_TEXT_UNVERIFIED:{name}")
         return
     if suffix in MEDIA_SUFFIXES:
@@ -219,7 +254,7 @@ def inspect(repository: Path) -> dict[str, object]:
             failures.append(f"SOS_PUBLIC_FILE_TOO_LARGE:{name}")
             continue
         if path.suffix.lower() in MEDIA_SUFFIXES:
-            _check_media_bytes(name, data, failures)
+            _check_media_bytes(name, data, failures, repository)
         if b"\0" in data:
             continue
         try:

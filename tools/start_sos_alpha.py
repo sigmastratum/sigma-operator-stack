@@ -26,7 +26,6 @@ EXPECTED_FILES = frozenset(
         "release-manifest.json",
         SBOM,
         "start-sos-alpha",
-        "start-sos-windows.ps1",
         WHEEL,
     }
 )
@@ -35,7 +34,6 @@ MAX_FILE_BYTES = {
     "release-manifest.json": 1024 * 1024,
     SBOM: 16 * 1024 * 1024,
     "start-sos-alpha": 1024 * 1024,
-    "start-sos-windows.ps1": 1024 * 1024,
     WHEEL: 64 * 1024 * 1024,
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -214,7 +212,6 @@ def verify_bundle(bundle: Path) -> dict[str, object]:
         "START-HERE.md": "text/markdown",
         SBOM: "application/vnd.cyclonedx+json",
         "start-sos-alpha": "text/x-python",
-        "start-sos-windows.ps1": "text/x-powershell",
         WHEEL: "application/zip",
     }
     if (

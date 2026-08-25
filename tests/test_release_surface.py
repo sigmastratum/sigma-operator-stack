@@ -27,9 +27,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         finalizer = (root / "tools" / "finalize_release_bundle.py").read_text(encoding="utf-8")
         release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        for name in ("START-HERE.md", "start-sos-alpha", "start-sos-windows.ps1"):
+        for name in ("START-HERE.md", "start-sos-alpha"):
             self.assertIn(name, finalizer)
             self.assertIn(name, release)
+        self.assertNotIn("start-sos-windows.ps1", finalizer)
+        self.assertNotIn("start-sos-windows.ps1", release)
 
     def test_public_readme_orders_outcome_before_detail(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -60,9 +62,26 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             for phrase in ("secrets", "private source", "prompts", "raw .sigma", "customer data"):
                 self.assertIn(phrase, serialized, path.name)
 
+    def test_alpha_feedback_contract_is_public_safe(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = " ".join(
+            (root / "docs" / "alpha-feedback.md").read_text(encoding="utf-8").lower().split()
+        )
+        for required in (
+            "sos --version",
+            "exit code",
+            "reason code",
+            "synthetic",
+            "do not include",
+            "raw `.sigma`",
+            "credentials",
+            "private vulnerability reporting",
+        ):
+            self.assertIn(required, text)
+
     def test_demo_media_and_good_first_issue_bounds(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        for name in ("recovery-loop.png",):
+        for name in ("recovery-loop.png", "recovery-terminal.png"):
             self.assertLess((root / "demo" / name).stat().st_size, 2 * 1024 * 1024)
         drafts = sorted((root / "docs" / "good-first-issues").glob("*.md"))
         self.assertEqual(len(drafts), 5)
