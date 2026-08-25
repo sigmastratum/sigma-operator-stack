@@ -324,6 +324,11 @@ class P106LifecycleTests(unittest.TestCase):
         self.assertEqual(update.reasons, ("SOS_UPDATE_AVAILABLE",))
         self.assertTrue(update.details["proposal_only"])
         self.assertFalse(update.details["writes_performed"])
+        self.assertTrue(update.details["agent_restart_required"])
+        self.assertTrue(update.details["qualification_rerun_required"])
+        self.assertEqual(update.details["tool_environment_inventory"], "not_available")
+        self.assertTrue(update.details["other_projects_fail_closed_on_next_open"])
+        self.assertTrue(update.details["predecessor_artifact_retention_required"])
         accepted_before = (root / ".sigma" / "records" / "authority.json").read_bytes()
         updated = update_codex_setup(
             str(root),

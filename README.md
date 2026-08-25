@@ -64,6 +64,9 @@ starts; SOS itself performs no network request, telemetry, or update check.
 Before publication, the same path is qualified from an exact local wheel. If
 you received a checked alpha bundle, verify it and run its `start-sos-alpha`
 launcher as described in [`docs/alpha-quickstart.md`](docs/alpha-quickstart.md).
+The explicit pinned update and downgrade contract is documented in
+[`docs/version-update.md`](docs/version-update.md); SOS performs no automatic
+update check or migration.
 
 ## Three failures SOS prevents
 

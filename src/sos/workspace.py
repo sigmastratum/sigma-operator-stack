@@ -1481,6 +1481,8 @@ def _replay_qualification(
     )
     if not source_current:
         return view, "valid_stale"
+    if view.get("executor_digest") != EXECUTOR_DIGEST:
+        return view, "valid_stale"
     live_discovery_plan = discover_checks(os.fspath(root))
     if plan.get("discovery_plan_digest") != live_discovery_plan.plan_digest:
         return view, "valid_stale"
@@ -1641,7 +1643,6 @@ def _validate_qualification_chain(root: Path, receipt: dict[str, Any]) -> None:
             raise WorkspaceError("SOS_QUALIFICATION_BINDING_INVALID")
     if (
         result.get("isolation_profile") != receipt.get("isolation")
-        or result.get("executor_digest") != EXECUTOR_DIGEST
         or result.get("claim_digest") != claim.get("claim_digest")
         or result.get("admission_id") != admission.get("admission_id")
         or result.get("plan_digest") != plan.get("plan_digest")

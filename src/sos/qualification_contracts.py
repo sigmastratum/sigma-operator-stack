@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from datetime import datetime, timezone
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
+
+from . import __version__
 
 
 _SCHEMAS = {
@@ -34,18 +39,6 @@ _SCHEMAS = {
     ),
 }
 
-EXECUTOR_DESCRIPTOR = {
-    "contract": "sos_qualification_executor_descriptor_v1",
-    "implementation": "sos-local-fixed-family-executor",
-    "result_protocol": "sos_execution_result_v1",
-    "shell": False,
-    "network_default": "deny",
-}
-EXECUTOR_DIGEST = "sha256:" + hashlib.sha256(
-    json.dumps(EXECUTOR_DESCRIPTOR, sort_keys=True, separators=(",", ":")).encode("utf-8")
-).hexdigest()
-
-
 class QualificationContractError(RuntimeError):
     def __init__(self, reason: str = "SOS_QUALIFICATION_CONTRACT_INVALID") -> None:
         super().__init__(reason)
@@ -55,6 +48,73 @@ class QualificationContractError(RuntimeError):
 def canonical_digest(value: object) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+_PACKAGE_FILE_LIMIT = 512
+_PACKAGE_BYTE_LIMIT = 8 * 1024 * 1024
+_EXECUTABLE_SUFFIXES = frozenset({".py", ".json"})
+
+
+def package_execution_identity() -> dict[str, Any]:
+    """Bind qualification to the exact executable SOS package bytes.
+
+    Wheel archives are acquired outside SOS and are not available after an
+    ordinary installation. The stable execution identity therefore covers the
+    installed package version and every executable/schema resource consumed by
+    SOS. Only repository-independent relative names and digests are retained.
+    """
+
+    root = Path(__file__).resolve().parent
+    files: list[dict[str, Any]] = []
+    total_bytes = 0
+    for candidate in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        if candidate.suffix not in _EXECUTABLE_SUFFIXES:
+            continue
+        try:
+            observed = os.lstat(candidate)
+        except OSError as exc:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID") from exc
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID")
+        if observed.st_size < 0 or observed.st_size > _PACKAGE_BYTE_LIMIT:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID")
+        total_bytes += observed.st_size
+        if total_bytes > _PACKAGE_BYTE_LIMIT or len(files) >= _PACKAGE_FILE_LIMIT:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID")
+        try:
+            payload = candidate.read_bytes()
+        except OSError as exc:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID") from exc
+        if len(payload) != observed.st_size:
+            raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_DRIFT")
+        files.append(
+            {
+                "path": candidate.relative_to(root).as_posix(),
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    if not files:
+        raise QualificationContractError("SOS_PACKAGE_EXECUTION_IDENTITY_INVALID")
+    return {
+        "contract": "sos_package_execution_identity_v1",
+        "package": "sigma-operator-stack",
+        "package_version": __version__,
+        "file_count": len(files),
+        "content_digest": canonical_digest(files),
+    }
+
+
+PACKAGE_EXECUTION_IDENTITY = package_execution_identity()
+EXECUTOR_DESCRIPTOR = {
+    "contract": "sos_qualification_executor_descriptor_v1",
+    "implementation": "sos-local-fixed-family-executor",
+    "result_protocol": "sos_execution_result_v1",
+    "shell": False,
+    "network_default": "deny",
+    "package_execution_identity": PACKAGE_EXECUTION_IDENTITY,
+}
+EXECUTOR_DIGEST = canonical_digest(EXECUTOR_DESCRIPTOR)
 
 
 def seal_contract(value: dict[str, Any]) -> dict[str, Any]:

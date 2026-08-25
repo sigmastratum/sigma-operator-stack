@@ -14,7 +14,13 @@ from jsonschema import Draft202012Validator
 
 from sos.agent_api import project_tool
 from sos.checks import discover_checks, qualify_supported
-from sos.qualification_contracts import schema_hashes, seal_contract, validate_contract
+from sos.qualification_contracts import (
+    EXECUTOR_DIGEST,
+    PACKAGE_EXECUTION_IDENTITY,
+    schema_hashes,
+    seal_contract,
+    validate_contract,
+)
 from sos.workspace import (
     WorkspaceError,
     accept_proposal,
@@ -108,6 +114,69 @@ class QualificationIntegrityTests(unittest.TestCase):
         self.assertEqual(tip["receipt_digest"], receipt["receipt_digest"])
         self.assertIsNone(tip["predecessor_receipt"])
         self.assertEqual(workspace_status(str(root)).details["qualification_integrity"], "valid")
+
+    def test_executor_identity_binds_package_version_and_executable_bytes(self) -> None:
+        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["contract"], "sos_package_execution_identity_v1")
+        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package"], "sigma-operator-stack")
+        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package_version"], "0.1.0a1")
+        self.assertGreater(PACKAGE_EXECUTION_IDENTITY["file_count"], 1)
+        self.assertRegex(PACKAGE_EXECUTION_IDENTITY["content_digest"], r"^sha256:[0-9a-f]{64}$")
+        self.assertRegex(EXECUTOR_DIGEST, r"^sha256:[0-9a-f]{64}$")
+
+    def test_package_execution_change_keeps_chain_valid_but_stales_green(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        _, _, receipt = qualify_once(
+            str(root),
+            family_id="python.syntax",
+            confirmed=True,
+            controlling_tty_observed=True,
+        )
+        changed_character = "0" if receipt["executor_digest"][-1] != "0" else "1"
+        changed_executor = "sha256:" + changed_character * 64
+        with patch("sos.workspace.EXECUTOR_DIGEST", changed_executor):
+            status = workspace_status(str(root))
+            self.assertEqual(status.status.value, "success", status.to_dict())
+            self.assertEqual(status.details["qualification_integrity"], "valid_stale")
+            doctor = doctor_workspace(str(root))
+            self.assertEqual(doctor.status.value, "stale", doctor.to_dict())
+            self.assertEqual(doctor.reasons, ("SOS_QUALIFICATION_STALE",))
+            preflight = project_tool(str(root), "sos_preflight")
+            self.assertEqual(preflight.status.value, "stale", preflight.to_dict())
+            self.assertEqual(preflight.reasons, ("SOS_QUALIFICATION_STALE",))
+
+    def test_shared_tool_update_stales_each_project_without_cross_project_state(self) -> None:
+        first_temporary, first_root = self.make_project()
+        second_temporary, second_root = self.make_project()
+        self.addCleanup(first_temporary.cleanup)
+        self.addCleanup(second_temporary.cleanup)
+        first_receipt = qualify_once(
+            str(first_root),
+            family_id="python.syntax",
+            confirmed=True,
+            controlling_tty_observed=True,
+        )[2]
+        second_receipt = qualify_once(
+            str(second_root),
+            family_id="python.syntax",
+            confirmed=True,
+            controlling_tty_observed=True,
+        )[2]
+        self.assertNotEqual(first_receipt["repository_id"], second_receipt["repository_id"])
+        changed_executor = "sha256:" + "e" * 64
+        with patch("sos.workspace.EXECUTOR_DIGEST", changed_executor):
+            first = workspace_status(str(first_root))
+            second = workspace_status(str(second_root))
+        self.assertEqual(first.details["qualification_integrity"], "valid_stale")
+        self.assertEqual(second.details["qualification_integrity"], "valid_stale")
+        self.assertEqual(
+            json.loads((first_root / ".sigma" / "views" / "qualification.json").read_text()),
+            first_receipt,
+        )
+        self.assertEqual(
+            json.loads((second_root / ".sigma" / "views" / "qualification.json").read_text()),
+            second_receipt,
+        )
 
     def test_plan_is_deterministic_read_only_and_confirmation_is_required(self) -> None:
         temporary, root = self.make_project()

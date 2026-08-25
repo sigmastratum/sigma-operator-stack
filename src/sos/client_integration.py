@@ -695,6 +695,7 @@ def project_codex_package_update(
             manifest["package_version"] != binding.package_version
             or manifest["launcher_digest"] != binding.digest
         )
+        workspace = workspace_status(os.fspath(root))
         return TerminalResult(
             "sos_codex_package_update_projection_v1",
             Status.SUCCESS,
@@ -706,6 +707,13 @@ def project_codex_package_update(
                 "proposed_package_version": binding.package_version,
                 "proposed_launcher_digest": binding.digest,
                 "setup_update_command": "sos setup update codex PATH" if changed else None,
+                "agent_restart_required": changed,
+                "qualification_integrity": workspace.details.get("qualification_integrity"),
+                "qualification_rerun_required": changed,
+                "affected_project_scope": manifest["repository_id"],
+                "tool_environment_inventory": "not_available",
+                "other_projects_fail_closed_on_next_open": changed,
+                "predecessor_artifact_retention_required": changed,
                 "proposal_only": True,
                 "writes_performed": False,
                 "network_performed": False,
