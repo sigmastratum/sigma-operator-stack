@@ -68,6 +68,16 @@ def inspect(root: Path) -> dict[str, object]:
     serialized = json.dumps(release, sort_keys=True)
     if "password:" in serialized or "token:" in serialized or "PYPI_API_TOKEN" in serialized:
         failures.append("SOS_RELEASE_LONG_LIVED_TOKEN_SURFACE")
+    audit_command = "python -m pip_audit --strict --progress-spinner off"
+    all_workflows = json.dumps((ci, release), sort_keys=True)
+    for required in (
+        "requirements/audit.txt",
+        f"{audit_command} -r requirements/release.txt",
+        f"{audit_command} .",
+    ):
+        if all_workflows.count(required) < 2:
+            failures.append("SOS_DEPENDENCY_AUDIT_GATE_INCOMPLETE")
+            break
     return {
         "contract": "sos_workflow_contract_v1",
         "failures": sorted(set(failures)),

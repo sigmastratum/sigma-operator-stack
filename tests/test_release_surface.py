@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import io
+import hashlib
 import subprocess
 import sys
 import unittest
@@ -83,6 +84,14 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         for name in ("recovery-loop.png", "recovery-terminal.png"):
             self.assertLess((root / "demo" / name).stat().st_size, 2 * 1024 * 1024)
+        manifest = json.loads((root / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v1")
+        self.assertTrue(manifest["synthetic"])
+        self.assertEqual(manifest["provider_calls"], 0)
+        for name in ("recovery-demo.mp4", "recovery-demo.webm"):
+            data = (root / "demo" / name).read_bytes()
+            self.assertLess(len(data), 2 * 1024 * 1024)
+            self.assertEqual(hashlib.sha256(data).hexdigest(), manifest["media"][name]["sha256"])
         drafts = sorted((root / "docs" / "good-first-issues").glob("*.md"))
         self.assertEqual(len(drafts), 5)
         for draft in drafts:

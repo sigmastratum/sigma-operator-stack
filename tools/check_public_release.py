@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -41,18 +42,23 @@ REQUIRED_FILES = {
     "SUPPORT.md",
     "demo/README.md",
     "demo/capture.sh",
+    "demo/media-manifest.json",
+    "demo/recovery-demo.mp4",
+    "demo/recovery-demo.webm",
     "demo/recovery-loop.png",
     "demo/recovery-loop.svg",
     "demo/recovery-terminal.png",
     "demo/terminal-frame.txt",
     "demo/transcript.md",
     "docs/architecture.md",
+    "docs/comparison.md",
     "docs/alpha-feedback.md",
     "docs/roadmap.md",
     "docs/threat-model.md",
     "docs/troubleshooting.md",
     "examples/fresh-agent-recovery/expected.json",
     "pyproject.toml",
+    "requirements/audit.txt",
 }
 REQUIRED_ISSUE_FORMS = {
     "bounded-feature-proposal.yml",
@@ -192,7 +198,13 @@ def _expected_terminal_png(repository: Path) -> bytes:
     return buffer.getvalue()
 
 
-def _check_media_bytes(name: str, data: bytes, failures: list[str], repository: Path | None = None) -> None:
+def _check_media_bytes(
+    name: str,
+    data: bytes,
+    failures: list[str],
+    repository: Path | None = None,
+    media_manifest: dict[str, object] | None = None,
+) -> None:
     suffix = PurePosixPath(name).suffix.lower()
     raw_text = data.decode("latin-1", errors="ignore")
     for pattern in FORBIDDEN_TEXT:
@@ -227,6 +239,26 @@ def _check_media_bytes(name: str, data: bytes, failures: list[str], repository: 
         if data != _expected_terminal_png(repository):
             failures.append(f"SOS_PUBLIC_MEDIA_RENDERED_TEXT_UNVERIFIED:{name}")
         return
+    if suffix in {".mp4", ".webm"}:
+        if media_manifest is None:
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_MISSING:{name}")
+            return
+        media_entries = media_manifest.get("media", {})
+        entry = media_entries.get(PurePosixPath(name).name) if isinstance(media_entries, dict) else None
+        expected_container = suffix.lstrip(".")
+        expected_codec = "h264" if suffix == ".mp4" else "vp9"
+        if not isinstance(entry, dict):
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_ENTRY_INVALID:{name}")
+            return
+        observed = hashlib.sha256(data).hexdigest()
+        if (
+            entry.get("sha256") != observed
+            or entry.get("size") != len(data)
+            or entry.get("container") != expected_container
+            or entry.get("codec") != expected_codec
+        ):
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_MISMATCH:{name}")
+        return
     if suffix in MEDIA_SUFFIXES:
         failures.append(f"SOS_PUBLIC_MEDIA_TEXT_EXTRACTION_UNAVAILABLE:{name}")
 
@@ -235,6 +267,22 @@ def inspect(repository: Path) -> dict[str, object]:
     repository = repository.resolve(strict=True)
     files = _inventory(repository)
     failures: list[str] = []
+    media_manifest: dict[str, object] | None = None
+    try:
+        value = json.loads((repository / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
+        if (
+            not isinstance(value, dict)
+            or value.get("contract") != "sos_demo_media_manifest_v1"
+            or value.get("synthetic") is not True
+            or value.get("provider_calls") != 0
+            or value.get("terminal_frame_sha256") != hashlib.sha256((repository / "demo" / "terminal-frame.txt").read_bytes()).hexdigest()
+            or value.get("transcript_sha256") != hashlib.sha256((repository / "demo" / "transcript.md").read_bytes()).hexdigest()
+        ):
+            failures.append("SOS_PUBLIC_MEDIA_MANIFEST_INVALID")
+        else:
+            media_manifest = value
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        failures.append("SOS_PUBLIC_MEDIA_MANIFEST_INVALID")
     if len(files) > MAX_FILES:
         failures.append("SOS_PUBLIC_FILE_LIMIT_EXCEEDED")
     missing = sorted(REQUIRED_FILES.difference(files))
@@ -254,7 +302,7 @@ def inspect(repository: Path) -> dict[str, object]:
             failures.append(f"SOS_PUBLIC_FILE_TOO_LARGE:{name}")
             continue
         if path.suffix.lower() in MEDIA_SUFFIXES:
-            _check_media_bytes(name, data, failures, repository)
+            _check_media_bytes(name, data, failures, repository, media_manifest)
         if b"\0" in data:
             continue
         try:

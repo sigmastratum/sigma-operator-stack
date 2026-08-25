@@ -39,6 +39,10 @@ SLA.
 
 ## Sign-off and license
 
+The initial repository history is contributed by Sigma Stratum under
+Apache-2.0. DCO sign-off is enforced for new external contributions; the
+qualified pre-publication history is not rewritten solely to add trailers.
+
 The project uses the Developer Certificate of Origin 1.1 and does not require
 a Contributor License Agreement. Sign each commit with:
 

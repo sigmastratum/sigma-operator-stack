@@ -38,7 +38,13 @@ jobs:
           test -z "$(git status --short)"
           grep -qx 'version = "0.1.0a1"' pyproject.toml
       - name: Install exact release tooling
-        run: python -m pip install --disable-pip-version-check -r requirements/release.txt
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements/release.txt
+          python -m pip install --disable-pip-version-check -r requirements/audit.txt
+      - name: Dependency vulnerability audit
+        run: |
+          python -m pip_audit --strict --progress-spinner off -r requirements/release.txt
+          python -m pip_audit --strict --progress-spinner off .
       - name: Requalify and build twice
         run: |
           PYTHONPATH=src python tools/run_zero_skip_tests.py

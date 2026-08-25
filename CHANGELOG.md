@@ -15,6 +15,8 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Reversible `sos init --with-codex` lifecycle with one aggregate preview.
 - Reproducible wheel, content-safety, SBOM and release-manifest tooling.
 - Typed host and filesystem admission for the Linux execution substrate.
+- Deterministic zero-provider WebM/MP4 demo media and a factual coexistence
+  comparison.
 
 ### Security
 
@@ -22,5 +24,7 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
   authority, qualification and managed-file state.
 - Unsupported native hosts and Windows-backed/shared mounts fail before
   preview, confirmation or canonical bootstrap mutation.
+- Release/build dependencies are pinned above their known-vulnerability floors
+  and audited in CI and the publication workflow.
 
 [0.1.0a1]: https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a1

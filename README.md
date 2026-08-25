@@ -29,18 +29,28 @@ shows the whole product outcome:
 4. A fresh session recovers accepted state and the next allowed action.
 5. A later source change is detected as stale instead of silently trusted.
 
-The canonical text transcript is available even when video is not:
-[`demo/transcript.md`](demo/transcript.md).
+The deterministic zero-provider terminal recording is available as
+[`WebM`](demo/recovery-demo.webm) or [`MP4`](demo/recovery-demo.mp4). Its
+canonical text equivalent is [`demo/transcript.md`](demo/transcript.md). It
+demonstrates the local SOS lifecycle; it is not presented as a provider-backed
+Codex session.
 
 ## Quickstart
 
 Prerequisites: Linux x86_64, Python 3.11 or 3.12, Git, a preinstalled `uv`,
 and a conventional Git repository.
 
+The public package is not available until the `v0.1.0a1` GitHub Release and
+PyPI project exist. Before that coordinated publication, invited testers must
+use the digest-verified alpha bundle described in
+[`docs/alpha-quickstart.md`](docs/alpha-quickstart.md); a source checkout is
+not an installation artifact.
+
+After the release is visible, the exact public path is:
+
 ```bash
 uv tool install --no-config --no-sources --no-build --no-python-downloads \
   'sigma-operator-stack==0.1.0a1'
-
 sos capabilities --json
 sos compatibility PATH
 sos init --with-codex PATH
@@ -126,7 +136,9 @@ compatibility claim.
 
 Read the public [architecture overview](docs/architecture.md),
 [threat model](docs/threat-model.md), and
-[contracts and integrity](docs/contracts-and-integrity.md). Expected refusals
+[contracts and integrity](docs/contracts-and-integrity.md). The
+[factual comparison](docs/comparison.md) explains what SOS complements rather
+than replaces. Expected refusals
 are indexed in [troubleshooting](docs/troubleshooting.md).
 
 ## Current capabilities and next milestones

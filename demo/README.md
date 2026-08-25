@@ -10,11 +10,11 @@ approval.
 It contains only synthetic commands and typed outcomes; it is not presented as
 a provider-backed Codex session.
 
-The final WebM, MP4, PNG, and recovery screenshot are generated only from the
-exact release candidate after all support-boundary gates are current. This
-public-preparation source contains a draft transcript, capture contract,
-diagram, and deterministic PNG renderer; it does not simulate a fresh Codex
-session or ship stale video.
+`recovery-demo.webm` and `recovery-demo.mp4` are deterministic zero-provider
+terminal media generated from `terminal-frame.txt`. They demonstrate the local
+typed lifecycle and do not simulate a fresh Codex session. A genuine
+provider-backed fresh-session capture remains a separately approved release
+action.
 
 Capture requirements:
 
@@ -31,4 +31,10 @@ Rebuild deterministic PNG assets with:
 ```bash
 python3 demo/render_draft_png.py
 python3 demo/render_terminal_png.py
+python3 demo/render_video.py --ffmpeg /path/to/ffmpeg
 ```
+
+The video renderer uses fixed arguments, strips source metadata, validates
+size, and rewrites `media-manifest.json`. The containers retain only ordinary
+codec/muxer identification. Rebuilding with a different encoder version changes
+the media digest and therefore requires a release-evidence rebind.

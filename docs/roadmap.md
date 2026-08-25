@@ -15,12 +15,12 @@ release promise or a compatibility claim.
 
 ## Next
 
-- complete independent review and exact release rebind for known
-  existing-stack fingerprint edge cases;
-- publish the native-Linux `0.1.0a1` reference alpha after its remaining
-  evidence and release gates pass;
-- publish the reproducible fresh-agent recovery tutorial and media from one
-  exact candidate;
+- finish the publication-safety rebind for the native-Linux `0.1.0a1`
+  reference alpha, including audited release tooling and exact artifacts;
+- run the exact candidate in public CI and complete the bounded repository
+  visibility/security transaction;
+- publish the reproducible fresh-agent recovery tutorial and deterministic
+  zero-provider terminal media with the same release candidate;
 - run public CI and a small independent alpha cohort;
 - freeze a native, non-admin Windows control-plane architecture that does not
   require WSL or Docker; executable Windows qualification remains a later,
@@ -42,3 +42,6 @@ release promise or a compatibility claim.
 
 Unknown dates, platforms, agents, and check families remain uncommitted until
 their contracts and qualification evidence exist.
+
+The ignored-managed-target fingerprint edge case is fixed and independently
+qualified. It is no longer an open roadmap item.
