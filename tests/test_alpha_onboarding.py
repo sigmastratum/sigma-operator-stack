@@ -253,9 +253,9 @@ class AlphaOnboardingTests(unittest.TestCase):
     def test_readme_front_loads_first_run_and_keeps_qualification_separate(self) -> None:
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertLess(readme.index("## Start here"), readme.index("## What gets installed"))
+        self.assertLess(readme.index("## Quickstart"), readme.index("## Three failures SOS prevents"))
         self.assertIn("start-sos-alpha", readme)
-        self.assertIn("sos qualify .", readme)
+        self.assertIn("sos qualify PATH", readme)
         launcher = (root / "tools" / "start_sos_alpha.py").read_text(encoding="utf-8")
         self.assertNotIn('"qualify"', launcher)
         self.assertNotIn("curl | sh", launcher)
