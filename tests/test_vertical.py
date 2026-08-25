@@ -166,7 +166,9 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         git(root, "add", "tasks/current.md")
         git(root, "commit", "-qm", "remove synthetic current work")
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        _, _, receipt = qualify_once(str(root), confirmed=True)
+        _, _, receipt = qualify_once(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
         doctor = doctor_workspace(str(root))
         self.assertEqual(doctor.status, "owner_required")
         self.assertEqual(doctor.reasons, ("SOS_CURRENT_WORK_NOT_CONFIGURED",))
@@ -183,7 +185,9 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         self.assertEqual(plan.families[1].status, "configured")
         self.assertEqual(plan.families[1].command_id, "python.unittest.v1")
         self.assertEqual(plan.families[1].isolation, "linux-landlock-seccomp-snapshot-v1")
-        _, _, receipt = qualify_once(str(root), confirmed=True)
+        _, _, receipt = qualify_once(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
         self.assertEqual(receipt["status"], "passed_local")
         self.assertFalse(receipt["raw_output_serialized"])
         self.assertIsNotNone(receipt["output_digest"])
@@ -198,14 +202,16 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         outside.mkdir()
         (root / ".sigma" / "qualification").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(WorkspaceError):
-            qualify_once(str(root), confirmed=True)
+            qualify_once(str(root), confirmed=True, controlling_tty_observed=True)
         self.assertEqual(list(outside.iterdir()), [])
 
     def test_fresh_agent_recovery_exposes_composed_state_without_content(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        _, _, receipt = qualify_once(str(root), confirmed=True)
+        _, _, receipt = qualify_once(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
         recovery = recover_workspace(str(root))
         self.assertEqual(recovery.status, "success")
         self.assertEqual(recovery.details["authority"]["paths"][0], "AGENTS.md")
@@ -282,7 +288,7 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        qualify_once(str(root), confirmed=True)
+        qualify_once(str(root), confirmed=True, controlling_tty_observed=True)
         view_path = root / ".sigma" / "views" / "qualification.json"
         view = json.loads(view_path.read_text(encoding="utf-8"))
         immutable_path = root / ".sigma" / "qualification" / "receipts" / (
@@ -310,7 +316,9 @@ class DifferentiatedVerticalTests(unittest.TestCase):
         git(root, "add", "broken.py")
         git(root, "commit", "-qm", "synthetic syntax failure")
         initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
-        _, _, receipt = qualify_once(str(root), confirmed=True)
+        _, _, receipt = qualify_once(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
         self.assertEqual(receipt["status"], "failed")
         self.assertEqual(receipt["reasons"], ["SOS_QUALIFICATION_FAILED"])
         self.assertEqual(doctor_workspace(str(root)).status, "not_verified")

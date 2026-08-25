@@ -101,7 +101,10 @@ def main() -> int:
         )
 
         _, _, receipt = qualify_once(
-            project, family_id="python.stdlib-unittest", confirmed=True
+            project,
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         observed.append(
             {

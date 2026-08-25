@@ -88,7 +88,10 @@ class QualificationIntegrityTests(unittest.TestCase):
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
         with patch("sos.workspace._utc_now", return_value=now):
             plan, admission, receipt = qualify_once(
-                str(root), family_id="python.stdlib-unittest", confirmed=True
+                str(root),
+                family_id="python.stdlib-unittest",
+                confirmed=True,
+                controlling_tty_observed=True,
             )
         validate_contract(plan, "sos_qualification_plan_v1")
         validate_contract(admission, "sos_command_admission_v1")
@@ -116,13 +119,20 @@ class QualificationIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_CONFIRMATION_REQUIRED"):
             admit_qualification_plan(str(root), first, confirmed=False)
         self.assertFalse((root / ".sigma" / "qualification").exists())
+        with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_TTY_REQUIRED"):
+            admit_qualification_plan(
+                str(root), first, confirmed=True, controlling_tty_observed=False
+            )
+        self.assertFalse((root / ".sigma" / "qualification").exists())
         tampered = dict(first)
         tampered.pop("plan_digest")
         tampered["argv_template"] = ["python", "-c", "pass"]
         tampered["argv_digest"] = "sha256:" + "0" * 64
         tampered = seal_contract(tampered)
         with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_PLAN_STALE"):
-            admit_qualification_plan(str(root), tampered, confirmed=True)
+            admit_qualification_plan(
+                str(root), tampered, confirmed=True, controlling_tty_observed=True
+            )
         self.assertFalse((root / ".sigma" / "qualification").exists())
 
     def test_admission_is_unique_expires_and_is_consumed_before_execution(self) -> None:
@@ -131,8 +141,20 @@ class QualificationIntegrityTests(unittest.TestCase):
         issued = datetime(2026, 1, 1, tzinfo=timezone.utc)
         plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
         with patch("sos.workspace._utc_now", return_value=issued):
-            first = admit_qualification_plan(str(root), plan, confirmed=True, ttl_seconds=5)
-            second = admit_qualification_plan(str(root), plan, confirmed=True, ttl_seconds=5)
+            first = admit_qualification_plan(
+                str(root),
+                plan,
+                confirmed=True,
+                controlling_tty_observed=True,
+                ttl_seconds=5,
+            )
+            second = admit_qualification_plan(
+                str(root),
+                plan,
+                confirmed=True,
+                controlling_tty_observed=True,
+                ttl_seconds=5,
+            )
         self.assertNotEqual(first["nonce_digest"], second["nonce_digest"])
         with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=6)):
             with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_ADMISSION_EXPIRED"):
@@ -154,7 +176,9 @@ class QualificationIntegrityTests(unittest.TestCase):
         issued = datetime(2026, 1, 1, tzinfo=timezone.utc)
         plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
         with patch("sos.workspace._utc_now", return_value=issued):
-            admission = admit_qualification_plan(str(root), plan, confirmed=True)
+            admission = admit_qualification_plan(
+                str(root), plan, confirmed=True, controlling_tty_observed=True
+            )
         (root / "README.md").write_text("Synthetic source drift.\n", encoding="utf-8")
         with patch("sos.workspace._utc_now", return_value=issued + timedelta(seconds=1)):
             with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
@@ -166,7 +190,9 @@ class QualificationIntegrityTests(unittest.TestCase):
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         plan = prepare_qualification_plan(str(root), "python.stdlib-unittest")
-        admission = admit_qualification_plan(str(root), plan, confirmed=True)
+        admission = admit_qualification_plan(
+            str(root), plan, confirmed=True, controlling_tty_observed=True
+        )
 
         def run_then_drift(
             path: str,
@@ -214,11 +240,17 @@ class QualificationIntegrityTests(unittest.TestCase):
         first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
         with patch("sos.workspace._utc_now", return_value=first_time):
             _, _, first = qualify_once(
-                str(root), family_id="python.stdlib-unittest", confirmed=True
+                str(root),
+                family_id="python.stdlib-unittest",
+                confirmed=True,
+                controlling_tty_observed=True,
             )
         with patch("sos.workspace._utc_now", return_value=first_time + timedelta(seconds=1)):
             _, _, second = qualify_once(
-                str(root), family_id="python.stdlib-unittest", confirmed=True
+                str(root),
+                family_id="python.stdlib-unittest",
+                confirmed=True,
+                controlling_tty_observed=True,
             )
         self.assertEqual(first["sequence_ordinal"], 1)
         self.assertIsNone(first["predecessor_receipt"])
@@ -267,7 +299,10 @@ class QualificationIntegrityTests(unittest.TestCase):
         self.assertEqual(workspace_status(str(root)).status.value, "success")
 
         syntax_plan, _syntax_admission, syntax_receipt = qualify_once(
-            str(root), family_id="python.syntax", confirmed=True
+            str(root),
+            family_id="python.syntax",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         self.assertNotEqual(
             syntax_plan["discovery_plan_digest"],
@@ -284,7 +319,10 @@ class QualificationIntegrityTests(unittest.TestCase):
         self.assertEqual(preflight.status.value, "success", preflight.to_dict())
 
         _test_plan, _test_admission, test_receipt = qualify_once(
-            str(root), family_id="python.stdlib-unittest", confirmed=True
+            str(root),
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         self.assertEqual(test_receipt["status"], "passed_local")
         self.assertEqual(test_receipt["sequence_ordinal"], 2)
@@ -309,7 +347,12 @@ class QualificationIntegrityTests(unittest.TestCase):
     def test_live_discovery_drift_is_non_green_on_recovery_doctor_and_preflight(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
-        qualify_once(str(root), family_id="python.syntax", confirmed=True)
+        qualify_once(
+            str(root),
+            family_id="python.syntax",
+            confirmed=True,
+            controlling_tty_observed=True,
+        )
         discovered = discover_checks(str(root))
         drifted = replace(discovered, plan_digest="sha256:" + "f" * 64)
 
@@ -336,7 +379,10 @@ class QualificationIntegrityTests(unittest.TestCase):
         self.addCleanup(first_temporary.cleanup)
         self.addCleanup(second_temporary.cleanup)
         _, _, receipt = qualify_once(
-            str(first_root), family_id="python.stdlib-unittest", confirmed=True
+            str(first_root),
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         with self.assertRaisesRegex(WorkspaceError, "SOS_QUALIFICATION_STALE"):
             store_qualification(str(second_root), receipt)
@@ -353,7 +399,10 @@ class QualificationIntegrityTests(unittest.TestCase):
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
         _, _, receipt = qualify_once(
-            str(root), family_id="python.stdlib-unittest", confirmed=True
+            str(root),
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         result_path = root / ".sigma" / "qualification" / "results" / (
             receipt["execution_result_digest"][7:] + ".json"

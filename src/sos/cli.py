@@ -346,7 +346,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code = 2
         else:
             try:
-                admission = admit_qualification_plan(args.path, plan, confirmed=True)
+                admission = admit_qualification_plan(
+                    args.path,
+                    plan,
+                    confirmed=True,
+                    controlling_tty_observed=sys.stdin.isatty(),
+                )
                 receipt = execute_admitted_qualification(args.path, plan, admission)
                 payload = receipt
                 exit_code = 0 if receipt["status"] == "passed_local" else 2

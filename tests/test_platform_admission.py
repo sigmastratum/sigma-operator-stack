@@ -20,12 +20,22 @@ from sos.result import Status, TerminalResult
 
 
 class PlatformAdmissionTests(unittest.TestCase):
-    def test_native_windows_returns_typed_linux_substrate_requirement(self) -> None:
+    def test_native_windows_returns_typed_native_support_boundary(self) -> None:
         result = admit_host(platform_name="win32")
         self.assertEqual(result.status, Status.UNSUPPORTED)
-        self.assertEqual(result.reasons, ("SOS_LINUX_SUBSTRATE_REQUIRED",))
+        self.assertEqual(
+            result.reasons, ("SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT",)
+        )
         self.assertEqual(result.details["host_platform"], "windows")
+        self.assertEqual(result.details["native_support_status"], "under_development")
         self.assertFalse(result.details["absolute_paths_serialized"])
+
+    def test_macos_returns_typed_demand_gate(self) -> None:
+        result = admit_host(platform_name="darwin")
+        self.assertEqual(result.status, Status.UNSUPPORTED)
+        self.assertEqual(result.reasons, ("SOS_MACOS_DEMAND_GATED",))
+        self.assertEqual(result.details["host_platform"], "macos")
+        self.assertEqual(result.details["native_support_status"], "demand_gated")
 
     def test_unsupported_entrypoint_does_not_import_posix_implementation(self) -> None:
         script = """
@@ -51,7 +61,7 @@ assert 'sos.managed_files' not in sys.modules
         )
         self.assertEqual(
             json.loads(completed.stdout)["reasons"],
-            ["SOS_LINUX_SUBSTRATE_REQUIRED"],
+            ["SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT"],
         )
 
     def test_version_is_available_without_loading_linux_implementation(self) -> None:

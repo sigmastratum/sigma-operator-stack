@@ -184,7 +184,10 @@ class P106LifecycleTests(unittest.TestCase):
         self.assertEqual(unadmitted.limits, isolation_limits())
 
         _plan, _admission, receipt = qualify_once(
-            str(root), family_id="python.stdlib-unittest", confirmed=True
+            str(root),
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         self.assertEqual(receipt["status"], "passed_local")
         preflight = project_tool(str(root), "sos_preflight")

@@ -283,7 +283,9 @@ class SuccessorLifecycleTests(unittest.TestCase):
     def test_prior_qualification_is_valid_but_stale_after_successor_cycle(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
-        _, _, receipt = qualify_once(str(root), confirmed=True)
+        _, _, receipt = qualify_once(
+            str(root), confirmed=True, controlling_tty_observed=True
+        )
         self.make_stale(root)
         plan = self.regenerate(root)
         for revision in plan.details["acceptance_order"]:

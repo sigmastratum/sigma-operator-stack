@@ -5,12 +5,18 @@ the exact reason code and use only synthetic data when filing an issue.
 
 ## Platform refusal
 
-`SOS_LINUX_SUBSTRATE_REQUIRED` means the CLI was started outside its supported
-Linux substrate. Direct Windows and macOS are not `0.1.0a1` execution targets.
-Do not install WSL, Docker or grant administrator access merely to bypass this
-refusal. A future native Windows control-plane increment is planned with its
-own explicit support boundary; until released, use a separately qualified
-native-Linux workspace.
+`SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT` means the CLI was started on
+Windows. Direct Windows is not a `0.1.0a1` execution target; a native,
+non-admin control-plane increment is under development. Do not install WSL,
+Docker or grant administrator access merely to bypass this refusal. Until that
+increment is released, use a separately qualified native-Linux runner.
+
+`SOS_MACOS_DEMAND_GATED` means direct macOS support is not currently planned
+on the alpha critical path. It requires an independently justified platform
+increment and its own support boundary.
+
+`SOS_LINUX_SUBSTRATE_REQUIRED` remains the typed refusal for any other
+unsupported host platform.
 
 ## Filesystem refusal
 

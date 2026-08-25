@@ -289,7 +289,10 @@ class IsolationCapabilityTests(unittest.TestCase):
         )
         with patch("sos.checks._run_admitted_isolated_unittest", return_value=unsupported):
             _plan, _admission, receipt = qualify_once(
-                str(root), family_id="python.stdlib-unittest", confirmed=True
+                str(root),
+                family_id="python.stdlib-unittest",
+                confirmed=True,
+                controlling_tty_observed=True,
             )
         self.assertEqual(receipt["status"], "unsupported")
         self.assertEqual(receipt["reasons"], [LANDLOCK_ABI_TOO_OLD])

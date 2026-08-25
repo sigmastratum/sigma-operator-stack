@@ -787,11 +787,14 @@ def admit_qualification_plan(
     plan: dict[str, Any],
     *,
     confirmed: bool,
+    controlling_tty_observed: bool = False,
     ttl_seconds: int = 300,
 ) -> dict[str, Any]:
     root = discover_repository_root(path)
     if not confirmed:
         raise WorkspaceError("SOS_QUALIFICATION_CONFIRMATION_REQUIRED")
+    if not controlling_tty_observed:
+        raise WorkspaceError("SOS_QUALIFICATION_TTY_REQUIRED")
     if not 1 <= ttl_seconds <= 300:
         raise WorkspaceError("SOS_QUALIFICATION_TTL_INVALID")
     _validate_qualification_contract(plan, "sos_qualification_plan_v1")
@@ -978,6 +981,7 @@ def qualify_once(
     *,
     family_id: str | None = None,
     confirmed: bool,
+    controlling_tty_observed: bool = False,
     ttl_seconds: int = 300,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     plan = prepare_qualification_plan(path, family_id)
@@ -985,6 +989,7 @@ def qualify_once(
         path,
         plan,
         confirmed=confirmed,
+        controlling_tty_observed=controlling_tty_observed,
         ttl_seconds=ttl_seconds,
     )
     receipt = execute_admitted_qualification(path, plan, admission)

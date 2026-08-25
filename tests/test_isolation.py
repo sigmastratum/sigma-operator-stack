@@ -169,7 +169,10 @@ class IsolationContract(unittest.TestCase):
         record_root = root / ".sigma" / "records"
         before = {path.name: path.read_bytes() for path in record_root.glob("*.json")}
         _, _, receipt = qualify_once(
-            str(root), family_id="python.stdlib-unittest", confirmed=True
+            str(root),
+            family_id="python.stdlib-unittest",
+            confirmed=True,
+            controlling_tty_observed=True,
         )
         self.assertEqual(receipt["status"], "passed_local")
         after = {path.name: path.read_bytes() for path in record_root.glob("*.json")}
@@ -293,7 +296,9 @@ class IsolationContract(unittest.TestCase):
             "success",
         )
         output = StringIO()
-        with redirect_stdout(output):
+        with redirect_stdout(output), mock.patch(
+            "sos.cli.sys.stdin.isatty", return_value=True
+        ):
             exit_code = cli_main(
                 ["qualify", str(root), "--family", "python.stdlib-unittest", "--yes", "--json"]
             )

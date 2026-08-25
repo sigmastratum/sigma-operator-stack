@@ -42,22 +42,33 @@ def admit_host(*, platform_name: str | None = None) -> TerminalResult:
     observed = sys.platform if platform_name is None else platform_name
     if observed == "linux":
         return TerminalResult(
-            "sos_host_admission_v1",
+            "sos_host_admission_v2",
             Status.SUCCESS,
             ("SOS_LINUX_SUBSTRATE_ADMITTED",),
             _details(host_platform="linux"),
         )
     host = "windows" if observed.startswith("win") else "macos" if observed == "darwin" else "other"
-    next_action = (
-        "Install or open SOS through WSL2 with the project in the WSL native Linux filesystem."
-        if host == "windows"
-        else "Install or open SOS through the qualified Linux execution substrate."
-    )
+    if host == "windows":
+        reason = "SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT"
+        support_status = "under_development"
+        next_action = "Use a qualified native Linux x86_64 runner for this alpha."
+    elif host == "macos":
+        reason = "SOS_MACOS_DEMAND_GATED"
+        support_status = "demand_gated"
+        next_action = "Use a qualified native Linux x86_64 runner for this alpha."
+    else:
+        reason = "SOS_LINUX_SUBSTRATE_REQUIRED"
+        support_status = "unsupported"
+        next_action = "Use a qualified native Linux x86_64 runner."
     return TerminalResult(
-        "sos_host_admission_v1",
+        "sos_host_admission_v2",
         Status.UNSUPPORTED,
-        ("SOS_LINUX_SUBSTRATE_REQUIRED",),
-        _details(host_platform=host, next_action=next_action),
+        (reason,),
+        _details(
+            host_platform=host,
+            native_support_status=support_status,
+            next_action=next_action,
+        ),
     )
 
 

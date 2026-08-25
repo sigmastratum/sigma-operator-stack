@@ -123,7 +123,7 @@ class P105AgentContractTests(unittest.TestCase):
         absent = project_tool(str(root), "sos_propose_qualification_receipt")
         self.assertEqual(absent.status, "not_verified")
         self.assertEqual(absent.details["proposal_state"], "not_configured")
-        qualify_once(str(root), confirmed=True)
+        qualify_once(str(root), confirmed=True, controlling_tty_observed=True)
         before = self.snapshot(root / ".sigma")
         first = project_tool(str(root), "sos_propose_qualification_receipt")
         second = project_tool(str(root), "sos_propose_qualification_receipt")
@@ -137,7 +137,7 @@ class P105AgentContractTests(unittest.TestCase):
     def test_tampered_receipt_never_becomes_proposal_or_green(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)
-        qualify_once(str(root), confirmed=True)
+        qualify_once(str(root), confirmed=True, controlling_tty_observed=True)
         view_path = root / ".sigma" / "views" / "qualification.json"
         view = json.loads(view_path.read_text(encoding="utf-8"))
         immutable = root / ".sigma" / "qualification" / "receipts" / (
