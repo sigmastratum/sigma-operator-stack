@@ -175,6 +175,19 @@ def _add_landlock_path(ruleset_fd: int, path: Path, access: int) -> None:
         os.close(descriptor)
 
 
+def _interpreter_read_roots() -> tuple[Path, ...]:
+    """Return exact interpreter roots needed after Landlock is enforced."""
+    roots: set[Path] = set()
+    for value in (sys.base_prefix, sys.prefix):
+        try:
+            candidate = Path(value).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if candidate.is_dir() and candidate != Path("/"):
+            roots.add(candidate)
+    return tuple(sorted(roots, key=os.fspath))
+
+
 def _restrict_filesystem(source: Path, output: Path) -> int:
     abi = _query_landlock_abi()
     if abi < 3:
@@ -190,6 +203,8 @@ def _restrict_filesystem(source: Path, output: Path) -> int:
             read_execute = _LL_EXECUTE | _LL_READ_FILE | _LL_READ_DIR
             for system_root in (Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")):
                 _add_landlock_path(ruleset_fd, system_root, read_execute & handled)
+            for interpreter_root in _interpreter_read_roots():
+                _add_landlock_path(ruleset_fd, interpreter_root, read_execute & handled)
             _add_landlock_path(ruleset_fd, Path("/etc/ld.so.cache"), _LL_READ_FILE & handled)
             _add_landlock_path(
                 ruleset_fd,

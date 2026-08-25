@@ -4,6 +4,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 from sos.checks import discover_checks, qualify_supported
 from sos.cli import main as cli_main
 from sos.isolation import run_isolated_unittest
+from sos import _isolation_worker
 from sos.workspace import initialize_workspace, qualify_once
 
 
@@ -19,6 +21,21 @@ def git(root: Path, *args: str) -> None:
 
 
 class IsolatedQualificationTests(unittest.TestCase):
+    def test_interpreter_roots_are_exact_read_candidates_without_filesystem_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary) / "base"
+            prefix = Path(temporary) / "venv"
+            base.mkdir()
+            prefix.mkdir()
+            with mock.patch.object(_isolation_worker.sys, "base_prefix", str(base)), mock.patch.object(
+                _isolation_worker.sys, "prefix", str(prefix)
+            ):
+                self.assertEqual(_isolation_worker._interpreter_read_roots(), (base, prefix))
+            with mock.patch.object(_isolation_worker.sys, "base_prefix", "/"), mock.patch.object(
+                _isolation_worker.sys, "prefix", "/"
+            ):
+                self.assertEqual(_isolation_worker._interpreter_read_roots(), ())
+
     def make_project(self, test_source: str) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
