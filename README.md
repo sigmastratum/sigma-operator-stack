@@ -14,8 +14,9 @@ managed change, and fails closed when authority is ambiguous.
 > Linux. Executable qualification has a deliberately narrow kernel boundary.
 > Direct Windows remains unsupported in `0.1.0a1`; the next platform increment
 > is a native, non-admin Windows control plane rather than a required
-> WSL/Docker setup. Public release readiness is not claimed by this source
-> candidate.
+> WSL/Docker setup. The source has passed the local alpha update contract, but
+> public release readiness is not claimed until candidate-bound artifacts,
+> demonstration, independent cohort evidence, and public CI all pass.
 
 ## See the recovery loop
 
@@ -82,6 +83,11 @@ Every authoritative read re-observes the application fingerprint. A changed
 tracked, staged, unstaged, untracked, deleted, symlink, or bounded submodule
 state becomes stale and returns an exact next action.
 
+Qualification is also bound to the exact installed SOS package identity. An
+upgrade or downgrade preserves historical receipts but makes their green state
+stale until each project is rebound, Codex is restarted, and qualification is
+run separately. See [version update and downgrade](docs/version-update.md).
+
 ### Installation overwrites an existing stack
 
 `sos compatibility` discovers known agent and governance surfaces and marks
@@ -132,6 +138,8 @@ compatibility claim.
   deploy, or production mutation tool.
 - One observed-terminal confirmation for managed writes.
 - Digest-bound previews, receipts, successor lineage, and stale detection.
+- Package-bound qualification currentness across upgrade and downgrade; setup
+  rebind alone cannot manufacture green.
 - Qualification runs only through a registered fixed command and a named
   fail-closed isolation profile.
 - User files are restored byte-for-byte on safe setup removal; `.sigma`

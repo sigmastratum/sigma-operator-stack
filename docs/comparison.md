@@ -10,6 +10,7 @@ coexist with the tools a repository already uses, not to replace them.
 | Memory and retrieval tools | Search or recalled project context | Authority-aware recovery that distinguishes retrieved context from accepted current state | General semantic memory or hosted retrieval |
 | Issue trackers | Work ownership, status and collaboration | Local binding from current work to exact repository and qualification state | Replacement for team planning or reporting |
 | Test runners and CI | Execution of project checks | Registered fixed plans, isolated local execution and digest-bound receipts | A new test framework or a substitute for CI |
+| Package managers | Install or replace a tool version | Per-project detection that prior qualification belongs to another exact SOS package, plus an explicit rebind/restart/requalify path | Automatic update discovery, package acquisition, schema migration or fleet rollout |
 
 The practical boundary is simple: existing systems remain their own sources
 of truth. SOS records which source was selected, whether the repository still

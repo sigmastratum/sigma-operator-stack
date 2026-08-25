@@ -53,9 +53,11 @@ REQUIRED_FILES = {
     "docs/architecture.md",
     "docs/comparison.md",
     "docs/alpha-feedback.md",
+    "docs/publication-checklist.md",
     "docs/roadmap.md",
     "docs/threat-model.md",
     "docs/troubleshooting.md",
+    "docs/version-update.md",
     "examples/fresh-agent-recovery/expected.json",
     "pyproject.toml",
     "requirements/audit.txt",
@@ -92,21 +94,43 @@ def _slug(value: str) -> str:
     return re.sub(r"[ _]+", "-", value).strip("-")
 
 
-def _check_readme_links(repository: Path, failures: list[str]) -> None:
-    readme = repository / "README.md"
-    text = readme.read_text(encoding="utf-8")
-    anchors = {_slug(line.lstrip("#").strip()) for line in text.splitlines() if line.startswith("#")}
-    for raw in MARKDOWN_LINK.findall(text):
-        target = raw.strip().split(maxsplit=1)[0].strip("<>")
-        if target.startswith(("https://", "http://", "mailto:")):
+def _markdown_anchors(path: Path) -> set[str]:
+    text = path.read_text(encoding="utf-8")
+    return {
+        _slug(line.lstrip("#").strip())
+        for line in text.splitlines()
+        if line.startswith("#")
+    }
+
+
+def _check_markdown_links(
+    repository: Path, files: list[str], failures: list[str]
+) -> None:
+    for name in files:
+        if PurePosixPath(name).suffix.lower() != ".md":
             continue
-        path_text, _, fragment = target.partition("#")
-        target_path = readme if not path_text else repository / path_text
-        if not target_path.is_file():
-            failures.append(f"SOS_PUBLIC_README_LINK_BROKEN:{target}")
-            continue
-        if fragment and target_path == readme and _slug(fragment) not in anchors:
-            failures.append(f"SOS_PUBLIC_README_ANCHOR_BROKEN:{fragment}")
+        source = repository / name
+        text = source.read_text(encoding="utf-8")
+        for raw in MARKDOWN_LINK.findall(text):
+            target = raw.strip().split(maxsplit=1)[0].strip("<>")
+            if target.startswith(("https://", "http://", "mailto:")):
+                continue
+            path_text, _, fragment = target.partition("#")
+            target_path = source if not path_text else source.parent / path_text
+            try:
+                resolved = target_path.resolve(strict=True)
+            except OSError:
+                failures.append(f"SOS_PUBLIC_MARKDOWN_LINK_BROKEN:{name}")
+                continue
+            if resolved != repository and repository not in resolved.parents:
+                failures.append(f"SOS_PUBLIC_MARKDOWN_LINK_OUTSIDE_REPOSITORY:{name}")
+                continue
+            if not resolved.is_file():
+                failures.append(f"SOS_PUBLIC_MARKDOWN_LINK_BROKEN:{name}")
+                continue
+            if fragment and resolved.suffix.lower() == ".md":
+                if _slug(fragment) not in _markdown_anchors(resolved):
+                    failures.append(f"SOS_PUBLIC_MARKDOWN_ANCHOR_BROKEN:{name}")
 
 
 def _check_issue_forms(repository: Path, failures: list[str]) -> None:
@@ -315,7 +339,7 @@ def inspect(repository: Path) -> dict[str, object]:
                 failures.append(f"SOS_PUBLIC_CONTENT_FORBIDDEN:{name}")
                 break
     try:
-        _check_readme_links(repository, failures)
+        _check_markdown_links(repository, files, failures)
         _check_issue_forms(repository, failures)
     except (OSError, TypeError, UnicodeError, yaml.YAMLError):
         failures.append("SOS_PUBLIC_COMMUNITY_SURFACE_INVALID")

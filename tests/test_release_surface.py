@@ -19,6 +19,36 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_public_release.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_public_scanner_checks_links_in_every_markdown_file(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        specification = importlib.util.spec_from_file_location(
+            "sos_public_scan_links", root / "tools" / "check_public_release.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        with self.subTest("non_readme_path"):
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as temporary:
+                repository = Path(temporary).resolve()
+                (repository / "docs").mkdir()
+                (repository / "README.md").write_text("# Safe\n", encoding="utf-8")
+                (repository / "docs" / "guide.md").write_text(
+                    "# Guide\n[missing](missing.md)\n", encoding="utf-8"
+                )
+                failures: list[str] = []
+                module._check_markdown_links(
+                    repository,
+                    ["README.md", "docs/guide.md"],
+                    failures,
+                )
+                self.assertEqual(
+                    failures,
+                    ["SOS_PUBLIC_MARKDOWN_LINK_BROKEN:docs/guide.md"],
+                )
+
     def test_ci_and_release_workflows_are_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = self.run_tool(root, "check_workflows.py")
@@ -48,6 +78,27 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         ]
         positions = [readme.index(heading) for heading in headings]
         self.assertEqual(positions, sorted(positions))
+
+    def test_public_update_claim_is_exact_and_bounded(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        update = (root / "docs" / "version-update.md").read_text(encoding="utf-8")
+        roadmap = (root / "docs" / "roadmap.md").read_text(encoding="utf-8")
+        architecture = (root / "docs" / "architecture.md").read_text(encoding="utf-8")
+        threat = (root / "docs" / "threat-model.md").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        joined = " ".join("\n".join((update, architecture)).split())
+        for phrase in (
+            "valid_stale",
+            "does not keep a global project inventory",
+            "performs no automatic package acquisition or migration",
+        ):
+            self.assertIn(phrase, joined)
+        self.assertIn("qualified package-bound `N -> N+1 -> N`", roadmap)
+        self.assertIn("predecessor artifact", threat)
+        self.assertIn(
+            "setup rebind alone cannot manufacture green",
+            " ".join(readme.split()),
+        )
 
     def test_issue_forms_are_typed_and_public_safe(self) -> None:
         root = Path(__file__).resolve().parents[1]

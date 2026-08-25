@@ -63,3 +63,22 @@ unsupported. SOS does not fall back to unisolated execution.
 qualification. Follow the returned next action, normally regeneration and
 ordered acceptance. `not_verified` means no current qualification receipt is
 green; it is not an integrity failure.
+
+## Update or downgrade is stale
+
+After an exact package replacement, historical qualification remains valid
+history but is not current for the new executable identity. Expected order:
+
+```text
+sos propose-update PATH
+sos setup update codex PATH
+# close and reopen Codex
+sos qualify PATH
+sos preflight PATH
+```
+
+Setup update alone must not turn qualification green. If successor
+qualification fails, preserve the failure receipt, reinstall the retained
+exact predecessor wheel, repeat the setup rebind, restart Codex, and qualify
+again. Do not delete `.sigma`, edit receipts, or regenerate accepted state to
+hide the failure. See [version update and downgrade](version-update.md).

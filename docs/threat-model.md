@@ -22,6 +22,9 @@ SOS is designed to keep a coding agent from silently:
 - unavailable or downgraded Landlock, `no_new_privs`, or seccomp capability;
 - oversized inputs, outputs, file sets, environment, or process activity;
 - interruption during bootstrap, setup, qualification, update, or removal.
+- a shared user-level tool replacement leaving one or more projects falsely
+  green under executable bytes they did not qualify;
+- setup rebind being mistaken for successful successor qualification.
 
 ## Controls
 
@@ -32,6 +35,9 @@ SOS is designed to keep a coding agent from silently:
 - fixed command arguments, closed environment, bounded output and timeout;
 - read-only source projection plus bounded writable output root;
 - exact managed-file journal with reverse-order rollback;
+- package-version and executable-resource identity in qualification bindings;
+- per-project stale projection after upgrade or downgrade, with explicit agent
+  restart and separate qualification required;
 - content-safe outputs that omit raw project bytes and environment values.
 
 ## Explicit non-goals
@@ -41,3 +47,8 @@ remote policy service, or permission to deploy. It does not prove every future
 kernel, Python, Git, `uv`, Codex, language, or framework compatible. It does
 not protect against an already-compromised operating system or repository
 owner.
+
+The alpha update contract is deliberately manual. It does not provide a global
+project inventory, side-by-side executable slots, automatic binary rollback,
+state-schema migration, or capability activation. The predecessor artifact
+must be retained until the successor has qualified.

@@ -25,6 +25,13 @@ authority.
 - green public CI for the published commit;
 - reproducible wheel, SBOM, provenance, and public-content scan;
 - current support matrix and regenerated demo media;
+- update/downgrade documentation and qualification claims bound to the exact
+  release candidate;
 - no known release-blocking existing-stack or platform ambiguity;
 - separate approval for remote metadata, visibility, tag, release, and package
   publication.
+
+The checked-in deterministic media is draft lifecycle evidence until it is
+rebuilt from the sole candidate and the separately approved fresh-agent step
+is captured. A documentation or candidate change invalidates the old media
+binding even when the commands remain visually identical.

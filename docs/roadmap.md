@@ -11,17 +11,21 @@ release promise or a compatibility claim.
 - registered Python syntax qualification and a narrowly isolated unittest
   profile on admitted native Linux;
 - content-safe receipts, recovery, update proposal, and safe next action;
-- version-pinned install/update/remove lifecycle.
+- version-pinned install/update/remove lifecycle;
+- qualified package-bound `N -> N+1 -> N` currentness: every project sharing a
+  tool environment becomes independently stale after package replacement and
+  must rebind setup, restart the agent, and qualify separately.
 
 ## Next
 
-- finish the publication-safety rebind for the native-Linux `0.1.0a1`
-  reference alpha, including audited release tooling and exact artifacts;
-- run the exact candidate in public CI and complete the bounded repository
-  visibility/security transaction;
-- publish the reproducible fresh-agent recovery tutorial and deterministic
-  zero-provider terminal media with the same release candidate;
-- run public CI and a small independent alpha cohort;
+- rebuild the 60–120 second fresh-agent demonstration from the sole release
+  candidate, including one separately approved genuine fresh Codex session;
+- complete a small independent supported-Linux cohort and bind its public-safe
+  result to the same candidate;
+- freeze the final wheel, SBOM, checksums, provenance, documentation and demo
+  as one exact release packet;
+- under a separate owner decision, open only the source repository, require
+  standard public CI to pass, and only then consider tag/package publication;
 - freeze a native, non-admin Windows control-plane architecture that does not
   require WSL or Docker; executable Windows qualification remains a later,
   separately isolated increment;
@@ -45,3 +49,7 @@ their contracts and qualification evidence exist.
 
 The ignored-managed-target fingerprint edge case is fixed and independently
 qualified. It is no longer an open roadmap item.
+
+The minimum manual alpha update contract is also independently qualified. It
+does not include automatic discovery, side-by-side binary slots, schema
+migration, capability activation, or fleet rollout.
