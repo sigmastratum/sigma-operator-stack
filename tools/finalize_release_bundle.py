@@ -17,6 +17,7 @@ VERSION = "0.1.0a1"
 ONBOARDING_FILES = (
     ("tools/start_sos_alpha.py", "start-sos-alpha", "text/x-python", 0o755),
     ("docs/alpha-quickstart.md", "START-HERE.md", "text/markdown", 0o644),
+    ("docs/alpha-feedback.md", "alpha-feedback.md", "text/markdown", 0o644),
 )
 
 
