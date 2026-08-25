@@ -118,10 +118,21 @@ def observe_application(
             worktree_by_path.setdefault(change.path, []).append(change)
         projected_untracked = set(untracked)
         projected_ignored = set(ignored)
+        overlay_index_payloads = {
+            path: _index_payload(root, path) for path in projected
+        }
+        ignored_overlay_paths = _ignored_paths(
+            root,
+            tuple(
+                path
+                for path, index_payload in overlay_index_payloads.items()
+                if index_payload is None
+            ),
+        )
         for path, payload in projected.items():
-            index_payload = _index_payload(root, path)
+            index_payload = overlay_index_payloads[path]
             if index_payload is None:
-                if path not in projected_ignored:
+                if path not in ignored_overlay_paths:
                     projected_untracked.add(path)
                 worktree_by_path.pop(path, None)
             elif payload == index_payload:
@@ -252,6 +263,15 @@ def observe_application(
                 raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
         if before != _candidate_snapshot(root):
             raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
+        if ignored_overlay_paths != _ignored_paths(
+            root,
+            tuple(
+                path
+                for path, index_payload in overlay_index_payloads.items()
+                if index_payload is None
+            ),
+        ):
+            raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
         entries.sort(key=lambda item: (item.path.encode("utf-8"), item.category, item.stage))
         material = _stream(repository_id, fingerprint_head, exclusion_policy_ref, entries)
         reasons = ("SOS_PROTECTED_CONTENT_NOT_OBSERVED",) if protected else ()
@@ -314,6 +334,26 @@ def _index_payload(root: Path, path: str) -> bytes | None:
     return payload
 
 
+def _ignored_paths(root: Path, paths: tuple[str, ...]) -> frozenset[str]:
+    """Return exact untracked overlay paths ignored by Git's active policy."""
+    if not paths:
+        return frozenset()
+    ordered = tuple(sorted(paths, key=lambda item: item.encode("utf-8")))
+    raw = _git(
+        root,
+        "check-ignore",
+        "--no-index",
+        "-z",
+        "--stdin",
+        input_bytes=b"".join(path.encode("utf-8") + b"\0" for path in ordered),
+        accepted_returncodes=(0, 1),
+    )
+    ignored = _parse_paths(raw)
+    if any(path not in ordered for path in ignored):
+        raise _ObservationFailure("SOS_DIRTY_GIT_OUTPUT_MALFORMED")
+    return frozenset(ignored)
+
+
 def _projected_git_mode(root: Path, path: str) -> int:
     try:
         observed = (root / path).lstat()
@@ -371,7 +411,12 @@ def _candidate_snapshot(
     return staged, worktree, untracked, ignored, unmerged
 
 
-def _git(root: Path, *args: str) -> bytes:
+def _git(
+    root: Path,
+    *args: str,
+    input_bytes: bytes | None = None,
+    accepted_returncodes: tuple[int, ...] = (0,),
+) -> bytes:
     if _GIT_EXECUTABLE is None:
         raise _ObservationFailure("SOS_DIRTY_GIT_INSPECTION_FAILED")
     environment = {
@@ -399,7 +444,8 @@ def _git(root: Path, *args: str) -> bytes:
                 *args,
             ],
             check=False,
-            stdin=subprocess.DEVNULL,
+            input=input_bytes,
+            stdin=subprocess.DEVNULL if input_bytes is None else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=_COMMAND_TIMEOUT_SECONDS,
@@ -408,7 +454,7 @@ def _git(root: Path, *args: str) -> bytes:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise _ObservationFailure("SOS_DIRTY_GIT_INSPECTION_FAILED") from exc
-    if completed.returncode != 0:
+    if completed.returncode not in accepted_returncodes:
         raise _ObservationFailure("SOS_DIRTY_GIT_INSPECTION_FAILED")
     if len(completed.stdout) > _MAX_GIT_OUTPUT_BYTES:
         raise _ObservationFailure("SOS_DIRTY_GIT_OUTPUT_LIMIT_EXCEEDED")

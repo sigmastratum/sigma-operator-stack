@@ -139,6 +139,78 @@ class DirtyApplicationObserverTests(unittest.TestCase):
         protected.chmod(0)
         self.assertEqual(self.observation(root).fingerprint, first)
 
+    def test_overlay_projection_uses_exact_ignore_decision_for_directory_rule(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        (root / ".gitignore").write_text("AGENTS.md\n.codex/\n", encoding="utf-8")
+        git(root, "add", ".gitignore")
+        git(root, "commit", "-qm", "synthetic managed-target ignores")
+        overlays = {
+            "AGENTS.md": b"synthetic managed instructions\n",
+            ".codex/config.toml": b"synthetic = true\n",
+        }
+        identity = repository_identity_contract(root, local_repository_nonce="1" * 32)
+        inspection = inspect_repository(root, local_repository_nonce="1" * 32)
+        exclusion = {
+            "contract": "sos_bootstrap_exclusion_policy_v2",
+            "schema_major": 2,
+            "control_plane_root": ".sigma",
+            "staging_prefix": ".sigma.init.",
+            "transaction_id": "2" * 64,
+            "policy_digest": "sha256:" + "0" * 64,
+        }
+        exclusion["policy_digest"] = exclusion_policy_digest(exclusion)
+        projected = dirty.observe_application(
+            root,
+            identity.repository_id,
+            inspection.head or "",
+            exclusion["policy_digest"],
+            overlays=overlays,
+        )
+        (root / "AGENTS.md").write_bytes(overlays["AGENTS.md"])
+        (root / ".codex").mkdir()
+        (root / ".codex" / "config.toml").write_bytes(overlays[".codex/config.toml"])
+        actual = dirty.observe_application(
+            root,
+            identity.repository_id,
+            inspection.head or "",
+            exclusion["policy_digest"],
+        )
+        self.assertTrue(projected.complete)
+        self.assertEqual(projected, actual)
+        self.assertEqual(projected.state, "clean")
+
+    def test_tracked_overlay_remains_fingerprint_bound_despite_ignore_rule(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        (root / "AGENTS.md").write_text("tracked original\n", encoding="utf-8")
+        git(root, "add", "AGENTS.md")
+        (root / ".gitignore").write_text("AGENTS.md\n", encoding="utf-8")
+        git(root, "add", ".gitignore")
+        git(root, "commit", "-qm", "synthetic tracked managed target")
+        identity = repository_identity_contract(root, local_repository_nonce="1" * 32)
+        inspection = inspect_repository(root, local_repository_nonce="1" * 32)
+        exclusion = {
+            "contract": "sos_bootstrap_exclusion_policy_v2",
+            "schema_major": 2,
+            "control_plane_root": ".sigma",
+            "staging_prefix": ".sigma.init.",
+            "transaction_id": "2" * 64,
+            "policy_digest": "sha256:" + "0" * 64,
+        }
+        exclusion["policy_digest"] = exclusion_policy_digest(exclusion)
+        projected = dirty.observe_application(
+            root,
+            identity.repository_id,
+            inspection.head or "",
+            exclusion["policy_digest"],
+            overlays={"AGENTS.md": b"tracked replacement\n"},
+        )
+        self.assertTrue(projected.complete)
+        self.assertEqual(projected.state, "dirty")
+        self.assertEqual(projected.entry_count, 1)
+        self.assertGreater(projected.bytes_hashed, 0)
+
     def test_sensitive_name_grammar_distinguishes_public_sources_from_private_material(self) -> None:
         expected = {
             ".env": "environment_or_secret",

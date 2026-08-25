@@ -116,6 +116,37 @@ class P106LifecycleTests(unittest.TestCase):
         self.assertEqual(preflight.status, "not_verified")
         self.assertEqual(preflight.details["next_action"], "sos qualify")
 
+    def test_ignored_managed_targets_install_and_remain_digest_verified(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        (root / ".gitignore").write_text("AGENTS.md\n.codex/\n", encoding="utf-8")
+        git(root, "add", ".gitignore")
+        git(root, "commit", "-qm", "synthetic managed-target ignores")
+        ignore_before = (root / ".gitignore").read_bytes()
+
+        plan = prepare_one_command_init(str(root), launcher=self.binding())
+        result = execute_one_command_init(
+            plan, confirmed=True, controlling_tty_observed=True
+        )
+
+        self.assertEqual(result.status, "success", result.to_dict())
+        self.assertEqual(
+            result.details["application_fingerprint"],
+            plan.expected_application_fingerprint,
+        )
+        self.assertEqual((root / ".gitignore").read_bytes(), ignore_before)
+        self.assertEqual(workspace_status(str(root)).status, "success")
+        self.assertEqual(
+            codex_setup_status(str(root), launcher=self.binding()).status,
+            "success",
+        )
+
+        config = root / ".codex" / "config.toml"
+        config.write_bytes(config.read_bytes() + b"# synthetic drift\n")
+        drifted = codex_setup_status(str(root), launcher=self.binding())
+        self.assertEqual(drifted.status, "stale")
+        self.assertIn("SOS_CODEX_SETUP_TARGET_DRIFT", drifted.reasons)
+
     def test_managed_dirty_state_requires_admission_and_qualifies_bound_snapshot(self) -> None:
         temporary, root = self.make_project(agents=None, config=None)
         self.addCleanup(temporary.cleanup)
