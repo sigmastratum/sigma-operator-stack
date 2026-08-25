@@ -23,12 +23,12 @@ from pathlib import Path
 from sos import __version__
 from sos.client_integration import (
     codex_setup_status,
-    install_codex_setup,
     project_codex_package_update,
     update_codex_setup,
 )
+from sos.lifecycle import execute_one_command_init, prepare_one_command_init
 from sos.qualification_contracts import EXECUTOR_DIGEST
-from sos.workspace import initialize_workspace, qualify_once, workspace_status
+from sos.workspace import qualify_once, workspace_status
 
 
 def digest_file(path):
@@ -67,17 +67,16 @@ def snapshot(root):
 root = Path(sys.argv[1])
 operation = sys.argv[2]
 if operation == "bootstrap":
-    initialized = initialize_workspace(str(root), confirmed=True, controlling_tty_observed=True)
+    initialized = execute_one_command_init(
+        prepare_one_command_init(str(root)),
+        confirmed=True,
+        controlling_tty_observed=True,
+    )
     if initialized.status.value != "success":
         raise SystemExit(20)
-    installed = install_codex_setup(
-        str(root), confirmed=True, controlling_tty_observed=True
-    )
-    if installed.status.value != "success":
-        raise SystemExit(21)
     receipt = qualify_once(
         str(root),
-        family_id="python.syntax",
+        family_id="python.stdlib-unittest",
         confirmed=True,
         controlling_tty_observed=True,
     )[2]
@@ -92,7 +91,7 @@ elif operation == "rebind":
 elif operation == "qualify":
     receipt = qualify_once(
         str(root),
-        family_id="python.syntax",
+        family_id="python.stdlib-unittest",
         confirmed=True,
         controlling_tty_observed=True,
     )[2]
@@ -176,6 +175,18 @@ def _make_project(root: Path, label: str, home: Path) -> Path:
     (project / "README.md").write_text("Synthetic U0 project.\n", encoding="utf-8")
     (project / "user-owned.txt").write_text("Preserve this user-owned file.\n", encoding="utf-8")
     (project / "sample.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (project / "pyproject.toml").write_text(
+        "[build-system]\nrequires = []\nbuild-backend = 'synthetic.backend'\n",
+        encoding="utf-8",
+    )
+    (project / "tests").mkdir()
+    (project / "tests" / "test_sample.py").write_text(
+        "import unittest\n\n"
+        "class SampleTest(unittest.TestCase):\n"
+        "    def test_value(self):\n"
+        "        self.assertEqual(1, 1)\n",
+        encoding="utf-8",
+    )
     (project / "tasks").mkdir()
     (project / "tasks" / "current.md").write_text("Synthetic current task.\n", encoding="utf-8")
     _run(["git", "add", "."], cwd=project, home=home)
