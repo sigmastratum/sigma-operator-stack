@@ -1,0 +1,35 @@
+name: Install or admission problem
+description: Report a supported-platform install, capability, or filesystem admission failure.
+title: "[install] "
+labels: ["bug", "install"]
+body:
+  - type: markdown
+    attributes:
+      value: "Use only a synthetic reproducer. Do not include secrets, private source, prompts, raw .sigma data, filesystem paths, hostnames, or customer data."
+  - type: input
+    id: version
+    attributes: {label: SOS version, placeholder: "sos 0.1.0a1"}
+    validations: {required: true}
+  - type: input
+    id: os_profile
+    attributes: {label: OS profile, placeholder: "Linux x86_64, kernel and Landlock ABI"}
+    validations: {required: true}
+  - type: input
+    id: command
+    attributes: {label: Command, placeholder: "sos capabilities --json"}
+    validations: {required: true}
+  - type: input
+    id: reason_code
+    attributes: {label: Reason code, placeholder: "SOS_..."}
+    validations: {required: true}
+  - type: textarea
+    id: reproducer
+    attributes: {label: Synthetic reproducer, description: "Minimal steps using a disposable synthetic Git repository only."}
+    validations: {required: true}
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public-content confirmation
+      options:
+        - label: I removed secrets, private source, prompts, raw .sigma data, paths, hostnames, and customer data.
+          required: true

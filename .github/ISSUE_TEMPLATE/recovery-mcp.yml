@@ -1,0 +1,35 @@
+name: Recovery or MCP problem
+description: Report status, recovery, Codex setup, or eight-tool MCP behavior.
+title: "[recovery] "
+labels: ["bug", "mcp"]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not paste agent conversations or tool payloads from a real project. Do not include secrets, private source, prompts, raw .sigma data, filesystem paths, hostnames, or customer data."
+  - type: input
+    id: version
+    attributes: {label: SOS version}
+    validations: {required: true}
+  - type: input
+    id: os_profile
+    attributes: {label: OS profile}
+    validations: {required: true}
+  - type: input
+    id: command
+    attributes: {label: Command or MCP tool}
+    validations: {required: true}
+  - type: input
+    id: reason_code
+    attributes: {label: Reason code}
+    validations: {required: true}
+  - type: textarea
+    id: reproducer
+    attributes: {label: Synthetic reproducer}
+    validations: {required: true}
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public-content confirmation
+      options:
+        - label: I removed secrets, private source, prompts, raw .sigma data, paths, hostnames, and customer data.
+          required: true

@@ -4,7 +4,9 @@ Thank you for helping improve Sigma Operator Stack.
 
 ## Before opening a change
 
-- Use GitHub Discussions for questions and GitHub Issues for reproducible bugs.
+- Use the matching typed GitHub Issue for reproducible bugs, documentation
+  mismatches, or bounded proposals. Discussions and blank issues are disabled
+  during the alpha.
 - Read [PUBLIC_REPOSITORY_BOUNDARY.md](PUBLIC_REPOSITORY_BOUNDARY.md).
 - Use only synthetic fixtures. Never commit credentials, private paths, raw
   conversations, customer/session identifiers or internal evidence.
@@ -22,6 +24,18 @@ python3 tools/check_public_release.py --repository .
 
 All tests must pass with zero skips. Changes to schemas, qualification,
 installation, MCP tools or release workflows need focused negative tests.
+
+Pull requests must explain the public outcome, authority or mutation boundary,
+fail-closed behavior, and explicit non-goals. Test fixtures, provenance, logs,
+and screenshots must be synthetic and safe to publish. Run:
+
+```bash
+python3 tools/check_public_release.py --repository .
+```
+
+Maintainers aim to classify a complete issue or pull request within five
+working days. This is a best-effort triage target, not a response or resolution
+SLA.
 
 ## Sign-off and license
 

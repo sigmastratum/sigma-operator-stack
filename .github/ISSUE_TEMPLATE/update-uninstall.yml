@@ -1,0 +1,35 @@
+name: Update or uninstall problem
+description: Report package rebind, setup update, removal, or project-record preservation.
+title: "[lifecycle] "
+labels: ["bug", "lifecycle"]
+body:
+  - type: markdown
+    attributes:
+      value: "Use exact public versions and a synthetic repository. Do not include secrets, private source, prompts, raw .sigma data, filesystem paths, hostnames, or customer data."
+  - type: input
+    id: version
+    attributes: {label: SOS version}
+    validations: {required: true}
+  - type: input
+    id: os_profile
+    attributes: {label: OS profile}
+    validations: {required: true}
+  - type: input
+    id: command
+    attributes: {label: Command}
+    validations: {required: true}
+  - type: input
+    id: reason_code
+    attributes: {label: Reason code or none}
+    validations: {required: true}
+  - type: textarea
+    id: reproducer
+    attributes: {label: Synthetic reproducer}
+    validations: {required: true}
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public-content confirmation
+      options:
+        - label: I removed secrets, private source, prompts, raw .sigma data, paths, hostnames, and customer data.
+          required: true

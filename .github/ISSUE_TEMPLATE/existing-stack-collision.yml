@@ -1,0 +1,35 @@
+name: Existing-stack collision
+description: Report preserve, append, create, block, or authority-selection behavior.
+title: "[coexistence] "
+labels: ["bug", "compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: "Describe only synthetic frameworks and files. Do not include secrets, private source, prompts, raw .sigma data, filesystem paths, hostnames, or customer data."
+  - type: input
+    id: version
+    attributes: {label: SOS version}
+    validations: {required: true}
+  - type: input
+    id: os_profile
+    attributes: {label: OS profile}
+    validations: {required: true}
+  - type: input
+    id: command
+    attributes: {label: Command}
+    validations: {required: true}
+  - type: input
+    id: reason_code
+    attributes: {label: Reason code}
+    validations: {required: true}
+  - type: textarea
+    id: reproducer
+    attributes: {label: Synthetic reproducer}
+    validations: {required: true}
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public-content confirmation
+      options:
+        - label: I removed secrets, private source, prompts, raw .sigma data, paths, hostnames, and customer data.
+          required: true
