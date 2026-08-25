@@ -26,6 +26,7 @@ class AlphaOnboardingTests(unittest.TestCase):
         bundle.mkdir()
         payloads = {
             "START-HERE.md": b"# Start here\n",
+            "alpha-feedback.md": b"# Alpha feedback\n",
             alpha.SBOM: b'{"bomFormat":"CycloneDX"}\n',
             "start-sos-alpha": b"#!/usr/bin/env python3\n",
             alpha.WHEEL: b"synthetic-wheel",
@@ -37,6 +38,7 @@ class AlphaOnboardingTests(unittest.TestCase):
                 "filename": name,
                 "media_type": {
                     "START-HERE.md": "text/markdown",
+                    "alpha-feedback.md": "text/markdown",
                     alpha.SBOM: "application/vnd.cyclonedx+json",
                     "start-sos-alpha": "text/x-python",
                     alpha.WHEEL: "application/zip",

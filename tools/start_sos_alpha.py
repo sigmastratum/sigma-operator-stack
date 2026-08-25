@@ -23,6 +23,7 @@ SBOM = f"sigma-operator-stack-{VERSION}.cdx.json"
 EXPECTED_FILES = frozenset(
     {
         "START-HERE.md",
+        "alpha-feedback.md",
         "release-manifest.json",
         SBOM,
         "start-sos-alpha",
@@ -31,6 +32,7 @@ EXPECTED_FILES = frozenset(
 )
 MAX_FILE_BYTES = {
     "START-HERE.md": 256 * 1024,
+    "alpha-feedback.md": 256 * 1024,
     "release-manifest.json": 1024 * 1024,
     SBOM: 16 * 1024 * 1024,
     "start-sos-alpha": 1024 * 1024,
@@ -210,6 +212,7 @@ def verify_bundle(bundle: Path) -> dict[str, object]:
     expected_artifacts = EXPECTED_FILES.difference({"release-manifest.json"})
     expected_media = {
         "START-HERE.md": "text/markdown",
+        "alpha-feedback.md": "text/markdown",
         SBOM: "application/vnd.cyclonedx+json",
         "start-sos-alpha": "text/x-python",
         WHEEL: "application/zip",
