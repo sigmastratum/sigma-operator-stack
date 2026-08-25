@@ -12,8 +12,10 @@ managed change, and fails closed when authority is ambiguous.
 
 > **Community alpha:** the control plane is useful today on supported native
 > Linux. Executable qualification has a deliberately narrow kernel boundary.
-> Native Ubuntu WSL2 remains pending, and public release readiness is not
-> claimed by this source candidate.
+> Direct Windows remains unsupported in `0.1.0a1`; the next platform increment
+> is a native, non-admin Windows control plane rather than a required
+> WSL/Docker setup. Public release readiness is not claimed by this source
+> candidate.
 
 ## See the recovery loop
 
@@ -85,9 +87,9 @@ claim.
 | --- | --- | --- | --- |
 | Native Linux x86_64, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Two independent positive controls | Supported | Control plane and registered Python qualification profile admitted |
 | Docker Desktop on a WSL2 kernel exposing Landlock ABI 1 | Capability diagnostic recorded | Control plane only | Executable unittest is unsupported and fails closed |
-| Native Ubuntu WSL2 | Pending | Unverified | No compatibility claim yet |
-| Direct Windows or Windows-backed mounts | Typed refusal observed | Unsupported | Use a separately qualified native-Linux workspace; do not bypass admission |
-| Direct macOS or VM shared folders | Not qualified | Unsupported | A future Linux-VM adapter requires separate qualification |
+| Native Ubuntu WSL2 | Pending diagnostic evidence | Unverified | Not the default Windows onboarding path |
+| Direct Windows or Windows-backed mounts | Typed refusal observed | Unsupported in `0.1.0a1` | A native non-admin control-plane preview is planned; executable checks require later, separate isolation evidence |
+| Direct macOS or VM shared folders | Not qualified | Unsupported | Demand-gated; no current installer or VM compatibility promise |
 | Agents other than Codex | Not qualified | Unverified | Control plane is agent-neutral; the alpha adapter is Codex-first |
 | Languages/check families beyond registered Python syntax and unittest | Not qualified | Unsupported | Future families require an explicit registry and isolation contract |
 

@@ -6,7 +6,11 @@ the exact reason code and use only synthetic data when filing an issue.
 ## Platform refusal
 
 `SOS_LINUX_SUBSTRATE_REQUIRED` means the CLI was started outside its supported
-Linux substrate. Direct Windows and macOS are not alpha execution targets.
+Linux substrate. Direct Windows and macOS are not `0.1.0a1` execution targets.
+Do not install WSL, Docker or grant administrator access merely to bypass this
+refusal. A future native Windows control-plane increment is planned with its
+own explicit support boundary; until released, use a separately qualified
+native-Linux workspace.
 
 ## Filesystem refusal
 
