@@ -31,7 +31,7 @@ authority.
 - separate approval for remote metadata, visibility, tag, release, and package
   publication.
 
-The checked-in deterministic media is draft lifecycle evidence until it is
-rebuilt from the sole candidate and the separately approved fresh-agent step
-is captured. A documentation or candidate change invalidates the old media
-binding even when the commands remain visually identical.
+Checked-in media becomes exact-candidate evidence only when its manifest binds
+the sole candidate, wheel, transcript, terminal frame and receipt-verified
+fresh-agent step. A documentation or candidate change invalidates the old
+media binding even when the commands remain visually identical.

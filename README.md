@@ -30,11 +30,12 @@ shows the whole product outcome:
 4. A fresh session recovers accepted state and the next allowed action.
 5. A later source change is detected as stale instead of silently trusted.
 
-The deterministic zero-provider terminal recording is available as
+The exact-candidate terminal recording is available as
 [`WebM`](demo/recovery-demo.webm) or [`MP4`](demo/recovery-demo.mp4). Its
 canonical text equivalent is [`demo/transcript.md`](demo/transcript.md). It
-demonstrates the local SOS lifecycle; it is not presented as a provider-backed
-Codex session.
+combines the offline local lifecycle with one explicitly approved,
+receipt-verified ephemeral Codex recovery. No raw task, response, tool result,
+session identifier, account data or host path is retained.
 
 ## Quickstart
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -9,6 +10,17 @@ from pathlib import Path
 
 
 class PublicDemoTests(unittest.TestCase):
+    def load_verifier(self):
+        root = Path(__file__).resolve().parents[1]
+        specification = importlib.util.spec_from_file_location(
+            "sos_demo_capture_verifier", root / "demo" / "verify_fresh_codex_capture.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        return module
+
     def test_zero_provider_tutorial_replay(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
@@ -70,6 +82,93 @@ class PublicDemoTests(unittest.TestCase):
             "SOS_SOURCE_STATUS_CHANGED",
         ):
             self.assertIn(token, transcript)
+
+    def test_fresh_codex_verifier_requires_exact_read_only_mcp_recovery(self) -> None:
+        module = self.load_verifier()
+        events = [
+            {"type": "thread.started", "thread_id": "synthetic"},
+            {"type": "turn.started"},
+        ]
+        for name in sorted(module.REQUIRED_TOOLS):
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "mcp_tool_call",
+                        "server": "sigma_operator_stack",
+                        "tool": name,
+                        "status": "completed",
+                    },
+                }
+            )
+        events.extend(
+            [
+                {"type": "item.completed", "item": {"type": "agent_message"}},
+                {"type": "turn.completed"},
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_path = root / "events.jsonl"
+            response_path = root / "response.json"
+            event_path.write_text(
+                "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+            )
+            response_path.write_text(json.dumps(module.EXPECTED_OUTPUT), encoding="utf-8")
+            receipt = module.verify(
+                event_path,
+                response_path,
+                candidate="a" * 40,
+                tree="b" * 40,
+                wheel_sha256="c" * 64,
+                client="codex-cli 0.145.0",
+                model="gpt-5.6-sol",
+            )
+        self.assertEqual(receipt["status"], "passed")
+        self.assertEqual(receipt["provider_calls"], 1)
+        self.assertEqual(receipt["shell_calls"], 0)
+        self.assertEqual(receipt["mutation_tool_calls"], 0)
+        self.assertFalse(receipt["raw_prompt_stored"])
+        self.assertFalse(receipt["raw_response_stored"])
+
+    def test_fresh_codex_verifier_rejects_shell_or_missing_tool(self) -> None:
+        module = self.load_verifier()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            response_path = root / "response.json"
+            response_path.write_text(json.dumps(module.EXPECTED_OUTPUT), encoding="utf-8")
+            for item in (
+                {"type": "command_execution", "status": "completed"},
+                {
+                    "type": "mcp_tool_call",
+                    "server": "sigma_operator_stack",
+                    "tool": "sos_status",
+                    "status": "completed",
+                },
+            ):
+                event_path = root / "events.jsonl"
+                event_path.write_text(
+                    "\n".join(
+                        json.dumps(event)
+                        for event in (
+                            {"type": "thread.started"},
+                            {"type": "item.completed", "item": item},
+                            {"type": "turn.completed"},
+                        )
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError):
+                    module.verify(
+                        event_path,
+                        response_path,
+                        candidate="a" * 40,
+                        tree="b" * 40,
+                        wheel_sha256="c" * 64,
+                        client="codex-cli 0.145.0",
+                        model="gpt-5.6-sol",
+                    )
 
 
 if __name__ == "__main__":

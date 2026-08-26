@@ -7,14 +7,20 @@ approval.
 
 `terminal-frame.txt` is the canonical content-safe terminal frame and
 `render_terminal_png.py` deterministically produces `recovery-terminal.png`.
-It contains only synthetic commands and typed outcomes; it is not presented as
-a provider-backed Codex session.
+It contains only synthetic commands, typed outcomes, and the result of one
+receipt-verified ephemeral Codex recovery. Raw task text, response text, tool
+results, session identifiers and absolute paths are never retained.
 
-`recovery-demo.webm` and `recovery-demo.mp4` are deterministic zero-provider
-terminal media generated from `terminal-frame.txt`. They demonstrate the local
-typed lifecycle and do not simulate a fresh Codex session. A genuine
-provider-backed fresh-session capture remains a separately approved release
-action.
+`recovery-demo.webm` and `recovery-demo.mp4` are deterministic terminal media
+generated from `terminal-frame.txt`. The local lifecycle is offline. Exactly
+one explicitly approved provider-backed Codex step is projected through
+`fresh-codex-receipt.json`; preparation failures are not release evidence.
+
+`capture_fresh_codex.py` accepts the operator instruction from an external
+temporary file, runs Codex with `--ephemeral`, `--ignore-user-config`, a
+read-only sandbox and only the generated eight-tool SOS MCP allow-list, then
+deletes raw events and response with its temporary directory. The public
+receipt stores only categorical recovery fields, tool names and digests.
 
 Capture requirements:
 
@@ -25,6 +31,10 @@ Capture requirements:
 - WebM and MP4 must each remain below 2 MiB;
 - GIF is optional and only retained when readable below the same limit;
 - media metadata and extracted text must pass the public-content scanner.
+- the fresh step requires `SOS_FRESH_CODEX_PROVIDER_APPROVED=1`; no default or
+  hidden provider call exists;
+- `SOS_FRESH_CODEX_TASK_FILE` is external and is never copied or hashed into
+  the repository.
 
 Rebuild deterministic PNG assets with:
 
