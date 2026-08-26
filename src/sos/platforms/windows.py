@@ -341,7 +341,7 @@ class _Win32NativeBoundary:
 
     def open_repository(self, path: Path) -> _NativeRoot:
         api = self._kernel()
-        handle = api.open_path(os.fspath(path), directory=True, write=False, create="open")
+        handle = api.open_path(os.fspath(path), directory=True, write=True, create="open")
         try:
             info = api.object_info(handle)
             if info[0] != "directory" or info[3]:
@@ -442,17 +442,8 @@ class _Win32NativeBoundary:
         api = self._kernel()
         self._assert_root(root)
         relative = _validate_relative_path(operation.relative_path)
-        initial_observation = self.observe_object(root, relative)
-        current = self._read_optional(root, relative)
-        if (current is not None) != operation.expected_existed or current != operation.expected_payload:
-            raise PlatformServiceError("identity_changed")
-        initial_identity = (
-            initial_observation.stable_identity_digest
-            if initial_observation.kind != "absent"
-            else None
-        )
-        before = _payload_digest(current)
         parent = str(PurePosixPath(relative).parent)
+        target_name = PurePosixPath(relative).name
         created_parent: str | None = None
         if parent != ".":
             parent_observed = self.observe_object(root, parent)
@@ -466,20 +457,61 @@ class _Win32NativeBoundary:
                 created_parent = parent
             elif parent_observed.kind != "directory":
                 raise PlatformServiceError("not_directory")
-        temporary = ("" if parent == "." else parent + "/") + ".sos-platform." + os.urandom(12).hex()
+        parent_handle = api.open_beneath(
+            root,
+            parent,
+            directory=True,
+            write=True,
+            create="open",
+        )
+        parent_info = api.object_info(parent_handle)
+        parent_root = _NativeRoot(
+            parent_handle,
+            api.final_path(parent_handle).rstrip("\\"),
+            root.volume_root,
+            parent_info[2],
+        )
+        temporary = ".sos-platform." + os.urandom(12).hex()
+        temporary_handle: int | None = None
+        temporary_identity: str | None = None
+        source_published = False
         try:
+            quarantine = _quarantine_name(target_name, operation.expected_payload)
+            self._recover_file_quarantine(
+                parent_root,
+                target_name,
+                quarantine,
+                operation.expected_payload if operation.expected_existed else None,
+            )
+
+            initial_observation = self.observe_object(parent_root, target_name)
+            current = self._read_optional(parent_root, target_name)
+            if (current is not None) != operation.expected_existed or current != operation.expected_payload:
+                raise PlatformServiceError("identity_changed")
+            initial_identity = (
+                initial_observation.stable_identity_digest
+                if initial_observation.kind != "absent"
+                else None
+            )
+            before = _payload_digest(current)
             if operation.payload is None:
                 if current is not None:
-                    api.delete_beneath(root, relative, initial_identity)
-                    api.flush_parent(root, relative)
+                    api.delete_beneath(parent_root, target_name, initial_identity)
+                    api.flush(parent_root.handle)
                 return PublicationReceipt(_DURABILITY, "delete", relative, before, None)
-            api.write_new_beneath(root, temporary, operation.payload)
+
+            api.write_new_beneath(parent_root, temporary, operation.payload)
             temporary_handle = api.open_beneath(
-                root, temporary, directory=False, write=True, create="open"
+                parent_root,
+                temporary,
+                directory=False,
+                write=True,
+                create="open",
             )
             target_handle: int | None = None
             try:
                 staged_before = api.object_info(temporary_handle)
+                temporary_identity = staged_before[2]
                 if staged_before[0] != "regular" or staged_before[3] or staged_before[6] != 1:
                     raise PlatformServiceError("identity_changed")
                 if api.read_bounded(temporary_handle, len(operation.payload)) != operation.payload:
@@ -488,7 +520,11 @@ class _Win32NativeBoundary:
                     raise PlatformServiceError("identity_changed")
                 if operation.expected_existed:
                     target_handle = api.open_beneath(
-                        root, relative, directory=False, write=False, create="open"
+                        parent_root,
+                        target_name,
+                        directory=False,
+                        write=True,
+                        create="open",
                     )
                     target_info = api.object_info(target_handle)
                     if target_info[2] != initial_identity:
@@ -496,40 +532,164 @@ class _Win32NativeBoundary:
                     if api.read_bounded(target_handle, len(operation.expected_payload or b"")) != operation.expected_payload:
                         raise PlatformServiceError("identity_changed")
                     api.rename_open_beneath(
-                        root,
-                        temporary_handle,
-                        relative,
-                        replace=True,
-                        expected_source_identity=staged_before[2],
+                        parent_root,
+                        target_handle,
+                        quarantine,
+                        expected_source_identity=target_info[2],
                     )
+                    try:
+                        api.rename_open_beneath(
+                            parent_root,
+                            temporary_handle,
+                            target_name,
+                            expected_source_identity=staged_before[2],
+                        )
+                    except BaseException as publication_error:
+                        try:
+                            api.rename_open_beneath(
+                                parent_root,
+                                target_handle,
+                                target_name,
+                                expected_source_identity=target_info[2],
+                            )
+                            api.flush(parent_root.handle)
+                        except BaseException as rollback_error:
+                            raise PlatformServiceError("recovery_required") from rollback_error
+                        raise publication_error
+                    source_published = True
+                    try:
+                        api.flush(temporary_handle)
+                        api.rewind(temporary_handle)
+                        if api.object_info(temporary_handle)[2] != staged_before[2]:
+                            raise PlatformServiceError("identity_changed")
+                        if api.read_bounded(temporary_handle, len(operation.payload)) != operation.payload:
+                            raise PlatformServiceError("identity_changed")
+                        api.flush(parent_root.handle)
+                        api.delete_open_handle(target_handle, target_info[2])
+                        api.close(target_handle)
+                        target_handle = None
+                        api.flush(parent_root.handle)
+                    except BaseException as cleanup_error:
+                        raise PlatformServiceError("recovery_required") from cleanup_error
                     verb = "replace"
                 else:
-                    if self.observe_object(root, relative).kind != "absent":
+                    if self.observe_object(parent_root, target_name).kind != "absent":
                         raise PlatformServiceError("collision")
                     api.rename_open_beneath(
-                        root,
+                        parent_root,
                         temporary_handle,
-                        relative,
-                        replace=False,
+                        target_name,
                         expected_source_identity=staged_before[2],
                     )
+                    source_published = True
+                    api.flush(temporary_handle)
+                    api.rewind(temporary_handle)
+                    if api.object_info(temporary_handle)[2] != staged_before[2]:
+                        raise PlatformServiceError("identity_changed")
+                    if api.read_bounded(temporary_handle, len(operation.payload)) != operation.payload:
+                        raise PlatformServiceError("identity_changed")
+                    api.flush(parent_root.handle)
                     verb = "create"
             finally:
                 if target_handle is not None:
                     api.close(target_handle)
-                api.close(temporary_handle)
-            api.flush_parent(root, relative)
-            if self._read_optional(root, relative) != operation.payload:
-                raise PlatformServiceError("identity_changed")
+                if temporary_handle is not None:
+                    api.close(temporary_handle)
+                    temporary_handle = None
             return PublicationReceipt(_DURABILITY, verb, relative, before, _payload_digest(operation.payload))
-        except BaseException:
-            try:
-                api.delete_beneath(root, temporary, expected_identity=None)
-            except (FileNotFoundError, PlatformServiceError):
-                pass
+        except BaseException as primary_error:
+            if not source_published:
+                try:
+                    if temporary_handle is not None and temporary_identity is not None:
+                        api.delete_open_handle(temporary_handle, temporary_identity)
+                        api.close(temporary_handle)
+                        temporary_handle = None
+                    elif temporary_identity is not None:
+                        api.delete_beneath(
+                            parent_root,
+                            temporary,
+                            expected_identity=temporary_identity,
+                        )
+                    api.flush(parent_root.handle)
+                except FileNotFoundError:
+                    pass
+                except BaseException as cleanup_error:
+                    raise PlatformServiceError("recovery_required") from cleanup_error
             if created_parent is not None:
-                api.prune_empty_beneath(root, created_parent)
-            raise
+                try:
+                    api.prune_empty_beneath(root, created_parent)
+                except BaseException as cleanup_error:
+                    raise PlatformServiceError("recovery_required") from cleanup_error
+            raise primary_error
+        finally:
+            if temporary_handle is not None:
+                api.close(temporary_handle)
+            api.close(parent_handle)
+
+    def _recover_file_quarantine(
+        self,
+        parent_root: _NativeRoot,
+        target_name: str,
+        quarantine: str,
+        expected_payload: bytes | None,
+    ) -> None:
+        api = self._kernel()
+        try:
+            residues = tuple(
+                name
+                for name in api.enumerate_beneath(parent_root, ".", 8192)
+                if name.lower().startswith(".sos-quarantine.")
+            )
+        except BaseException as exc:
+            raise PlatformServiceError("recovery_required") from exc
+        if not residues:
+            return
+        if (
+            len(residues) != 1
+            or not _windows_equal(residues[0], quarantine)
+            or residues[0] != quarantine
+            or expected_payload is None
+            or self.observe_object(parent_root, target_name).kind != "absent"
+        ):
+            raise PlatformServiceError("recovery_required")
+        handle: int | None = None
+        try:
+            handle = api.open_beneath(
+                parent_root,
+                quarantine,
+                directory=False,
+                write=True,
+                create="open",
+            )
+            observed = api.object_info(handle)
+            if observed[0] != "regular" or observed[3] or observed[6] != 1:
+                raise PlatformServiceError("recovery_required")
+            if api.read_bounded(handle, len(expected_payload)) != expected_payload:
+                raise PlatformServiceError("recovery_required")
+            if api.object_info(handle)[2] != observed[2]:
+                raise PlatformServiceError("recovery_required")
+            api.rename_open_beneath(
+                parent_root,
+                handle,
+                target_name,
+                expected_source_identity=observed[2],
+            )
+            api.flush(handle)
+            api.flush(parent_root.handle)
+            api.rewind(handle)
+            if api.object_info(handle)[2] != observed[2]:
+                raise PlatformServiceError("recovery_required")
+            if api.read_bounded(handle, len(expected_payload)) != expected_payload:
+                raise PlatformServiceError("recovery_required")
+        except PlatformServiceError as exc:
+            if exc.kind == "recovery_required":
+                raise
+            raise PlatformServiceError("recovery_required") from exc
+        except BaseException as exc:
+            raise PlatformServiceError("recovery_required") from exc
+        finally:
+            if handle is not None:
+                api.close(handle)
 
     def publish_tree(self, operation: TreePublicationOperation, root: _NativeRoot) -> PublicationReceipt:
         self._assert_root(root)
@@ -561,7 +721,6 @@ class _Win32NativeBoundary:
                     root,
                     token.handle,
                     operation.target_name,
-                    replace=False,
                     expected_source_identity=token.identity_digest,
                 )
                 self._kernel().flush(root.handle)
@@ -845,7 +1004,6 @@ class _Kernel32:
     FILE_DISPOSITION_FLAG_ON_CLOSE = 0x00000008
     FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE = 0x00000010
     FILE_RENAME_INFO_EX = 22
-    FILE_RENAME_FLAG_REPLACE_IF_EXISTS = 0x00000001
     FILE_ID_BOTH_DIRECTORY_INFO = 10
     FILE_ID_BOTH_DIRECTORY_RESTART_INFO = 11
     DRIVE_FIXED = 3
@@ -896,6 +1054,13 @@ class _Kernel32:
         ]
         self.kernel32.WriteFile.restype = ctypes.c_int
         self.kernel32.WriteFile.argtypes = list(self.kernel32.ReadFile.argtypes)
+        self.kernel32.SetFilePointerEx.restype = ctypes.c_int
+        self.kernel32.SetFilePointerEx.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int64,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
         self.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
         self.kernel32.DuplicateHandle.restype = ctypes.c_int
         self.kernel32.DuplicateHandle.argtypes = [
@@ -1163,6 +1328,10 @@ class _Kernel32:
             chunks.append(buffer.raw[: read.value])
         return b"".join(chunks)
 
+    def rewind(self, handle: int) -> None:
+        if not self.kernel32.SetFilePointerEx(handle, 0, None, 0):
+            raise PlatformServiceError("read_failed")
+
     def enumerate_beneath(self, root: _NativeRoot, relative: str, limit: int) -> list[str]:
         handle = self.open_beneath(root, relative, directory=True, write=False, create="open")
         try:
@@ -1237,7 +1406,6 @@ class _Kernel32:
         source_handle: int,
         target: str,
         *,
-        replace: bool,
         expected_source_identity: str,
     ) -> None:
         if self.object_info(source_handle)[2] != expected_source_identity:
@@ -1256,7 +1424,7 @@ class _Kernel32:
         )
         buffer = ctypes.create_string_buffer(name_offset + len(encoded))
         header = FILE_RENAME_INFO_HEADER.from_buffer(buffer)
-        header.Flags = self.FILE_RENAME_FLAG_REPLACE_IF_EXISTS if replace else 0
+        header.Flags = 0
         header.RootDirectory = ctypes.c_void_p(root.handle)
         header.FileNameLength = len(encoded)
         ctypes.memmove(ctypes.addressof(buffer) + name_offset, encoded, len(encoded))
@@ -1267,7 +1435,7 @@ class _Kernel32:
             len(buffer),
         ):
             error = ctypes.get_last_error()
-            if not replace and error in {80, 183}:
+            if error in {80, 183}:
                 raise PlatformServiceError("collision")
             raise PlatformServiceError("publication_failed")
         if self.object_info(source_handle)[2] != expected_source_identity:
@@ -1510,6 +1678,17 @@ def _canonical_json(value: object) -> bytes:
 def _binding_digest(marker: dict[str, object]) -> str:
     material = {key: value for key, value in marker.items() if key != "binding_digest"}
     return "sha256:" + hashlib.sha256(_canonical_json(material)).hexdigest()
+
+
+def _quarantine_name(target_name: str, expected_payload: bytes | None) -> str:
+    material = _canonical_json(
+        {
+            "contract": "sos_windows_file_quarantine_v1",
+            "target_name": target_name,
+            "expected_payload_digest": _payload_digest(expected_payload),
+        }
+    )
+    return ".sos-quarantine." + hashlib.sha256(material).hexdigest()
 
 
 def _payload_digest(payload: bytes | None) -> str | None:

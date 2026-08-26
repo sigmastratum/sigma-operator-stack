@@ -26,6 +26,7 @@ from sos.platforms.windows import (
     _Kernel32,
     _Win32NativeBoundary,
     _binding_digest,
+    _quarantine_name,
 )
 
 
@@ -226,7 +227,7 @@ class _IdentityBoundKernel:
         self.calls.append(("delete_beneath", root.handle, relative))
 
     def rename_open_beneath(self, root: _NativeRoot, source_handle: int, target: str, **kwargs) -> None:
-        self.calls.append(("rename_open_beneath", root.handle, source_handle, target, kwargs["replace"]))
+        self.calls.append(("rename_open_beneath", root.handle, source_handle, target))
 
     def enumerate_beneath(self, root: _NativeRoot, relative: str, limit: int) -> list[str]:
         self.calls.append(("enumerate_beneath", root.handle, relative, limit))
@@ -246,6 +247,151 @@ class _InjectedWin32Boundary(_Win32NativeBoundary):
 
     def _kernel(self):
         return self._injected_kernel
+
+
+class _FileCASKernel:
+    """Handle/name model with deterministic race injection for file CAS tests."""
+
+    def __init__(self, *, target: bytes | None) -> None:
+        self.names: dict[str, int] = {}
+        self.payloads: dict[int, bytes] = {}
+        self.identities: dict[int, str] = {
+            1: _digest(b"root"),
+            2: _digest(b"root"),
+        }
+        self.directory_handles = {1, 2}
+        self.next_handle = 10
+        self.rename_calls: list[tuple[int, int, str]] = []
+        self.deleted_handles: list[int] = []
+        self.inject_foreign_after_quarantine = False
+        self.inject_create_collision = False
+        self.drift_on_rename_handle: int | None = None
+        self.drift_on_rename_index: int | None = None
+        self.drift_before_delete_handle: int | None = None
+        self.old_handle: int | None = None
+        self.foreign_handle: int | None = None
+        if target is not None:
+            self.old_handle = self.add_file("target.txt", target, b"old-target")
+
+    def add_file(self, name: str, payload: bytes, identity_material: bytes) -> int:
+        handle = self.next_handle
+        self.next_handle += 1
+        self.names[name] = handle
+        self.payloads[handle] = payload
+        self.identities[handle] = _digest(identity_material)
+        return handle
+
+    def object_info(self, handle: int):
+        if handle in self.directory_handles:
+            return ("directory", 0, self.identities[handle], False, 0o755, False, 1)
+        payload = self.payloads[handle]
+        return (
+            "regular",
+            len(payload),
+            self.identities[handle],
+            False,
+            0o600,
+            False,
+            1,
+        )
+
+    def final_path(self, handle: int) -> str:
+        return r"C:\repo"
+
+    def open_beneath(self, root: _NativeRoot, relative: str, **kwargs) -> int:
+        if relative == ".":
+            return 2
+        try:
+            return self.names[relative]
+        except KeyError as exc:
+            raise FileNotFoundError(relative) from exc
+
+    def close(self, handle: int) -> None:
+        return None
+
+    def read_bounded(self, handle: int, limit: int) -> bytes:
+        payload = self.payloads[handle]
+        if len(payload) > limit:
+            raise PlatformServiceError("file_limit_exceeded")
+        return payload
+
+    def rewind(self, handle: int) -> None:
+        return None
+
+    def enumerate_beneath(self, root: _NativeRoot, relative: str, limit: int) -> list[str]:
+        names = sorted(self.names)
+        if len(names) > limit:
+            raise PlatformServiceError("directory_limit_exceeded")
+        return names
+
+    def write_new_beneath(self, root: _NativeRoot, relative: str, payload: bytes) -> None:
+        if relative in self.names:
+            raise PlatformServiceError("collision")
+        self.add_file(relative, payload, b"staged-source")
+
+    def rename_open_beneath(
+        self,
+        root: _NativeRoot,
+        source_handle: int,
+        target: str,
+        *,
+        expected_source_identity: str,
+    ) -> None:
+        self.rename_calls.append((root.handle, source_handle, target))
+        if source_handle == self.drift_on_rename_handle or len(self.rename_calls) == self.drift_on_rename_index:
+            self.identities[source_handle] = _digest(b"drifted")
+        if self.identities[source_handle] != expected_source_identity:
+            raise PlatformServiceError("identity_changed")
+        source_name = next(
+            (name for name, handle in self.names.items() if handle == source_handle),
+            None,
+        )
+        if source_name is None:
+            raise PlatformServiceError("identity_changed")
+        if self.inject_create_collision and target == "target.txt" and self.old_handle is None:
+            self.foreign_handle = self.add_file("target.txt", b"foreign", b"foreign")
+            self.inject_create_collision = False
+        if target in self.names:
+            raise PlatformServiceError("collision")
+        del self.names[source_name]
+        self.names[target] = source_handle
+        if (
+            self.inject_foreign_after_quarantine
+            and source_handle == self.old_handle
+            and target.startswith(".sos-quarantine.")
+        ):
+            self.foreign_handle = self.add_file("target.txt", b"foreign", b"foreign")
+            self.inject_foreign_after_quarantine = False
+
+    def delete_open_handle(self, handle: int, expected_identity: str) -> None:
+        if handle == self.drift_before_delete_handle:
+            self.identities[handle] = _digest(b"drifted-before-cleanup")
+        if self.identities[handle] != expected_identity:
+            raise PlatformServiceError("identity_changed")
+        name = next(
+            (name for name, current in self.names.items() if current == handle),
+            None,
+        )
+        if name is None:
+            raise PlatformServiceError("identity_changed")
+        del self.names[name]
+        self.deleted_handles.append(handle)
+
+    def delete_beneath(self, root: _NativeRoot, relative: str, expected_identity: str | None) -> None:
+        try:
+            handle = self.names[relative]
+        except KeyError as exc:
+            raise FileNotFoundError(relative) from exc
+        if expected_identity is not None and self.identities[handle] != expected_identity:
+            raise PlatformServiceError("identity_changed")
+        del self.names[relative]
+        self.deleted_handles.append(handle)
+
+    def flush(self, handle: int) -> None:
+        return None
+
+    def prune_empty_beneath(self, root: _NativeRoot, relative: str) -> None:
+        return None
 
 
 class WindowsPlatformServicesContractTests(unittest.TestCase):
@@ -382,6 +528,114 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             with self.assertRaisesRegex(PlatformServiceError, "durability_profile_unavailable"):
                 self.service.publish_file(FilePublicationOperation(root, "other.txt", b"x", None, False, 0o600))
 
+    @staticmethod
+    def _run_native_file_cas(kernel: _FileCASKernel, expected: bytes, payload: bytes):
+        boundary = _InjectedWin32Boundary(kernel)
+        root = _NativeRoot(1, r"C:\repo", "C:\\", _digest(b"root"))
+        operation = FilePublicationOperation(
+            root,
+            "target.txt",
+            payload,
+            expected,
+            True,
+            0o600,
+        )
+        return boundary.publish_file(operation, root)
+
+    def test_existing_target_cas_uses_two_no_replace_handle_renames_and_cleanup(self) -> None:
+        kernel = _FileCASKernel(target=b"old")
+        receipt = self._run_native_file_cas(kernel, b"old", b"new")
+        quarantine = _quarantine_name("target.txt", b"old")
+        self.assertEqual(receipt.operation, "replace")
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"new")
+        self.assertNotIn(quarantine, kernel.names)
+        self.assertIn(kernel.old_handle, kernel.deleted_handles)
+        self.assertEqual(
+            [(root, target) for root, _source, target in kernel.rename_calls],
+            [(2, quarantine), (2, "target.txt")],
+        )
+
+    def test_foreign_insertion_is_preserved_and_rollback_never_overwrites(self) -> None:
+        kernel = _FileCASKernel(target=b"old")
+        kernel.inject_foreign_after_quarantine = True
+        with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        quarantine = _quarantine_name("target.txt", b"old")
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"foreign")
+        self.assertEqual(kernel.payloads[kernel.names[quarantine]], b"old")
+        self.assertNotIn(kernel.old_handle, kernel.deleted_handles)
+        self.assertTrue(all(call[0] == 2 for call in kernel.rename_calls))
+
+    def test_exact_quarantine_residue_is_restored_before_retry(self) -> None:
+        kernel = _FileCASKernel(target=None)
+        quarantine = _quarantine_name("target.txt", b"old")
+        old_handle = kernel.add_file(quarantine, b"old", b"old-target")
+        kernel.old_handle = old_handle
+        receipt = self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertEqual(receipt.operation, "replace")
+        self.assertEqual(kernel.rename_calls[0], (2, old_handle, "target.txt"))
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"new")
+        self.assertNotIn(quarantine, kernel.names)
+
+    def test_foreign_or_identity_drifting_quarantine_fails_closed(self) -> None:
+        quarantine = _quarantine_name("target.txt", b"old")
+        kernel = _FileCASKernel(target=b"foreign")
+        kernel.add_file(quarantine, b"old", b"old-target")
+        with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"foreign")
+        self.assertEqual(kernel.payloads[kernel.names[quarantine]], b"old")
+
+        kernel = _FileCASKernel(target=None)
+        kernel.old_handle = kernel.add_file(quarantine, b"old", b"old-target")
+        kernel.drift_on_rename_index = 1
+        with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertIn(quarantine, kernel.names)
+
+        for extra_names in (
+            (".sos-quarantine.unknown",),
+            (quarantine, ".sos-quarantine.second"),
+        ):
+            with self.subTest(extra_names=extra_names):
+                kernel = _FileCASKernel(target=b"old")
+                for index, name in enumerate(extra_names):
+                    kernel.add_file(name, b"old", f"residue:{index}".encode())
+                with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+                    self._run_native_file_cas(kernel, b"old", b"new")
+                self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"old")
+
+    def test_target_source_and_cleanup_identity_drift_fail_closed(self) -> None:
+        for rename_index in (1, 2):
+            with self.subTest(rename_index=rename_index):
+                kernel = _FileCASKernel(target=b"old")
+                kernel.drift_on_rename_index = rename_index
+                with self.assertRaises(PlatformServiceError):
+                    self._run_native_file_cas(kernel, b"old", b"new")
+                self.assertNotEqual(
+                    kernel.payloads[kernel.names.get("target.txt", kernel.old_handle)],
+                    b"new",
+                )
+
+        kernel = _FileCASKernel(target=b"old")
+        kernel.drift_before_delete_handle = kernel.old_handle
+        with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"new")
+        self.assertIn(_quarantine_name("target.txt", b"old"), kernel.names)
+
+    def test_create_absent_collision_is_non_destructive(self) -> None:
+        kernel = _FileCASKernel(target=None)
+        kernel.inject_create_collision = True
+        boundary = _InjectedWin32Boundary(kernel)
+        root = _NativeRoot(1, r"C:\repo", "C:\\", _digest(b"root"))
+        with self.assertRaisesRegex(PlatformServiceError, "collision"):
+            boundary.publish_file(
+                FilePublicationOperation(root, "target.txt", b"new", None, False, 0o600),
+                root,
+            )
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"foreign")
+
     def test_tree_lifecycle_requires_closed_actions_capability_and_reserved_marker(self) -> None:
         staging = ".sigma.init." + "a" * 64
         with self._open() as root:
@@ -451,7 +705,7 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
         )
         self.assertEqual(committed.operation, "create_tree")
         self.assertIn(("delete_beneath", 2, _STAGING_MARKER), kernel.calls)
-        self.assertIn(("rename_open_beneath", 1, 2, ".sigma", False), kernel.calls)
+        self.assertIn(("rename_open_beneath", 1, 2, ".sigma"), kernel.calls)
         self.assertFalse(
             any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
         )
@@ -504,7 +758,6 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             root,
             77,
             "nested/target",
-            replace=False,
             expected_source_identity=identity,
         )
         self.assertIsNotNone(recorder.observed)
@@ -577,6 +830,7 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             "ReplaceFileW",
             "MoveFileExW",
             "CreateDirectoryW",
+            "FILE_RENAME_FLAG_REPLACE_IF_EXISTS",
         ):
             self.assertNotIn(forbidden, source)
 
