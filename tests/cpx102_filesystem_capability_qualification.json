@@ -1,0 +1,69 @@
+{
+  "candidate": "93bf56db9bfad31039492a8b350a7c602beeb131",
+  "contract": "sos_cpx102_filesystem_capability_evidence_v1",
+  "date": "2026-08-26",
+  "diff": {
+    "file_count": 34,
+    "git_diff_check": "passed",
+    "within_frozen_boundary": true
+  },
+  "lineage": {
+    "direct_parent": "c84cefa3c683fda954f59d2abb5b77fa909915d0",
+    "rejected_candidate_is_ancestor": false
+  },
+  "mcp": {
+    "mutation_surface_present": false,
+    "tool_count": 8,
+    "tools": [
+      "sos_status",
+      "sos_preflight",
+      "sos_active_task",
+      "sos_next_action",
+      "sos_qualification_plan",
+      "sos_recover",
+      "sos_propose_qualification_receipt",
+      "sos_propose_update"
+    ]
+  },
+  "package": {
+    "version": "0.1.0a1",
+    "wheel_builds": 2,
+    "wheel_byte_identical": true,
+    "wheel_sha256": "3c458b906d3ca8d35bf0535f638e917d1bd504612795145b4a89a2b1d8bf1aad"
+  },
+  "qualification": {
+    "installed_wheel": {
+      "errors": 0,
+      "failures": 0,
+      "import_origin": "external_site_packages",
+      "skips": 0,
+      "tests": 220
+    },
+    "python_3_11_source": {
+      "errors": 0,
+      "failures": 0,
+      "skips": 0,
+      "tests": 220
+    },
+    "python_3_12_source": {
+      "errors": 0,
+      "failures": 0,
+      "skips": 0,
+      "tests": 220
+    },
+    "public_release_scan": {
+      "files": 165,
+      "status": "passed"
+    },
+    "workflow_contract": "passed"
+  },
+  "safety": {
+    "network_calls": 0,
+    "private_content_serialized": false,
+    "production_actions": 0,
+    "provider_calls": 0,
+    "publication_actions": 0
+  },
+  "status": "candidate_qualified_pending_independent_review",
+  "tree": "6bc769edae212ef7b14d14f9a752f1167f7e467e"
+}
