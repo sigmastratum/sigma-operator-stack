@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/tests/platform_conformance_corpus_v1.schema.json",
+  "title": "SOS platform conformance corpus v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "family_count", "families", "mcp_tools", "platforms"],
+  "properties": {
+    "contract": {"const": "sos_platform_conformance_corpus_v1"},
+    "family_count": {"const": 14},
+    "platforms": {
+      "const": ["linux", "windows", "macos"]
+    },
+    "mcp_tools": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^sos_[a-z_]+$"}
+    },
+    "families": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": {"$ref": "#/$defs/family"}
+    }
+  },
+  "$defs": {
+    "family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family_id", "ordinal", "cases"],
+      "properties": {
+        "family_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]+$"},
+        "ordinal": {"type": "integer", "minimum": 1, "maximum": 14},
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/case"}
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "facts", "expected"],
+      "properties": {
+        "case_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]+$"},
+        "facts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9_.:-]+$"}
+        },
+        "expected": {"$ref": "#/$defs/outcome"},
+        "platform_expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "linux": {"$ref": "#/$defs/outcome"},
+            "windows": {"$ref": "#/$defs/outcome"},
+            "macos": {"$ref": "#/$defs/outcome"}
+          }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "currentness",
+        "mcp_projection",
+        "mutation_allowed",
+        "next_action",
+        "primary_reason",
+        "project_process_count",
+        "receipt_effect",
+        "status"
+      ],
+      "properties": {
+        "authority": {
+          "enum": ["absent", "ambiguous", "selected", "single", "unchanged"]
+        },
+        "currentness": {
+          "enum": ["current", "not_applicable", "not_verified", "stale", "unchanged"]
+        },
+        "mcp_projection": {
+          "enum": ["eight_tool_byte_identical", "refused_before_projection", "unchanged"]
+        },
+        "mutation_allowed": {"type": "boolean"},
+        "next_action": {
+          "enum": [
+            "authenticate_codex",
+            "continue",
+            "install_codex",
+            "none",
+            "qualify",
+            "recover_or_rollback",
+            "resolve_blocker",
+            "review_and_qualify",
+            "select_primary_authority",
+            "use_supported_execution_profile"
+          ]
+        },
+        "primary_reason": {"type": "string", "pattern": "^SOS_[A-Z0-9_]+$"},
+        "project_process_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "receipt_effect": {
+          "enum": ["append_valid_tip", "none", "preserve_tip", "reject_no_append", "rollback_only"]
+        },
+        "status": {
+          "enum": ["blocked", "invalid", "not_verified", "owner_required", "stale", "success", "unsupported"]
+        }
+      }
+    }
+  }
+}

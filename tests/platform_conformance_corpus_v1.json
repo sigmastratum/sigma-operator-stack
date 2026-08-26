@@ -1,0 +1,244 @@
+{
+  "contract": "sos_platform_conformance_corpus_v1",
+  "family_count": 14,
+  "platforms": ["linux", "windows", "macos"],
+  "mcp_tools": [
+    "sos_status",
+    "sos_preflight",
+    "sos_active_task",
+    "sos_next_action",
+    "sos_qualification_plan",
+    "sos_recover",
+    "sos_propose_qualification_receipt",
+    "sos_propose_update"
+  ],
+  "families": [
+    {
+      "ordinal": 1,
+      "family_id": "repository_state",
+      "cases": [
+        {
+          "case_id": "clean_current_repository",
+          "facts": ["git.clean", "source.accepted", "workspace.current"],
+          "expected": {"status": "success", "primary_reason": "SOS_WORKSPACE_CURRENT", "next_action": "continue", "authority": "single", "currentness": "current", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "source_status_changed",
+          "facts": ["git.unstaged", "source.accepted", "workspace.previous_current"],
+          "expected": {"status": "stale", "primary_reason": "SOS_SOURCE_STATUS_CHANGED", "next_action": "review_and_qualify", "authority": "unchanged", "currentness": "stale", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 2,
+      "family_id": "existing_control_surfaces",
+      "cases": [
+        {
+          "case_id": "compatible_foreign_surfaces_preserved",
+          "facts": ["agents.foreign_compatible", "codex.foreign_compatible", "sigma.absent"],
+          "expected": {"status": "success", "primary_reason": "SOS_COMPATIBILITY_READY", "next_action": "continue", "authority": "single", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "foreign_sigma_blocks",
+          "facts": ["sigma.foreign", "workspace.not_installed"],
+          "expected": {"status": "blocked", "primary_reason": "SOS_EXISTING_SIGMA_COLLISION", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_applicable", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 3,
+      "family_id": "ignored_managed_target",
+      "cases": [
+        {
+          "case_id": "ignored_exact_managed_bytes",
+          "facts": ["managed.ignored", "managed.setup_digest_exact", "source.fingerprint_excludes_target"],
+          "expected": {"status": "success", "primary_reason": "SOS_CODEX_SETUP_CURRENT", "next_action": "continue", "authority": "unchanged", "currentness": "current", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "ignored_managed_bytes_drift",
+          "facts": ["managed.ignored", "managed.setup_digest_changed", "source.fingerprint_excludes_target"],
+          "expected": {"status": "stale", "primary_reason": "SOS_CODEX_SETUP_STALE", "next_action": "review_and_qualify", "authority": "unchanged", "currentness": "stale", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 4,
+      "family_id": "primary_authority",
+      "cases": [
+        {
+          "case_id": "multiple_authorities_unselected",
+          "facts": ["authority.agents", "authority.openspec", "authority.selection_absent"],
+          "expected": {"status": "owner_required", "primary_reason": "SOS_PRIMARY_AUTHORITY_REQUIRED", "next_action": "select_primary_authority", "authority": "ambiguous", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "multiple_authorities_explicit_selection",
+          "facts": ["authority.agents", "authority.openspec", "authority.selection_exact"],
+          "expected": {"status": "success", "primary_reason": "SOS_PRIMARY_AUTHORITY_SELECTED", "next_action": "continue", "authority": "selected", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 5,
+      "family_id": "unicode_case_collision",
+      "cases": [
+        {
+          "case_id": "lookup_key_collision",
+          "facts": ["path.canonical_spellings_distinct", "path.lookup_key_equal"],
+          "expected": {"status": "blocked", "primary_reason": "SOS_PATH_COLLISION", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 6,
+      "family_id": "platform_path_grammar",
+      "cases": [
+        {
+          "case_id": "non_utf8_git_path",
+          "facts": ["git.path_non_utf8"],
+          "expected": {"status": "unsupported", "primary_reason": "SOS_PATH_ENCODING_UNSUPPORTED", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        },
+        {
+          "case_id": "windows_reserved_or_ads_path",
+          "facts": ["path.windows_reserved_or_ads"],
+          "expected": {"status": "success", "primary_reason": "SOS_PATH_ADMITTED", "next_action": "continue", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "unchanged", "project_process_count": 0},
+          "platform_expected": {
+            "windows": {"status": "blocked", "primary_reason": "SOS_PATH_COLLISION", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 7,
+      "family_id": "object_kind_and_escape",
+      "cases": [
+        {
+          "case_id": "managed_ancestry_indirection",
+          "facts": ["object.alias_or_link_or_reparse", "path.managed_ancestry"],
+          "expected": {"status": "blocked", "primary_reason": "SOS_OBJECT_KIND_UNSUPPORTED", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        },
+        {
+          "case_id": "cloud_placeholder",
+          "facts": ["object.cloud_placeholder", "object.recall_unresolved"],
+          "expected": {"status": "unsupported", "primary_reason": "SOS_CLOUD_PLACEHOLDER_UNSUPPORTED", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 8,
+      "family_id": "concurrency_and_lock",
+      "cases": [
+        {
+          "case_id": "identity_changes_after_preview",
+          "facts": ["preview.confirmed", "target.identity_changed_before_commit"],
+          "expected": {"status": "stale", "primary_reason": "SOS_PUBLICATION_IDENTITY_CHANGED", "next_action": "review_and_qualify", "authority": "unchanged", "currentness": "stale", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "repository_lock_deadline",
+          "facts": ["lock.contended", "lock.deadline_elapsed"],
+          "expected": {"status": "blocked", "primary_reason": "SOS_REPOSITORY_LOCK_TIMEOUT", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "unchanged", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "unchanged", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 9,
+      "family_id": "crash_recovery",
+      "cases": [
+        {
+          "case_id": "valid_staging_journal_after_crash",
+          "facts": ["canonical.not_promoted", "journal.digest_bound", "staging.marker_owned"],
+          "expected": {"status": "not_verified", "primary_reason": "SOS_RECOVERY_REQUIRED", "next_action": "recover_or_rollback", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "rollback_only", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "invalid_staging_journal_after_crash",
+          "facts": ["canonical.not_promoted", "journal.binding_invalid", "staging.present"],
+          "expected": {"status": "invalid", "primary_reason": "SOS_CONTROL_PLANE_INTEGRITY_INVALID", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "reject_no_append", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 10,
+      "family_id": "package_lifecycle",
+      "cases": [
+        {
+          "case_id": "same_version_rerun",
+          "facts": ["package.digest_exact", "setup.digest_exact", "workspace.current"],
+          "expected": {"status": "success", "primary_reason": "SOS_SETUP_ALREADY_CURRENT", "next_action": "continue", "authority": "unchanged", "currentness": "current", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "compatible_package_rebind",
+          "facts": ["package.new_digest", "schema.compatible", "setup.rebind_previewed"],
+          "expected": {"status": "not_verified", "primary_reason": "SOS_QUALIFICATION_NOT_RUN", "next_action": "qualify", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": true, "receipt_effect": "append_valid_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "setup_remove_preserves_workspace",
+          "facts": ["package.remove_requested", "setup.managed_bytes_exact", "workspace.preserve"],
+          "expected": {"status": "success", "primary_reason": "SOS_CODEX_SETUP_REMOVED", "next_action": "none", "authority": "unchanged", "currentness": "unchanged", "mutation_allowed": true, "receipt_effect": "append_valid_tip", "mcp_projection": "unchanged", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 11,
+      "family_id": "receipt_integrity",
+      "cases": [
+        {
+          "case_id": "forged_or_replayed_receipt",
+          "facts": ["receipt.digest_or_nonce_invalid", "receipt.tip_unchanged"],
+          "expected": {"status": "invalid", "primary_reason": "SOS_CONTROL_PLANE_INTEGRITY_INVALID", "next_action": "resolve_blocker", "authority": "unchanged", "currentness": "unchanged", "mutation_allowed": false, "receipt_effect": "reject_no_append", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        },
+        {
+          "case_id": "valid_receipt_for_stale_source",
+          "facts": ["receipt.chain_valid", "receipt.source_binding_stale"],
+          "expected": {"status": "stale", "primary_reason": "SOS_QUALIFICATION_STALE", "next_action": "review_and_qualify", "authority": "unchanged", "currentness": "stale", "mutation_allowed": false, "receipt_effect": "preserve_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 12,
+      "family_id": "codex_prerequisite",
+      "cases": [
+        {
+          "case_id": "codex_missing",
+          "facts": ["codex.executable_absent"],
+          "expected": {"status": "not_verified", "primary_reason": "SOS_CODEX_NOT_FOUND", "next_action": "install_codex", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        },
+        {
+          "case_id": "codex_auth_missing",
+          "facts": ["codex.auth_absent", "codex.executable_present"],
+          "expected": {"status": "not_verified", "primary_reason": "SOS_CODEX_AUTH_REQUIRED", "next_action": "authenticate_codex", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "refused_before_projection", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 13,
+      "family_id": "mcp_boundary",
+      "cases": [
+        {
+          "case_id": "exact_eight_tools",
+          "facts": ["mcp.arguments_closed", "mcp.root_process_bound", "mcp.tools_exact_eight"],
+          "expected": {"status": "success", "primary_reason": "SOS_MCP_BOUNDARY_VALID", "next_action": "continue", "authority": "unchanged", "currentness": "unchanged", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        },
+        {
+          "case_id": "unknown_or_mutating_tool",
+          "facts": ["mcp.tool_not_registered"],
+          "expected": {"status": "invalid", "primary_reason": "SOS_AGENT_TOOL_UNKNOWN", "next_action": "none", "authority": "unchanged", "currentness": "unchanged", "mutation_allowed": false, "receipt_effect": "none", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+        }
+      ]
+    },
+    {
+      "ordinal": 14,
+      "family_id": "qualification_profile",
+      "cases": [
+        {
+          "case_id": "executable_project_check",
+          "facts": ["qualification.family_python_stdlib_unittest", "qualification.requested"],
+          "expected": {"status": "unsupported", "primary_reason": "SOS_EXECUTABLE_QUALIFICATION_UNSUPPORTED", "next_action": "use_supported_execution_profile", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "append_valid_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0},
+          "platform_expected": {
+            "linux": {"status": "success", "primary_reason": "SOS_QUALIFICATION_PASSED", "next_action": "continue", "authority": "unchanged", "currentness": "current", "mutation_allowed": false, "receipt_effect": "append_valid_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 1},
+            "windows": {"status": "unsupported", "primary_reason": "SOS_EXECUTABLE_QUALIFICATION_UNSUPPORTED", "next_action": "use_supported_execution_profile", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "append_valid_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0},
+            "macos": {"status": "unsupported", "primary_reason": "SOS_EXECUTABLE_QUALIFICATION_UNSUPPORTED", "next_action": "use_supported_execution_profile", "authority": "unchanged", "currentness": "not_verified", "mutation_allowed": false, "receipt_effect": "append_valid_tip", "mcp_projection": "eight_tool_byte_identical", "project_process_count": 0}
+          }
+        }
+      ]
+    }
+  ]
+}
