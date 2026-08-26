@@ -267,6 +267,8 @@ class _FileCASKernel:
         self.inject_create_collision = False
         self.drift_on_rename_handle: int | None = None
         self.drift_on_rename_index: int | None = None
+        self.mutate_then_raise_on_rename_index: int | None = None
+        self.mutate_then_drift = False
         self.drift_before_delete_handle: int | None = None
         self.old_handle: int | None = None
         self.foreign_handle: int | None = None
@@ -355,6 +357,10 @@ class _FileCASKernel:
             raise PlatformServiceError("collision")
         del self.names[source_name]
         self.names[target] = source_handle
+        if len(self.rename_calls) == self.mutate_then_raise_on_rename_index:
+            if self.mutate_then_drift:
+                self.identities[source_handle] = _digest(b"post-rename-drift")
+            raise PlatformServiceError("identity_changed")
         if (
             self.inject_foreign_after_quarantine
             and source_handle == self.old_handle
@@ -565,6 +571,24 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
         self.assertEqual(kernel.payloads[kernel.names[quarantine]], b"old")
         self.assertNotIn(kernel.old_handle, kernel.deleted_handles)
         self.assertTrue(all(call[0] == 2 for call in kernel.rename_calls))
+
+    def test_target_quarantine_mutate_then_raise_is_rolled_back_or_recoverable(self) -> None:
+        quarantine = _quarantine_name("target.txt", b"old")
+
+        kernel = _FileCASKernel(target=b"old")
+        kernel.mutate_then_raise_on_rename_index = 1
+        with self.assertRaisesRegex(PlatformServiceError, "identity_changed"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertEqual(kernel.payloads[kernel.names["target.txt"]], b"old")
+        self.assertNotIn(quarantine, kernel.names)
+
+        kernel = _FileCASKernel(target=b"old")
+        kernel.mutate_then_raise_on_rename_index = 1
+        kernel.mutate_then_drift = True
+        with self.assertRaisesRegex(PlatformServiceError, "recovery_required"):
+            self._run_native_file_cas(kernel, b"old", b"new")
+        self.assertNotIn("target.txt", kernel.names)
+        self.assertEqual(kernel.payloads[kernel.names[quarantine]], b"old")
 
     def test_exact_quarantine_residue_is_restored_before_retry(self) -> None:
         kernel = _FileCASKernel(target=None)

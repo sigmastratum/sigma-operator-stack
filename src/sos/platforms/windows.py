@@ -531,12 +531,22 @@ class _Win32NativeBoundary:
                         raise PlatformServiceError("identity_changed")
                     if api.read_bounded(target_handle, len(operation.expected_payload or b"")) != operation.expected_payload:
                         raise PlatformServiceError("identity_changed")
-                    api.rename_open_beneath(
-                        parent_root,
-                        target_handle,
-                        quarantine,
-                        expected_source_identity=target_info[2],
-                    )
+                    try:
+                        api.rename_open_beneath(
+                            parent_root,
+                            target_handle,
+                            quarantine,
+                            expected_source_identity=target_info[2],
+                        )
+                    except BaseException as quarantine_error:
+                        self._stabilize_failed_quarantine_transition(
+                            parent_root,
+                            target_name,
+                            quarantine,
+                            target_handle,
+                            target_info[2],
+                        )
+                        raise quarantine_error
                     try:
                         api.rename_open_beneath(
                             parent_root,
@@ -625,6 +635,57 @@ class _Win32NativeBoundary:
             if temporary_handle is not None:
                 api.close(temporary_handle)
             api.close(parent_handle)
+
+    def _stabilize_failed_quarantine_transition(
+        self,
+        parent_root: _NativeRoot,
+        target_name: str,
+        quarantine: str,
+        target_handle: int,
+        expected_identity: str,
+    ) -> None:
+        """Restore a completed rename or fail closed with its residue intact."""
+
+        api = self._kernel()
+        try:
+            if api.object_info(target_handle)[2] != expected_identity:
+                raise PlatformServiceError("recovery_required")
+            target = self.observe_object(parent_root, target_name)
+            residue = self.observe_object(parent_root, quarantine)
+            target_matches = (
+                target.kind == "regular"
+                and target.stable_identity_digest == expected_identity
+            )
+            residue_matches = (
+                residue.kind == "regular"
+                and residue.stable_identity_digest == expected_identity
+            )
+            if target_matches and residue.kind == "absent":
+                return
+            if target.kind != "absent" or not residue_matches:
+                raise PlatformServiceError("recovery_required")
+            api.rename_open_beneath(
+                parent_root,
+                target_handle,
+                target_name,
+                expected_source_identity=expected_identity,
+            )
+            api.flush(parent_root.handle)
+            restored = self.observe_object(parent_root, target_name)
+            remaining = self.observe_object(parent_root, quarantine)
+            if (
+                api.object_info(target_handle)[2] != expected_identity
+                or restored.kind != "regular"
+                or restored.stable_identity_digest != expected_identity
+                or remaining.kind != "absent"
+            ):
+                raise PlatformServiceError("recovery_required")
+        except PlatformServiceError as exc:
+            if exc.kind == "recovery_required":
+                raise
+            raise PlatformServiceError("recovery_required") from exc
+        except BaseException as exc:
+            raise PlatformServiceError("recovery_required") from exc
 
     def _recover_file_quarantine(
         self,
