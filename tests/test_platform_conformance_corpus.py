@@ -75,6 +75,10 @@ class PlatformConformanceCorpusTests(unittest.TestCase):
         extra["families"].append(copy.deepcopy(extra["families"][0]))
         self.assertFalse(validator.is_valid(extra))
 
+        unknown = copy.deepcopy(corpus)
+        unknown["families"][-1]["family_id"] = "unknown_family"
+        self.assertFalse(validator.is_valid(unknown))
+
         duplicate = copy.deepcopy(corpus)
         duplicate["families"][1]["family_id"] = duplicate["families"][0]["family_id"]
         self.assertFalse(validator.is_valid(duplicate))
@@ -98,6 +102,11 @@ class PlatformConformanceCorpusTests(unittest.TestCase):
             copy.deepcopy(extra["families"][family_index]["cases"][0])
         )
         self.assertFalse(validator.is_valid(extra))
+
+        unknown = copy.deepcopy(corpus)
+        unknown_cases = unknown["families"][family_index]["cases"]
+        unknown_cases[-1]["case_id"] = "unknown_case"
+        self.assertFalse(validator.is_valid(unknown))
 
         duplicate = copy.deepcopy(corpus)
         duplicate_cases = duplicate["families"][family_index]["cases"]
