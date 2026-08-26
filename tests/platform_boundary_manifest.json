@@ -3,17 +3,39 @@
   "modules": {
     "src/sos/__init__.py": {"class": "shared_core"},
     "src/sos/__main__.py": {"class": "shared_core"},
-    "src/sos/_isolation_worker.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/_isolation_worker.py": {
+      "class": "qualification_execution_mechanism",
+      "symbols": [
+        "_add_landlock_path",
+        "_apply_limits",
+        "_emit",
+        "_interpreter_read_roots",
+        "_probe_landlock_ruleset",
+        "_restrict_filesystem",
+        "main"
+      ]
+    },
     "src/sos/agent_api.py": {"class": "shared_core"},
     "src/sos/capabilities.py": {"class": "shared_core", "proven_non_filesystem_symbols": ["_run_bounded_process"]},
-    "src/sos/checks.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/checks.py": {
+      "class": "qualification_execution_mechanism",
+      "symbols": ["_run_python_syntax"]
+    },
     "src/sos/cli.py": {"class": "shared_core"},
     "src/sos/client_integration.py": {"class": "shared_core"},
     "src/sos/compatibility.py": {"class": "shared_core"},
     "src/sos/contracts.py": {"class": "shared_core"},
     "src/sos/dirty.py": {"class": "shared_core"},
     "src/sos/entrypoint.py": {"class": "shared_core"},
-    "src/sos/isolation.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/isolation.py": {
+      "class": "qualification_execution_mechanism",
+      "symbols": [
+        "_copy_snapshot",
+        "_open_regular_beneath",
+        "_run_isolated_unittest",
+        "_writable_budget_exceeded"
+      ]
+    },
     "src/sos/lifecycle.py": {"class": "shared_core"},
     "src/sos/managed_files.py": {"class": "shared_core"},
     "src/sos/mcp.py": {"class": "shared_core"},

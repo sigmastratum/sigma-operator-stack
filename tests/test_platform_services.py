@@ -72,7 +72,7 @@ def _boundary_violations(source: str, relative: str, rule: dict[str, object]) ->
             symbol = self.symbols[-1] if self.symbols else "<module>"
             mechanism_allowed = (
                 module_class == "qualification_execution_mechanism"
-                and ("*" in allowed_symbols or symbol in allowed_symbols)
+                and symbol in allowed_symbols
             )
             package_read_allowed = (
                 module_class == "package_resource_mechanism"
@@ -136,6 +136,18 @@ class PortablePlatformServicesTests(unittest.TestCase):
         violations: list[str] = []
         for relative, rule in sorted(manifest["modules"].items()):
             source = (repository / relative).read_text(encoding="utf-8")
+            if rule["class"] == "qualification_execution_mechanism":
+                symbols = rule.get("symbols")
+                self.assertIsInstance(symbols, list, relative)
+                self.assertTrue(symbols, relative)
+                self.assertNotIn("*", symbols, relative)
+                declared = {
+                    node.name
+                    for node in ast.walk(ast.parse(source, relative))
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+                self.assertEqual(len(symbols), len(set(symbols)), relative)
+                self.assertLessEqual(set(symbols), declared, relative)
             violations.extend(_boundary_violations(source, relative, rule))
         self.assertEqual(violations, [])
 
@@ -154,6 +166,17 @@ class PortablePlatformServicesTests(unittest.TestCase):
         self.assertEqual(
             _boundary_violations(positives[0].read_text(), positives[0].name, shared),
             [],
+        )
+        wildcard_rule = {
+            "class": "qualification_execution_mechanism",
+            "symbols": ["*"],
+        }
+        self.assertTrue(
+            _boundary_violations(
+                "import os\ndef qualification_worker():\n    os.stat('candidate')\n",
+                "whole_module_wildcard.py",
+                wildcard_rule,
+            )
         )
 
     def test_selector_uses_process_platform_only_and_linux_conforms(self) -> None:
