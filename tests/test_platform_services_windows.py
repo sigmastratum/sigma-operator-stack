@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import hashlib
 import json
 import sys
@@ -21,6 +22,10 @@ from sos.platforms.windows import (
     WindowsPlatformServices,
     _NativeObject,
     _NativeRoot,
+    _NativeStaging,
+    _Kernel32,
+    _Win32NativeBoundary,
+    _binding_digest,
 )
 
 
@@ -158,6 +163,91 @@ class _FakeWindowsNative:
         return EphemeralLauncherObservation(Path(r"C:\Program Files\SOS\sos.exe"), "0.1.0a1", _digest(b"launcher"))
 
 
+class _IdentityBoundKernel:
+    """Injectable kernel model that makes any staging-name rebind terminal."""
+
+    def __init__(self, staging_name: str, marker_payload: bytes) -> None:
+        self.staging_name = staging_name
+        self.marker_payload = marker_payload
+        self.calls: list[tuple[object, ...]] = []
+        self._next_handle = 20
+        self._objects: dict[int, tuple[str, int, str, bool, int, bool, int]] = {
+            1: ("directory", 0, _digest(b"root"), False, 0o755, False, 1),
+            2: ("directory", 0, _digest(b"staging"), False, 0o755, False, 1),
+            3: ("regular", len(marker_payload), _digest(b"marker"), False, 0o600, False, 1),
+        }
+
+    def object_info(self, handle: int):
+        return self._objects[handle]
+
+    def final_path(self, handle: int) -> str:
+        if handle == 1:
+            return r"C:\repo"
+        if handle == 2:
+            return r"C:\repo\.renamed-original-staging"
+        return r"C:\repo\.renamed-original-staging\object"
+
+    def open_beneath(self, root: _NativeRoot, relative: str, **kwargs) -> int:
+        self.calls.append(("open_beneath", root.handle, relative))
+        if root.handle == 1 and relative == self.staging_name:
+            raise AssertionError("staging name was rebound after capability admission")
+        if root.handle == 2 and relative == _STAGING_MARKER:
+            return 3
+        self._next_handle += 1
+        self._objects[self._next_handle] = (
+            "regular",
+            0,
+            _digest(f"handle:{self._next_handle}".encode()),
+            False,
+            0o600,
+            False,
+            1,
+        )
+        return self._next_handle
+
+    def read_bounded(self, handle: int, limit: int) -> bytes:
+        if handle != 3 or len(self.marker_payload) > limit:
+            raise AssertionError("unexpected marker read")
+        return self.marker_payload
+
+    def write_new_beneath(self, root: _NativeRoot, relative: str, payload: bytes) -> None:
+        self.calls.append(("write_new_beneath", root.handle, relative, payload))
+
+    def create_directory_chain_beneath(self, root: _NativeRoot, relative: str) -> None:
+        self.calls.append(("create_directory_chain_beneath", root.handle, relative))
+
+    def flush_parent(self, root: _NativeRoot, relative: str) -> None:
+        self.calls.append(("flush_parent", root.handle, relative))
+
+    def flush(self, handle: int) -> None:
+        self.calls.append(("flush", handle))
+
+    def delete_beneath(self, root: _NativeRoot, relative: str, expected_identity: str | None) -> None:
+        self.calls.append(("delete_beneath", root.handle, relative))
+
+    def rename_open_beneath(self, root: _NativeRoot, source_handle: int, target: str, **kwargs) -> None:
+        self.calls.append(("rename_open_beneath", root.handle, source_handle, target, kwargs["replace"]))
+
+    def enumerate_beneath(self, root: _NativeRoot, relative: str, limit: int) -> list[str]:
+        self.calls.append(("enumerate_beneath", root.handle, relative, limit))
+        return []
+
+    def discard_open_tree(self, root: _NativeRoot, expected_identity: str) -> None:
+        self.calls.append(("discard_open_tree", root.handle, expected_identity))
+
+    def close(self, handle: int) -> None:
+        self.calls.append(("close", handle))
+
+
+class _InjectedWin32Boundary(_Win32NativeBoundary):
+    def __init__(self, kernel: _IdentityBoundKernel) -> None:
+        super().__init__()
+        self._injected_kernel = kernel
+
+    def _kernel(self):
+        return self._injected_kernel
+
+
 class WindowsPlatformServicesContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.native = _FakeWindowsNative()
@@ -165,6 +255,37 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
 
     def _open(self):
         return self.service.open_repository(Path(r"C:\repo"))
+
+    @staticmethod
+    def _identity_bound_lifecycle(staging: str):
+        root = _NativeRoot(1, r"C:\repo", "C:\\", _digest(b"root"))
+        marker = {
+            "contract": "sos_staging_binding_v1",
+            "root_identity_digest": root.identity_digest,
+            "transaction_id": staging.removeprefix(".sigma.init."),
+            "staging_name": staging,
+            "target_name": ".sigma",
+            "staging_identity_digest": _digest(b"staging"),
+            "recovery_binding_digest": "none",
+            "binding_nonce": "ab" * 32,
+        }
+        marker["binding_digest"] = _binding_digest(marker)
+        kernel = _IdentityBoundKernel(
+            staging,
+            json.dumps(marker, sort_keys=True, separators=(",", ":")).encode(),
+        )
+        boundary = _InjectedWin32Boundary(kernel)
+        token = _NativeStaging(
+            2,
+            root,
+            staging,
+            ".sigma",
+            _digest(b"staging"),
+            str(marker["binding_digest"]),
+            staging.removeprefix(".sigma.init."),
+            "none",
+        )
+        return root, boundary, boundary._capability(token), kernel
 
     def test_all_nine_services_conform_to_protocol_with_injected_boundary(self) -> None:
         self.assertIsInstance(self.service, PlatformServices)
@@ -295,6 +416,120 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
                     TreePublicationOperation(root, staging, ".sigma", "recover", recovery_binding_digest=_digest(b"other"))
                 )
 
+    def test_extend_stays_on_retained_staging_handle_after_name_substitution(self) -> None:
+        staging = ".sigma.init." + "c" * 64
+        root, boundary, capability, kernel = self._identity_bound_lifecycle(staging)
+        receipt = boundary.publish_tree(
+            TreePublicationOperation(
+                root,
+                staging,
+                ".sigma",
+                "extend",
+                (("nested/record", b"new"),),
+                capability=capability,
+            ),
+            root,
+        )
+        self.assertEqual(receipt.operation, "extend_tree")
+        self.assertIn(("write_new_beneath", 2, "nested/record", b"new"), kernel.calls)
+        self.assertFalse(
+            any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
+        )
+
+    def test_commit_and_discard_use_retained_handles_after_name_substitution(self) -> None:
+        staging = ".sigma.init." + "d" * 64
+        root, boundary, capability, kernel = self._identity_bound_lifecycle(staging)
+        committed = boundary.publish_tree(
+            TreePublicationOperation(
+                root,
+                staging,
+                ".sigma",
+                "commit",
+                capability=capability,
+            ),
+            root,
+        )
+        self.assertEqual(committed.operation, "create_tree")
+        self.assertIn(("delete_beneath", 2, _STAGING_MARKER), kernel.calls)
+        self.assertIn(("rename_open_beneath", 1, 2, ".sigma", False), kernel.calls)
+        self.assertFalse(
+            any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
+        )
+
+    def test_native_create_and_rename_primitives_are_handle_relative(self) -> None:
+        api = object.__new__(_Kernel32)
+        create_calls: list[tuple[object, ...]] = []
+        api.open_beneath = lambda root, relative, **kwargs: (
+            create_calls.append((root.handle, relative, kwargs)),
+            77,
+        )[1]
+        root = _NativeRoot(41, r"C:\repo", "C:\\", _digest(b"root"))
+        self.assertEqual(api.create_directory_handle_beneath(root, "managed"), 77)
+        self.assertEqual(create_calls[0][0:2], (41, "managed"))
+        self.assertEqual(create_calls[0][2]["create"], "new")
+
+        class RenameRecorder:
+            def __init__(self) -> None:
+                self.observed: tuple[int, int, int, int, int, bytes] | None = None
+
+            def SetFileInformationByHandle(self, source, info_class, buffer, size):
+                address = ctypes.addressof(buffer)
+                flags = ctypes.c_uint32.from_address(address).value
+                root_handle = ctypes.c_void_p.from_address(address + 8).value
+                name_length = ctypes.c_uint32.from_address(address + 16).value
+                name = bytes((ctypes.c_ubyte * name_length).from_address(address + 20))
+                self.observed = (
+                    source,
+                    info_class,
+                    size,
+                    flags,
+                    int(root_handle or 0),
+                    name,
+                )
+                return 1
+
+        recorder = RenameRecorder()
+        api.kernel32 = recorder
+        identity = _digest(b"source")
+        api.object_info = lambda handle: (
+            "regular",
+            0,
+            identity,
+            False,
+            0o600,
+            False,
+            1,
+        )
+        api.rename_open_beneath(
+            root,
+            77,
+            "nested/target",
+            replace=False,
+            expected_source_identity=identity,
+        )
+        self.assertIsNotNone(recorder.observed)
+        source, info_class, _size, flags, root_handle, name = recorder.observed
+        self.assertEqual((source, info_class, flags, root_handle), (77, 22, 0, 41))
+        self.assertEqual(name.decode("utf-16-le"), r"nested\target")
+
+        staging = ".sigma.init." + "e" * 64
+        root, boundary, capability, kernel = self._identity_bound_lifecycle(staging)
+        discarded = boundary.publish_tree(
+            TreePublicationOperation(
+                root,
+                staging,
+                ".sigma",
+                "discard",
+                capability=capability,
+            ),
+            root,
+        )
+        self.assertEqual(discarded.operation, "discard_tree")
+        self.assertIn(("discard_open_tree", 2, _digest(b"staging")), kernel.calls)
+        self.assertFalse(
+            any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
+        )
+
     def test_launcher_is_bounded_to_codex_and_git_and_content_safe(self) -> None:
         observed = self.service.observe_launcher("codex")
         self.assertEqual(observed.package_version, "0.1.0a1")
@@ -325,14 +560,24 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             "NtCreateFile",
             "OBJ_DONT_REPARSE",
             "CompareStringOrdinal",
-            "ReplaceFileW",
-            "MoveFileExW",
+            "FILE_RENAME_INFO_EX",
+            "DuplicateHandle",
             "SetFileInformationByHandle",
+            "GetFileInformationByHandleEx",
             "FlushFileBuffers",
             "windows-project-execution-unavailable-v1",
         ):
             self.assertIn(required, source)
-        for forbidden in ("subprocess", "os.system", "os.walk", "shell=True"):
+        for forbidden in (
+            "subprocess",
+            "os.system",
+            "os.walk",
+            "os.scandir",
+            "shell=True",
+            "ReplaceFileW",
+            "MoveFileExW",
+            "CreateDirectoryW",
+        ):
             self.assertNotIn(forbidden, source)
 
 

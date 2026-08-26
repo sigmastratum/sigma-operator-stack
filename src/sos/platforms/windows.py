@@ -475,7 +475,7 @@ class _Win32NativeBoundary:
                 return PublicationReceipt(_DURABILITY, "delete", relative, before, None)
             api.write_new_beneath(root, temporary, operation.payload)
             temporary_handle = api.open_beneath(
-                root, temporary, directory=False, write=False, create="open"
+                root, temporary, directory=False, write=True, create="open"
             )
             target_handle: int | None = None
             try:
@@ -495,12 +495,24 @@ class _Win32NativeBoundary:
                         raise PlatformServiceError("identity_changed")
                     if api.read_bounded(target_handle, len(operation.expected_payload or b"")) != operation.expected_payload:
                         raise PlatformServiceError("identity_changed")
-                    api.replace_beneath(root, relative, temporary)
+                    api.rename_open_beneath(
+                        root,
+                        temporary_handle,
+                        relative,
+                        replace=True,
+                        expected_source_identity=staged_before[2],
+                    )
                     verb = "replace"
                 else:
                     if self.observe_object(root, relative).kind != "absent":
                         raise PlatformServiceError("collision")
-                    api.move_new_beneath(root, temporary, relative)
+                    api.rename_open_beneath(
+                        root,
+                        temporary_handle,
+                        relative,
+                        replace=False,
+                        expected_source_identity=staged_before[2],
+                    )
                     verb = "create"
             finally:
                 if target_handle is not None:
@@ -529,24 +541,35 @@ class _Win32NativeBoundary:
             verb = "recover_tree"
         else:
             capability = self._require_staging(root, operation)
+            token = capability._platform_token()
+            if not isinstance(token, _NativeStaging):
+                raise PlatformServiceError("staging_recovery_required")
+            staging_root = self._staging_root(token)
             if operation.action == "extend":
-                self._write_tree_files(root, operation.staging_name, operation.files)
-                self._kernel().flush(capability._platform_token().handle if isinstance(capability._platform_token(), _NativeStaging) else -1)
+                self._write_tree_files(staging_root, operation.files)
+                self._kernel().flush(token.handle)
                 verb = "extend_tree"
             elif operation.action == "commit":
-                self._kernel().delete_beneath(root, operation.staging_name + "/" + _STAGING_MARKER, expected_identity=None)
-                token = capability._platform_token()
-                if not isinstance(token, _NativeStaging):
-                    raise PlatformServiceError("staging_recovery_required")
+                self._kernel().delete_beneath(
+                    staging_root,
+                    _STAGING_MARKER,
+                    expected_identity=None,
+                )
                 self._kernel().flush(token.handle)
-                self._assert_staging_identity(root, capability)
-                self._kernel().move_new_beneath(root, operation.staging_name, operation.target_name, directory=True)
+                self._assert_staging_identity(capability)
+                self._kernel().rename_open_beneath(
+                    root,
+                    token.handle,
+                    operation.target_name,
+                    replace=False,
+                    expected_source_identity=token.identity_digest,
+                )
                 self._kernel().flush(root.handle)
                 capability.consume("commit")
                 capability = None
                 verb = "create_tree"
             elif operation.action == "discard":
-                self._kernel().discard_tree_beneath(root, operation.staging_name)
+                self._discard_staging(staging_root, token)
                 self._kernel().flush(root.handle)
                 capability.consume("discard")
                 capability = None
@@ -595,10 +618,10 @@ class _Win32NativeBoundary:
         recovery = operation.recovery_binding_digest or _NONE_RECOVERY_BINDING
         transaction = _transaction_id(operation.staging_name)
         api = self._kernel()
-        api.create_directory_beneath(root, operation.staging_name)
-        handle = api.open_beneath(root, operation.staging_name, directory=True, write=True, create="open")
+        handle = api.create_directory_handle_beneath(root, operation.staging_name)
         try:
             staging = _NativeStaging(handle, root, operation.staging_name, operation.target_name, api.object_info(handle)[2], "", transaction, recovery)
+            staging_root = self._staging_root(staging)
             marker = {
                 "contract": "sos_staging_binding_v1",
                 "root_identity_digest": root.identity_digest,
@@ -611,8 +634,8 @@ class _Win32NativeBoundary:
             }
             marker["binding_digest"] = _binding_digest(marker)
             staging.binding_digest = str(marker["binding_digest"])
-            api.write_new_beneath(root, operation.staging_name + "/" + _STAGING_MARKER, _canonical_json(marker))
-            self._write_tree_files(root, operation.staging_name, operation.files)
+            api.write_new_beneath(staging_root, _STAGING_MARKER, _canonical_json(marker))
+            self._write_tree_files(staging_root, operation.files)
             api.flush(handle)
             return self._capability(staging)
         except BaseException:
@@ -627,7 +650,21 @@ class _Win32NativeBoundary:
         handle = api.open_beneath(root, operation.staging_name, directory=True, write=True, create="open")
         try:
             identity = api.object_info(handle)[2]
-            marker_payload = self.read_regular_file(root, operation.staging_name + "/" + _STAGING_MARKER, 64 * 1024)[1]
+            staging = _NativeStaging(
+                handle,
+                root,
+                operation.staging_name,
+                operation.target_name,
+                identity,
+                "",
+                _transaction_id(operation.staging_name),
+                recovery,
+            )
+            marker_payload = self.read_regular_file(
+                self._staging_root(staging),
+                _STAGING_MARKER,
+                64 * 1024,
+            )[1]
             marker = json.loads(marker_payload.decode("utf-8"))
             expected = {
                 "contract": "sos_staging_binding_v1",
@@ -642,7 +679,8 @@ class _Win32NativeBoundary:
             expected["binding_digest"] = _binding_digest(expected)
             if marker != expected:
                 raise PlatformServiceError("staging_recovery_required")
-            return self._capability(_NativeStaging(handle, root, operation.staging_name, operation.target_name, identity, str(expected["binding_digest"]), str(expected["transaction_id"]), recovery))
+            staging.binding_digest = str(expected["binding_digest"])
+            return self._capability(staging)
         except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             api.close(handle)
             raise PlatformServiceError("staging_recovery_required") from exc
@@ -659,48 +697,61 @@ class _Win32NativeBoundary:
             raise PlatformServiceError("staging_recovery_required")
         if token.staging_name != operation.staging_name or token.target_name != operation.target_name or capability.root_identity_digest != root.identity_digest:
             raise PlatformServiceError("staging_identity_changed")
-        self._assert_staging(root, capability)
+        self._assert_staging(capability)
         return capability
 
-    def _assert_staging(self, root: _NativeRoot, capability: TreeStagingCapability) -> None:
+    def _assert_staging(self, capability: TreeStagingCapability) -> None:
         token = capability._platform_token()
-        if not isinstance(token, _NativeStaging):
+        if not isinstance(token, _NativeStaging) or token.closed:
             raise PlatformServiceError("staging_recovery_required")
-        current = self._kernel().open_beneath(root, token.staging_name, directory=True, write=True, create="open")
+        api = self._kernel()
+        if api.object_info(token.handle)[2] != token.identity_digest:
+            raise PlatformServiceError("staging_identity_changed")
         try:
-            if self._kernel().object_info(current)[2] != token.identity_digest:
-                raise PlatformServiceError("staging_identity_changed")
-            try:
-                marker = json.loads(self.read_regular_file(root, token.staging_name + "/" + _STAGING_MARKER, 64 * 1024)[1].decode("utf-8"))
-            except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-                raise PlatformServiceError("staging_identity_changed") from exc
-            if marker.get("binding_digest") != token.binding_digest or _binding_digest({key: value for key, value in marker.items() if key != "binding_digest"}) != token.binding_digest:
-                raise PlatformServiceError("staging_identity_changed")
-        finally:
-            self._kernel().close(current)
+            marker = json.loads(
+                self.read_regular_file(
+                    self._staging_root(token),
+                    _STAGING_MARKER,
+                    64 * 1024,
+                )[1].decode("utf-8")
+            )
+        except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise PlatformServiceError("staging_identity_changed") from exc
+        if marker.get("binding_digest") != token.binding_digest or _binding_digest({key: value for key, value in marker.items() if key != "binding_digest"}) != token.binding_digest:
+            raise PlatformServiceError("staging_identity_changed")
 
-    def _assert_staging_identity(self, root: _NativeRoot, capability: TreeStagingCapability) -> None:
+    def _assert_staging_identity(self, capability: TreeStagingCapability) -> None:
         token = capability._platform_token()
-        if not isinstance(token, _NativeStaging):
+        if not isinstance(token, _NativeStaging) or token.closed:
             raise PlatformServiceError("staging_recovery_required")
-        current = self._kernel().open_beneath(
-            root, token.staging_name, directory=True, write=True, create="open"
-        )
-        try:
-            if self._kernel().object_info(current)[2] != token.identity_digest:
-                raise PlatformServiceError("staging_identity_changed")
-        finally:
-            self._kernel().close(current)
+        if self._kernel().object_info(token.handle)[2] != token.identity_digest:
+            raise PlatformServiceError("staging_identity_changed")
 
-    def _write_tree_files(self, root: _NativeRoot, staging_name: str, files: tuple[tuple[str, bytes], ...]) -> None:
+    def _write_tree_files(self, staging_root: _NativeRoot, files: tuple[tuple[str, bytes], ...]) -> None:
         api = self._kernel()
         for relative, payload in files:
-            target = staging_name + "/" + relative
-            parent = str(PurePosixPath(target).parent)
-            api.create_directory_chain_beneath(root, parent)
-            api.write_new_beneath(root, target, payload)
-            api.flush_parent(root, target)
-        api.flush(root.handle)
+            parent = str(PurePosixPath(relative).parent)
+            if parent != ".":
+                api.create_directory_chain_beneath(staging_root, parent)
+            api.write_new_beneath(staging_root, relative, payload)
+            api.flush_parent(staging_root, relative)
+        api.flush(staging_root.handle)
+
+    def _staging_root(self, token: _NativeStaging) -> _NativeRoot:
+        if token.closed:
+            raise PlatformServiceError("staging_recovery_required")
+        return _NativeRoot(
+            token.handle,
+            self._kernel().final_path(token.handle).rstrip("\\"),
+            token.root.volume_root,
+            token.identity_digest,
+        )
+
+    def _discard_staging(self, staging_root: _NativeRoot, token: _NativeStaging) -> None:
+        api = self._kernel()
+        if api.object_info(token.handle)[2] != token.identity_digest:
+            raise PlatformServiceError("staging_identity_changed")
+        api.discard_open_tree(staging_root, token.identity_digest)
 
     def _capability(self, token: _NativeStaging) -> TreeStagingCapability:
         return TreeStagingCapability(
@@ -764,6 +815,7 @@ class _Kernel32:
     FILE_APPEND_DATA = 0x0004
     FILE_READ_ATTRIBUTES = 0x0080
     FILE_WRITE_ATTRIBUTES = 0x0100
+    DELETE = 0x00010000
     FILE_SHARE_READ = 1
     FILE_SHARE_WRITE = 2
     FILE_SHARE_DELETE = 4
@@ -792,7 +844,10 @@ class _Kernel32:
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS = 0x00000002
     FILE_DISPOSITION_FLAG_ON_CLOSE = 0x00000008
     FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE = 0x00000010
-    MOVEFILE_WRITE_THROUGH = 0x8
+    FILE_RENAME_INFO_EX = 22
+    FILE_RENAME_FLAG_REPLACE_IF_EXISTS = 0x00000001
+    FILE_ID_BOTH_DIRECTORY_INFO = 10
+    FILE_ID_BOTH_DIRECTORY_RESTART_INFO = 11
     DRIVE_FIXED = 3
 
     def __init__(self) -> None:
@@ -841,23 +896,17 @@ class _Kernel32:
         ]
         self.kernel32.WriteFile.restype = ctypes.c_int
         self.kernel32.WriteFile.argtypes = list(self.kernel32.ReadFile.argtypes)
-        self.kernel32.ReplaceFileW.restype = ctypes.c_int
-        self.kernel32.ReplaceFileW.argtypes = [
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
+        self.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        self.kernel32.DuplicateHandle.restype = ctypes.c_int
+        self.kernel32.DuplicateHandle.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
             ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_uint32,
         ]
-        self.kernel32.MoveFileExW.restype = ctypes.c_int
-        self.kernel32.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
-        self.kernel32.DeleteFileW.restype = ctypes.c_int
-        self.kernel32.DeleteFileW.argtypes = [ctypes.c_wchar_p]
-        self.kernel32.CreateDirectoryW.restype = ctypes.c_int
-        self.kernel32.CreateDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p]
-        self.kernel32.RemoveDirectoryW.restype = ctypes.c_int
-        self.kernel32.RemoveDirectoryW.argtypes = [ctypes.c_wchar_p]
         self.kernel32.SetFileInformationByHandle.restype = ctypes.c_int
         self.kernel32.SetFileInformationByHandle.argtypes = [
             ctypes.c_void_p,
@@ -905,8 +954,9 @@ class _Kernel32:
 
     def open_beneath(self, root: _NativeRoot, relative: str, *, directory: bool | None, write: bool, create: str, share: int | None = None) -> int:
         if relative == ".":
-            path = root.final_path
-            handle = self.open_path(path, directory=directory, write=write, create=create, share=share)
+            if create != "open":
+                raise PlatformServiceError("publication_failed")
+            handle = self.duplicate(root.handle)
         else:
             handle = self._nt_open_relative(
                 root.handle,
@@ -978,7 +1028,7 @@ class _Kernel32:
         handle = ctypes.c_void_p()
         access = self.SYNCHRONIZE | self.FILE_READ_ATTRIBUTES | self.FILE_READ_DATA
         if write:
-            access |= self.FILE_WRITE_DATA | self.FILE_APPEND_DATA | self.FILE_WRITE_ATTRIBUTES
+            access |= self.FILE_WRITE_DATA | self.FILE_APPEND_DATA | self.FILE_WRITE_ATTRIBUTES | self.DELETE
         share_mode = self.FILE_SHARE_READ | self.FILE_SHARE_WRITE | self.FILE_SHARE_DELETE if share is None else share
         disposition = {"open": self.FILE_OPEN, "new": self.FILE_CREATE, "open_or_create": self.FILE_OPEN_IF}[create]
         options = self.FILE_OPEN_REPARSE_POINT | self.FILE_SYNCHRONOUS_IO_NONALERT
@@ -1013,6 +1063,21 @@ class _Kernel32:
         if not handle.value:
             raise PlatformServiceError("publication_failed" if write else "read_failed")
         return int(handle.value)
+
+    def duplicate(self, handle: int) -> int:
+        process = self.kernel32.GetCurrentProcess()
+        duplicate = ctypes.c_void_p()
+        if not self.kernel32.DuplicateHandle(
+            process,
+            ctypes.c_void_p(handle),
+            process,
+            ctypes.byref(duplicate),
+            0,
+            False,
+            0x00000002,
+        ) or not duplicate.value:
+            raise PlatformServiceError("observation_failed")
+        return int(duplicate.value)
 
     def object_info(self, handle: int) -> tuple[str, int, str, bool, int, bool, int]:
         class FILETIME(ctypes.Structure):
@@ -1102,20 +1167,54 @@ class _Kernel32:
         handle = self.open_beneath(root, relative, directory=True, write=False, create="open")
         try:
             before = self.object_info(handle)[2]
-            base = self.final_path(handle)
-            names: list[str] = []
-            with os.scandir(base) as entries:
-                for entry in entries:
-                    if entry.name in {".", ".."}:
-                        continue
-                    names.append(entry.name)
-                    if len(names) > limit:
-                        raise PlatformServiceError("directory_limit_exceeded")
+            names = self.enumerate_handle(handle, limit)
             if self.object_info(handle)[2] != before:
                 raise PlatformServiceError("identity_changed")
             return names
         finally:
             self.close(handle)
+
+    def enumerate_handle(self, handle: int, limit: int) -> list[str]:
+        names: list[str] = []
+        restart = True
+        while True:
+            buffer = ctypes.create_string_buffer(64 * 1024)
+            information_class = (
+                self.FILE_ID_BOTH_DIRECTORY_RESTART_INFO
+                if restart
+                else self.FILE_ID_BOTH_DIRECTORY_INFO
+            )
+            if not self.kernel32.GetFileInformationByHandleEx(
+                handle,
+                information_class,
+                buffer,
+                len(buffer),
+            ):
+                error = ctypes.get_last_error()
+                if error == 18:
+                    break
+                raise PlatformServiceError("observation_failed")
+            restart = False
+            offset = 0
+            while True:
+                next_offset = ctypes.c_uint32.from_buffer(buffer, offset).value
+                name_length = ctypes.c_uint32.from_buffer(buffer, offset + 60).value
+                if name_length > len(buffer) - offset - 104 or name_length % 2:
+                    raise PlatformServiceError("observation_failed")
+                name = bytes(buffer[offset + 104 : offset + 104 + name_length]).decode(
+                    "utf-16-le",
+                    errors="strict",
+                )
+                if name not in {".", ".."}:
+                    names.append(name)
+                    if len(names) > limit:
+                        raise PlatformServiceError("directory_limit_exceeded")
+                if next_offset == 0:
+                    break
+                if next_offset < 104 or offset + next_offset >= len(buffer):
+                    raise PlatformServiceError("observation_failed")
+                offset += next_offset
+        return names
 
     def write_new_beneath(self, root: _NativeRoot, relative: str, payload: bytes) -> None:
         handle = self.open_beneath(root, relative, directory=False, write=True, create="new")
@@ -1132,20 +1231,47 @@ class _Kernel32:
         finally:
             self.close(handle)
 
-    def replace_beneath(self, root: _NativeRoot, target: str, replacement: str) -> None:
-        target_path = self._path(root, target)
-        replacement_path = self._path(root, replacement)
-        if not self.kernel32.ReplaceFileW(target_path, replacement_path, None, 1, None, None):
-            raise PlatformServiceError("publication_failed")
+    def rename_open_beneath(
+        self,
+        root: _NativeRoot,
+        source_handle: int,
+        target: str,
+        *,
+        replace: bool,
+        expected_source_identity: str,
+    ) -> None:
+        if self.object_info(source_handle)[2] != expected_source_identity:
+            raise PlatformServiceError("identity_changed")
+        encoded = target.replace("/", "\\").encode("utf-16-le")
 
-    def move_new_beneath(self, root: _NativeRoot, source: str, target: str, *, directory: bool = False) -> None:
-        if self.observe_path_absent(root, target) is False:
-            raise PlatformServiceError("collision")
-        if not self.kernel32.MoveFileExW(self._path(root, source), self._path(root, target), self.MOVEFILE_WRITE_THROUGH):
+        class FILE_RENAME_INFO_HEADER(ctypes.Structure):
+            _fields_ = [
+                ("Flags", ctypes.c_uint32),
+                ("RootDirectory", ctypes.c_void_p),
+                ("FileNameLength", ctypes.c_uint32),
+            ]
+
+        name_offset = FILE_RENAME_INFO_HEADER.FileNameLength.offset + ctypes.sizeof(
+            ctypes.c_uint32
+        )
+        buffer = ctypes.create_string_buffer(name_offset + len(encoded))
+        header = FILE_RENAME_INFO_HEADER.from_buffer(buffer)
+        header.Flags = self.FILE_RENAME_FLAG_REPLACE_IF_EXISTS if replace else 0
+        header.RootDirectory = ctypes.c_void_p(root.handle)
+        header.FileNameLength = len(encoded)
+        ctypes.memmove(ctypes.addressof(buffer) + name_offset, encoded, len(encoded))
+        if not self.kernel32.SetFileInformationByHandle(
+            source_handle,
+            self.FILE_RENAME_INFO_EX,
+            buffer,
+            len(buffer),
+        ):
             error = ctypes.get_last_error()
-            if error in {80, 183}:
+            if not replace and error in {80, 183}:
                 raise PlatformServiceError("collision")
             raise PlatformServiceError("publication_failed")
+        if self.object_info(source_handle)[2] != expected_source_identity:
+            raise PlatformServiceError("identity_changed")
 
     def delete_beneath(self, root: _NativeRoot, relative: str, expected_identity: str | None) -> None:
         try:
@@ -1159,13 +1285,25 @@ class _Kernel32:
         finally:
             self.close(handle)
 
+    def delete_open_handle(self, handle: int, expected_identity: str) -> None:
+        if self.object_info(handle)[2] != expected_identity:
+            raise PlatformServiceError("identity_changed")
+        self._delete_handle(handle)
+
+    def create_directory_handle_beneath(self, root: _NativeRoot, relative: str) -> int:
+        try:
+            return self.open_beneath(
+                root,
+                relative,
+                directory=True,
+                write=True,
+                create="new",
+            )
+        except FileExistsError as exc:
+            raise PlatformServiceError("collision") from exc
+
     def create_directory_beneath(self, root: _NativeRoot, relative: str) -> None:
-        if not self.kernel32.CreateDirectoryW(self._path(root, relative), None):
-            error = ctypes.get_last_error()
-            if error in {80, 183}:
-                raise PlatformServiceError("collision")
-            raise PlatformServiceError("publication_failed")
-        handle = self.open_beneath(root, relative, directory=True, write=True, create="open")
+        handle = self.create_directory_handle_beneath(root, relative)
         self.close(handle)
 
     def create_directory_chain_beneath(self, root: _NativeRoot, relative: str) -> None:
@@ -1190,25 +1328,48 @@ class _Kernel32:
         self.flush_parent(root, relative)
 
     def discard_tree_beneath(self, root: _NativeRoot, relative: str) -> None:
-        for name in self.enumerate_beneath(root, relative, 8192):
-            _validate_component(name)
-            child = relative + "/" + name
-            handle = self.open_beneath(root, child, directory=None, write=True, create="open")
-            try:
-                info = self.object_info(handle)
-            finally:
-                self.close(handle)
-            if info[0] == "directory":
-                self.discard_tree_beneath(root, child)
-            elif info[0] == "regular" and info[6] == 1:
-                self.delete_beneath(root, child, info[2])
-            else:
-                raise PlatformServiceError("object_kind_unsupported")
         handle = self.open_beneath(root, relative, directory=True, write=True, create="open")
         try:
-            self._delete_handle(handle)
+            identity = self.object_info(handle)[2]
+            child_root = _NativeRoot(
+                handle,
+                self.final_path(handle).rstrip("\\"),
+                root.volume_root,
+                identity,
+            )
+            self.discard_open_tree(child_root, identity)
         finally:
             self.close(handle)
+
+    def discard_open_tree(self, root: _NativeRoot, expected_identity: str) -> None:
+        if self.object_info(root.handle)[2] != expected_identity:
+            raise PlatformServiceError("identity_changed")
+        for name in self.enumerate_beneath(root, ".", 8192):
+            _validate_component(name)
+            handle = self.open_beneath(
+                root,
+                name,
+                directory=None,
+                write=True,
+                create="open",
+            )
+            try:
+                info = self.object_info(handle)
+                if info[0] == "directory":
+                    child_root = _NativeRoot(
+                        handle,
+                        self.final_path(handle).rstrip("\\"),
+                        root.volume_root,
+                        info[2],
+                    )
+                    self.discard_open_tree(child_root, info[2])
+                elif info[0] == "regular" and info[6] == 1:
+                    self.delete_open_handle(handle, info[2])
+                else:
+                    raise PlatformServiceError("object_kind_unsupported")
+            finally:
+                self.close(handle)
+        self.delete_open_handle(root.handle, expected_identity)
 
     def _delete_handle(self, handle: int) -> None:
         class FILE_DISPOSITION_INFO_EX(ctypes.Structure):
@@ -1253,10 +1414,6 @@ class _Kernel32:
         else:
             self.close(handle)
             return False
-
-    def _path(self, root: _NativeRoot, relative: str) -> str:
-        return root.final_path + "\\" + relative.replace("/", "\\")
-
 
 def _validate_relative_path(value: str, *, allow_root: bool = False) -> str:
     if allow_root and value == ".":
