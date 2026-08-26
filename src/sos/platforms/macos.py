@@ -19,6 +19,7 @@ import platform
 import plistlib
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -48,8 +49,12 @@ _DURABILITY = "macos-apfs-same-volume-fsync-rename-v1"
 _RENAME_EXCL = 0x00000004
 _RENAME_SWAP = 0x00000002
 _MNT_LOCAL = 0x00001000
-_MNT_CASE_SENSITIVE = 0x40000000
 _UF_DATALESS = 0x40000000
+_ATTR_BIT_MAP_COUNT = 5
+_ATTR_VOL_INFO = 0x00000080
+_ATTR_VOL_CAPABILITIES = 0x00020000
+_VOL_CAPABILITIES_FORMAT = 1
+_VOL_CAP_FMT_CASE_SENSITIVE = 0x00000001
 _STAGING_MARKER = ".sos-staging-binding-v1"
 
 
@@ -80,6 +85,18 @@ class _DarwinStatFS(ctypes.Structure):
     ]
 
 
+class _DarwinAttrList(ctypes.Structure):
+    _fields_ = [
+        ("bitmapcount", ctypes.c_uint16),
+        ("reserved", ctypes.c_uint16),
+        ("commonattr", ctypes.c_uint32),
+        ("volattr", ctypes.c_uint32),
+        ("dirattr", ctypes.c_uint32),
+        ("fileattr", ctypes.c_uint32),
+        ("forkattr", ctypes.c_uint32),
+    ]
+
+
 class MacOSPlatformServices:
     profile_id = _PROFILE
 
@@ -94,10 +111,12 @@ class MacOSPlatformServices:
             "absolute_paths_serialized": False,
         }
         if repository_path is not None:
+            descriptor = -1
             try:
-                filesystem, local, removable, case_sensitive = self._filesystem_facts(
-                    repository_path
-                )
+                self._admit_host()
+                descriptor = self._open_root_without_symlinks(repository_path)
+                filesystem, local, removable = self._filesystem_facts(repository_path)
+                case_sensitive = self._observe_apfs_case_mode(descriptor)
                 report["filesystem_type"] = filesystem
                 report["filesystem_local"] = local
                 report["filesystem_removable"] = removable
@@ -108,6 +127,9 @@ class MacOSPlatformServices:
             except (OSError, ValueError, PlatformServiceError):
                 report["filesystem_type"] = "unknown"
                 report["filesystem_observation_status"] = "not_verified"
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
         return report
 
     def _host_facts(self) -> tuple[str, str, int]:
@@ -119,7 +141,7 @@ class MacOSPlatformServices:
             major = 0
         return system, architecture, major
 
-    def _filesystem_facts(self, path: Path) -> tuple[str, bool, bool, bool]:
+    def _filesystem_facts(self, path: Path) -> tuple[str, bool, bool]:
         if platform.system() != "Darwin":
             raise PlatformServiceError("platform_unsupported")
         statfs_value = _DarwinStatFS()
@@ -128,7 +150,6 @@ class MacOSPlatformServices:
             raise PlatformServiceError("filesystem_not_verified")
         filesystem = bytes(statfs_value.f_fstypename).split(b"\0", 1)[0].decode("ascii")
         local = bool(statfs_value.f_flags & _MNT_LOCAL)
-        case_sensitive = bool(statfs_value.f_flags & _MNT_CASE_SENSITIVE)
         # diskutil is a bounded local inventory read.  It is used only to
         # distinguish removable media; its paths and raw plist never escape.
         try:
@@ -153,15 +174,19 @@ class MacOSPlatformServices:
         internal = inventory.get("Internal")
         if not isinstance(removable, bool) or not isinstance(internal, bool):
             raise PlatformServiceError("filesystem_not_verified")
-        return filesystem.lower(), local and internal, removable, case_sensitive
+        return filesystem.lower(), local and internal, removable
 
-    def _admit_environment(self, path: Path) -> tuple[bool, str]:
+    def _admit_host(self) -> None:
         system, architecture, major = self._host_facts()
         if system != "darwin" or architecture not in {"arm64", "aarch64"} or major < 14:
             raise PlatformServiceError("platform_unsupported")
-        filesystem, local, removable, case_sensitive = self._filesystem_facts(path)
+
+    def _admit_environment(self, path: Path, descriptor: int) -> tuple[bool, str]:
+        self._admit_host()
+        filesystem, local, removable = self._filesystem_facts(path)
         if filesystem != "apfs" or not local or removable:
             raise PlatformServiceError("filesystem_unsupported")
+        case_sensitive = self._observe_apfs_case_mode(descriptor)
         return case_sensitive, (
             "macos-local-apfs-case-sensitive-v1"
             if case_sensitive
@@ -169,14 +194,20 @@ class MacOSPlatformServices:
         )
 
     def open_repository(self, path: Path) -> RepositoryRootHandle:
+        descriptor = -1
         try:
-            case_sensitive, filesystem_profile = self._admit_environment(path)
+            self._admit_host()
             descriptor = self._open_root_without_symlinks(path)
             self._reject_unsafe_fd(descriptor)
+            case_sensitive, filesystem_profile = self._admit_environment(path, descriptor)
             identity_digest = self._stable_identity(os.fstat(descriptor))
         except PlatformServiceError:
+            if descriptor >= 0:
+                os.close(descriptor)
             raise
         except OSError as exc:
+            if descriptor >= 0:
+                os.close(descriptor)
             raise PlatformServiceError("invalid_root") from exc
         return RepositoryRootHandle(
             _PROFILE,
@@ -185,6 +216,56 @@ class MacOSPlatformServices:
             _MacRootToken(descriptor, case_sensitive),
             self._close_repository_token,
         )
+
+    def _observe_apfs_case_mode(self, descriptor: int) -> bool:
+        return self._parse_volume_capabilities(
+            self._read_volume_capability_payload(descriptor)
+        )
+
+    @staticmethod
+    def _read_volume_capability_payload(descriptor: int) -> bytes:
+        attributes = _DarwinAttrList()
+        attributes.bitmapcount = _ATTR_BIT_MAP_COUNT
+        attributes.volattr = _ATTR_VOL_INFO | _ATTR_VOL_CAPABILITIES
+        output = ctypes.create_string_buffer(4096)
+        libc = ctypes.CDLL(None, use_errno=True)
+        fgetattrlist = getattr(libc, "fgetattrlist", None)
+        if fgetattrlist is None:
+            raise PlatformServiceError("filesystem_not_verified")
+        fgetattrlist.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(_DarwinAttrList),
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_ulong,
+        ]
+        fgetattrlist.restype = ctypes.c_int
+        if fgetattrlist(
+            descriptor,
+            ctypes.byref(attributes),
+            ctypes.byref(output),
+            ctypes.sizeof(output),
+            0,
+        ) != 0:
+            raise PlatformServiceError("filesystem_not_verified")
+        length = struct.unpack_from("=I", output.raw, 0)[0]
+        if length < 36 or length > len(output.raw):
+            raise PlatformServiceError("filesystem_not_verified")
+        return output.raw[:length]
+
+    @staticmethod
+    def _parse_volume_capabilities(payload: bytes) -> bool:
+        if len(payload) < 36:
+            raise PlatformServiceError("filesystem_not_verified")
+        declared = struct.unpack_from("=I", payload, 0)[0]
+        if declared < 36 or declared > len(payload):
+            raise PlatformServiceError("filesystem_not_verified")
+        values = struct.unpack_from("=8I", payload, 4)
+        capabilities = values[_VOL_CAPABILITIES_FORMAT]
+        valid = values[4 + _VOL_CAPABILITIES_FORMAT]
+        if not valid & _VOL_CAP_FMT_CASE_SENSITIVE:
+            raise PlatformServiceError("filesystem_not_verified")
+        return bool(capabilities & _VOL_CAP_FMT_CASE_SENSITIVE)
 
     def _open_root_without_symlinks(self, path: Path) -> int:
         absolute = Path(os.path.abspath(path))

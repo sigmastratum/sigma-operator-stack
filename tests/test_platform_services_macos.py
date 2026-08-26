@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import tempfile
 import threading
 import unittest
@@ -18,6 +19,12 @@ from sos.platform_services import (
 from sos.platforms.macos import MacOSPlatformServices
 
 
+def _volume_capability_payload(*, case_sensitive: bool, valid: bool = True) -> bytes:
+    capabilities = [0, 1 if case_sensitive else 0, 0, 0]
+    validity = [0, 1 if valid else 0, 0, 0]
+    return struct.pack("=I8I", 36, *(capabilities + validity))
+
+
 class _HermeticMacOSPlatformServices(MacOSPlatformServices):
     def __init__(
         self,
@@ -26,14 +33,19 @@ class _HermeticMacOSPlatformServices(MacOSPlatformServices):
         filesystem: tuple[str, bool, bool, bool] = ("apfs", True, False, True),
     ) -> None:
         self._test_host = host
-        self._test_filesystem = filesystem
+        self._test_filesystem = filesystem[:3]
+        self._test_case_sensitive = filesystem[3]
 
     def _host_facts(self) -> tuple[str, str, int]:
         return self._test_host
 
-    def _filesystem_facts(self, path: Path) -> tuple[str, bool, bool, bool]:
+    def _filesystem_facts(self, path: Path) -> tuple[str, bool, bool]:
         del path
         return self._test_filesystem
+
+    def _read_volume_capability_payload(self, descriptor: int) -> bytes:
+        del descriptor
+        return _volume_capability_payload(case_sensitive=self._test_case_sensitive)
 
     def _rename_noreplace(
         self, source_fd: int, source: str, target_fd: int, target: str
@@ -59,6 +71,24 @@ def _service(*, case_sensitive: bool = True) -> MacOSPlatformServices:
 
 
 class MacOSPlatformServicesTests(unittest.TestCase):
+    def test_native_volume_capability_parser_binds_apfs_case_mode(self) -> None:
+        self.assertTrue(
+            MacOSPlatformServices._parse_volume_capabilities(
+                _volume_capability_payload(case_sensitive=True)
+            )
+        )
+        self.assertFalse(
+            MacOSPlatformServices._parse_volume_capabilities(
+                _volume_capability_payload(case_sensitive=False)
+            )
+        )
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(
+                _volume_capability_payload(case_sensitive=True, valid=False)
+            )
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(b"\x00" * 35)
+
     def test_admission_is_fail_closed_and_report_is_content_safe(self) -> None:
         unsupported = [
             (("linux", "x86_64", 6), ("apfs", True, False, True)),
