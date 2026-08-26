@@ -16,6 +16,11 @@ generated from `terminal-frame.txt`. The local lifecycle is offline. Exactly
 one explicitly approved provider-backed Codex step is projected through
 `fresh-codex-receipt.json`; preparation failures are not release evidence.
 
+The final cut opens with the product outcome in the first frame, then moves to
+the exact terminal sequence after two seconds. `voiceover.txt` is the canonical
+public narration. One separately approved TTS call generates `voiceover.mp3`;
+the media manifest binds its model, voice, text, bytes and provider-call count.
+
 `capture_fresh_codex.py` accepts the operator instruction from an external
 temporary file, runs Codex with `--ephemeral`, `--ignore-user-config`, a
 read-only sandbox and only the generated eight-tool SOS MCP allow-list, then
@@ -28,6 +33,7 @@ Capture requirements:
 - no host prompt, username, repository path, environment, credentials, or
   network access in frame;
 - captions follow `transcript.md` exactly;
+- narration follows `voiceover.txt` exactly and begins with the first frame;
 - WebM and MP4 must each remain below 2 MiB;
 - GIF is optional and only retained when readable below the same limit;
 - media metadata and extracted text must pass the public-content scanner.

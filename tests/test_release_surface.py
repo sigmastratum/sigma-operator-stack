@@ -138,7 +138,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         manifest = json.loads((root / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v2")
         self.assertTrue(manifest["synthetic_repository"])
-        self.assertEqual(manifest["provider_calls"], 1)
+        self.assertEqual(manifest["provider_calls"], 2)
+        self.assertEqual(manifest["fresh_codex_provider_calls"], 1)
         self.assertGreaterEqual(manifest["duration_seconds"], 60)
         self.assertLessEqual(manifest["duration_seconds"], 120)
         receipt = json.loads((root / "demo" / "fresh-codex-receipt.json").read_text(encoding="utf-8"))
@@ -147,6 +148,18 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertEqual(receipt["provider_calls"], 1)
         self.assertEqual(receipt["shell_calls"], 0)
         self.assertEqual(receipt["mutation_tool_calls"], 0)
+        voiceover = manifest["voiceover"]
+        self.assertEqual(voiceover["provider_calls"], 1)
+        self.assertEqual(voiceover["model"], "gpt-4o-mini-tts-2025-12-15")
+        self.assertEqual(voiceover["voice"], "marin")
+        self.assertEqual(
+            voiceover["text_sha256"],
+            hashlib.sha256((root / "demo" / "voiceover.txt").read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            voiceover["sha256"],
+            hashlib.sha256((root / "demo" / "voiceover.mp3").read_bytes()).hexdigest(),
+        )
         for field in ("candidate", "tree", "wheel_sha256"):
             self.assertEqual(manifest[field], receipt[field])
         for name in ("recovery-demo.mp4", "recovery-demo.webm"):

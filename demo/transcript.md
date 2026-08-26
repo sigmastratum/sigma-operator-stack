@@ -37,3 +37,8 @@ results, session identifiers and absolute paths were not retained.
 The public media is rendered from this transcript, the canonical terminal
 frame and the receipt for product candidate `0f81483`. It is product evidence,
 not a compatibility, release-readiness or broad adoption claim.
+
+The video opens immediately with the outcome rather than an idle terminal
+frame. Its English narration is the exact public text in `voiceover.txt`; the
+generated audio and TTS provider count are separately digest-bound in the
+media manifest.

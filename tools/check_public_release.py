@@ -54,6 +54,8 @@ REQUIRED_FILES = {
     "demo/terminal-frame.txt",
     "demo/transcript.md",
     "demo/verify_fresh_codex_capture.py",
+    "demo/voiceover.mp3",
+    "demo/voiceover.txt",
     "docs/architecture.md",
     "docs/comparison.md",
     "docs/alpha-feedback.md",
@@ -77,7 +79,7 @@ REQUIRED_ISSUE_FORMS = {
 }
 REQUIRED_FORM_IDS = {"version", "os_profile", "command", "reason_code", "reproducer", "privacy"}
 PRIVACY_WORDS = ("secrets", "private source", "prompts", "raw .sigma", "paths", "hostnames", "customer data")
-MEDIA_SUFFIXES = {".gif", ".mp4", ".png", ".webm"}
+MEDIA_SUFFIXES = {".gif", ".mp3", ".mp4", ".png", ".webm"}
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 
 
@@ -287,6 +289,17 @@ def _check_media_bytes(
         ):
             failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_MISMATCH:{name}")
         return
+    if name == "demo/voiceover.mp3":
+        if media_manifest is None:
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_MISSING:{name}")
+            return
+        voiceover = media_manifest.get("voiceover")
+        if not isinstance(voiceover, dict):
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_ENTRY_INVALID:{name}")
+            return
+        if voiceover.get("sha256") != hashlib.sha256(data).hexdigest() or voiceover.get("size") != len(data):
+            failures.append(f"SOS_PUBLIC_MEDIA_MANIFEST_MISMATCH:{name}")
+        return
     if suffix in MEDIA_SUFFIXES:
         failures.append(f"SOS_PUBLIC_MEDIA_TEXT_EXTRACTION_UNAVAILABLE:{name}")
 
@@ -302,11 +315,17 @@ def inspect(repository: Path) -> dict[str, object]:
             not isinstance(value, dict)
             or value.get("contract") != "sos_demo_media_manifest_v2"
             or value.get("synthetic_repository") is not True
-            or value.get("provider_calls") != 1
+            or value.get("provider_calls") != 2
+            or value.get("fresh_codex_provider_calls") != 1
             or value.get("duration_seconds") not in range(60, 121)
             or value.get("fresh_codex_receipt_sha256") != hashlib.sha256((repository / "demo" / "fresh-codex-receipt.json").read_bytes()).hexdigest()
             or value.get("terminal_frame_sha256") != hashlib.sha256((repository / "demo" / "terminal-frame.txt").read_bytes()).hexdigest()
             or value.get("transcript_sha256") != hashlib.sha256((repository / "demo" / "transcript.md").read_bytes()).hexdigest()
+            or not isinstance(value.get("voiceover"), dict)
+            or value["voiceover"].get("provider_calls") != 1
+            or value["voiceover"].get("model") != "gpt-4o-mini-tts-2025-12-15"
+            or value["voiceover"].get("voice") != "marin"
+            or value["voiceover"].get("text_sha256") != hashlib.sha256((repository / "demo" / "voiceover.txt").read_bytes()).hexdigest()
         ):
             failures.append("SOS_PUBLIC_MEDIA_MANIFEST_INVALID")
         else:

@@ -17,7 +17,10 @@ ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "terminal-frame.txt"
 TRANSCRIPT = ROOT / "transcript.md"
 CAPTURE_RECEIPT = ROOT / "fresh-codex-receipt.json"
+VOICEOVER_TEXT = ROOT / "voiceover.txt"
+VOICEOVER_AUDIO = ROOT / "voiceover.mp3"
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
+FRAME_DURATIONS = (2, 6, 7, 7, 8, 10, 10, 10)
 
 
 def digest(path: Path) -> str:
@@ -36,6 +39,20 @@ def render_frame(lines: list[str], path: Path) -> None:
         if line.startswith("$"):
             color = "#93c5fd"
         draw.text((52, 48 + index * 34), line, font=font, fill=color)
+    image.save(path, format="PNG", optimize=True)
+
+
+def render_hook(path: Path) -> None:
+    image = Image.new("RGB", (1200, 800), "#090d18")
+    draw = ImageDraw.Draw(image)
+    title = ImageFont.load_default(size=42)
+    body = ImageFont.load_default(size=24)
+    draw.rounded_rectangle((24, 24, 1176, 776), radius=14, fill="#111827", outline="#334155", width=2)
+    draw.text((70, 175), "A fresh coding agent.", font=title, fill="#e5e7eb")
+    draw.text((70, 245), "Your existing project.", font=title, fill="#e5e7eb")
+    draw.text((70, 315), "One safe next action.", font=title, fill="#a7f3d0")
+    draw.text((72, 430), "No previous chat required.", font=body, fill="#93c5fd")
+    draw.text((72, 490), "Sigma Operator Stack", font=body, fill="#fbbf24")
     image.save(path, format="PNG", optimize=True)
 
 
@@ -59,18 +76,28 @@ def main() -> int:
         raise SystemExit("SOS_DEMO_FFMPEG_INVALID")
 
     lines = SOURCE.read_text(encoding="utf-8").splitlines()
-    boundaries = (2, 4, 6, 8, 10, 14, 18, len(lines))
+    boundaries = (4, 6, 8, 10, 13, 17, len(lines))
+    if not VOICEOVER_AUDIO.is_file() or VOICEOVER_AUDIO.stat().st_size >= MAX_MEDIA_BYTES:
+        raise SystemExit("SOS_DEMO_VOICEOVER_INVALID")
     with tempfile.TemporaryDirectory(prefix="sos-demo-media-") as temporary:
         frame_root = Path(temporary)
-        for index, boundary in enumerate(boundaries):
+        render_hook(frame_root / "frame-00.png")
+        for index, boundary in enumerate(boundaries, start=1):
             render_frame(lines[:boundary], frame_root / f"frame-{index:02d}.png")
+        concat = frame_root / "frames.txt"
+        entries: list[str] = []
+        for index, duration in enumerate(FRAME_DURATIONS):
+            entries.extend((f"file 'frame-{index:02d}.png'", f"duration {duration}"))
+        entries.append(f"file 'frame-{len(FRAME_DURATIONS) - 1:02d}.png'")
+        concat.write_text("\n".join(entries) + "\n", encoding="utf-8")
         common = [
-            "-framerate", "1/10", "-i", str(frame_root / "frame-%02d.png"),
-            "-an", "-map_metadata", "-1", "-metadata", "title=",
-            "-metadata", "comment=", "-vf", "fps=25,format=yuv420p",
+            "-f", "concat", "-safe", "0", "-i", str(concat),
+            "-i", str(VOICEOVER_AUDIO), "-map", "0:v:0", "-map", "1:a:0",
+            "-map_metadata", "-1", "-metadata", "title=", "-metadata", "comment=",
+            "-vf", "fps=25,format=yuv420p",
         ]
-        run(ffmpeg, [*common, "-c:v", "libx264", "-preset", "veryslow", "-crf", "31", "-movflags", "+faststart", str(ROOT / "recovery-demo.mp4")])
-        run(ffmpeg, [*common, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "39", "-threads", "1", str(ROOT / "recovery-demo.webm")])
+        run(ffmpeg, [*common, "-c:v", "libx264", "-preset", "veryslow", "-crf", "31", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(ROOT / "recovery-demo.mp4")])
+        run(ffmpeg, [*common, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "39", "-threads", "1", "-c:a", "libopus", "-b:a", "64k", str(ROOT / "recovery-demo.webm")])
 
     media = {}
     for name, container, codec in (
@@ -87,14 +114,23 @@ def main() -> int:
     manifest = {
         "candidate": receipt["candidate"],
         "contract": "sos_demo_media_manifest_v2",
-        "duration_seconds": len(boundaries) * 10,
+        "duration_seconds": sum(FRAME_DURATIONS),
         "fresh_codex_receipt_sha256": digest(CAPTURE_RECEIPT),
+        "fresh_codex_provider_calls": receipt["provider_calls"],
         "media": media,
-        "provider_calls": receipt["provider_calls"],
+        "provider_calls": receipt["provider_calls"] + 1,
         "synthetic_repository": True,
         "terminal_frame_sha256": digest(SOURCE),
         "transcript_sha256": digest(TRANSCRIPT),
         "tree": receipt["tree"],
+        "voiceover": {
+            "model": "gpt-4o-mini-tts-2025-12-15",
+            "provider_calls": 1,
+            "sha256": digest(VOICEOVER_AUDIO),
+            "size": VOICEOVER_AUDIO.stat().st_size,
+            "text_sha256": digest(VOICEOVER_TEXT),
+            "voice": "marin",
+        },
         "wheel_sha256": receipt["wheel_sha256"],
     }
     (ROOT / "media-manifest.json").write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")

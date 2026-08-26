@@ -1,0 +1,19 @@
+A new coding agent should not need your old chat to continue safely.
+
+SOS installs a local control plane inside an existing Git repository. It first
+discovers competing project authorities and asks you to choose. One preview,
+one confirmation, and the project is connected to Codex without replacing your
+existing instructions.
+
+SOS stays honest. Before tests run, preflight says not verified. Qualification
+is a separate, isolated step, bound to the exact source.
+
+Now a completely fresh Codex session asks SOS for project status, current work,
+boundaries, checks, and the next safe action. No previous conversation is
+required.
+
+When the source changes, SOS marks the old qualification stale instead of
+reusing a false green result. The agent is told to review and qualify before
+continuing.
+
+Local-first. Reversible. No hidden telemetry. This is Sigma Operator Stack.
