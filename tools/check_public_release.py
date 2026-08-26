@@ -42,6 +42,9 @@ REQUIRED_FILES = {
     "SUPPORT.md",
     "demo/README.md",
     "demo/capture.sh",
+    "demo/capture_fresh_codex.py",
+    "demo/fresh-codex-output.schema.json",
+    "demo/fresh-codex-receipt.json",
     "demo/media-manifest.json",
     "demo/recovery-demo.mp4",
     "demo/recovery-demo.webm",
@@ -50,6 +53,7 @@ REQUIRED_FILES = {
     "demo/recovery-terminal.png",
     "demo/terminal-frame.txt",
     "demo/transcript.md",
+    "demo/verify_fresh_codex_capture.py",
     "docs/architecture.md",
     "docs/comparison.md",
     "docs/alpha-feedback.md",
@@ -206,10 +210,10 @@ def _expected_demo_png() -> bytes:
 
 def _expected_terminal_png(repository: Path) -> bytes:
     lines = (repository / "demo" / "terminal-frame.txt").read_text(encoding="utf-8").splitlines()
-    image = Image.new("RGB", (1200, 650), "#090d18")
+    image = Image.new("RGB", (1200, 800), "#090d18")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=18)
-    draw.rounded_rectangle((24, 24, 1176, 626), radius=14, fill="#111827", outline="#334155", width=2)
+    draw.rounded_rectangle((24, 24, 1176, 776), radius=14, fill="#111827", outline="#334155", width=2)
     for index, line in enumerate(lines):
         color = "#a7f3d0" if line.startswith(("success", "passed_local")) else "#e5e7eb"
         if line.startswith(("owner_required", "not_verified", "stale")):
@@ -253,7 +257,7 @@ def _check_media_bytes(
         try:
             with Image.open(io.BytesIO(data)) as image:
                 image.load()
-                if image.format != "PNG" or image.mode != "RGB" or image.size != (1200, 650):
+                if image.format != "PNG" or image.mode != "RGB" or image.size != (1200, 800):
                     failures.append(f"SOS_PUBLIC_MEDIA_SHAPE_INVALID:{name}")
                 if image.info or len(image.getexif()) != 0:
                     failures.append(f"SOS_PUBLIC_MEDIA_METADATA_FORBIDDEN:{name}")
@@ -296,9 +300,11 @@ def inspect(repository: Path) -> dict[str, object]:
         value = json.loads((repository / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
         if (
             not isinstance(value, dict)
-            or value.get("contract") != "sos_demo_media_manifest_v1"
-            or value.get("synthetic") is not True
-            or value.get("provider_calls") != 0
+            or value.get("contract") != "sos_demo_media_manifest_v2"
+            or value.get("synthetic_repository") is not True
+            or value.get("provider_calls") != 1
+            or value.get("duration_seconds") not in range(60, 121)
+            or value.get("fresh_codex_receipt_sha256") != hashlib.sha256((repository / "demo" / "fresh-codex-receipt.json").read_bytes()).hexdigest()
             or value.get("terminal_frame_sha256") != hashlib.sha256((repository / "demo" / "terminal-frame.txt").read_bytes()).hexdigest()
             or value.get("transcript_sha256") != hashlib.sha256((repository / "demo" / "transcript.md").read_bytes()).hexdigest()
         ):
@@ -307,6 +313,28 @@ def inspect(repository: Path) -> dict[str, object]:
             media_manifest = value
     except (OSError, UnicodeError, json.JSONDecodeError):
         failures.append("SOS_PUBLIC_MEDIA_MANIFEST_INVALID")
+    try:
+        receipt = json.loads((repository / "demo" / "fresh-codex-receipt.json").read_text(encoding="utf-8"))
+        if (
+            receipt.get("contract") != "sos_fresh_codex_capture_receipt_v1"
+            or receipt.get("status") != "passed"
+            or receipt.get("provider_calls") != 1
+            or receipt.get("shell_calls") != 0
+            or receipt.get("mutation_tool_calls") != 0
+            or receipt.get("raw_prompt_stored") is not False
+            or receipt.get("raw_response_stored") is not False
+            or receipt.get("raw_tool_results_stored") is not False
+        ):
+            failures.append("SOS_PUBLIC_FRESH_CODEX_RECEIPT_INVALID")
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        failures.append("SOS_PUBLIC_FRESH_CODEX_RECEIPT_INVALID")
+        receipt = None
+    if media_manifest is not None and isinstance(receipt, dict):
+        if any(
+            media_manifest.get(field) != receipt.get(field)
+            for field in ("candidate", "tree", "wheel_sha256")
+        ):
+            failures.append("SOS_PUBLIC_MEDIA_RECEIPT_BINDING_INVALID")
     if len(files) > MAX_FILES:
         failures.append("SOS_PUBLIC_FILE_LIMIT_EXCEEDED")
     missing = sorted(REQUIRED_FILES.difference(files))

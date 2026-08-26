@@ -13,10 +13,10 @@ OUTPUT = ROOT / "recovery-terminal.png"
 
 def main() -> int:
     lines = SOURCE.read_text(encoding="utf-8").splitlines()
-    image = Image.new("RGB", (1200, 650), "#090d18")
+    image = Image.new("RGB", (1200, 800), "#090d18")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=18)
-    draw.rounded_rectangle((24, 24, 1176, 626), radius=14, fill="#111827", outline="#334155", width=2)
+    draw.rounded_rectangle((24, 24, 1176, 776), radius=14, fill="#111827", outline="#334155", width=2)
     for index, line in enumerate(lines):
         color = "#a7f3d0" if line.startswith(("success", "passed_local")) else "#e5e7eb"
         if line.startswith(("owner_required", "not_verified", "stale")):

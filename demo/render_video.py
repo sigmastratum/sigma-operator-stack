@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "terminal-frame.txt"
 TRANSCRIPT = ROOT / "transcript.md"
+CAPTURE_RECEIPT = ROOT / "fresh-codex-receipt.json"
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
 
 
@@ -24,10 +25,10 @@ def digest(path: Path) -> str:
 
 
 def render_frame(lines: list[str], path: Path) -> None:
-    image = Image.new("RGB", (1200, 650), "#090d18")
+    image = Image.new("RGB", (1200, 800), "#090d18")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=18)
-    draw.rounded_rectangle((24, 24, 1176, 626), radius=14, fill="#111827", outline="#334155", width=2)
+    draw.rounded_rectangle((24, 24, 1176, 776), radius=14, fill="#111827", outline="#334155", width=2)
     for index, line in enumerate(lines):
         color = "#a7f3d0" if line.startswith(("success", "passed_local")) else "#e5e7eb"
         if line.startswith(("owner_required", "not_verified", "stale")):
@@ -58,13 +59,13 @@ def main() -> int:
         raise SystemExit("SOS_DEMO_FFMPEG_INVALID")
 
     lines = SOURCE.read_text(encoding="utf-8").splitlines()
-    boundaries = (2, 4, 6, 8, 10, 12, len(lines))
+    boundaries = (2, 4, 6, 8, 10, 14, 18, len(lines))
     with tempfile.TemporaryDirectory(prefix="sos-demo-media-") as temporary:
         frame_root = Path(temporary)
         for index, boundary in enumerate(boundaries):
             render_frame(lines[:boundary], frame_root / f"frame-{index:02d}.png")
         common = [
-            "-framerate", "1/2", "-i", str(frame_root / "frame-%02d.png"),
+            "-framerate", "1/10", "-i", str(frame_root / "frame-%02d.png"),
             "-an", "-map_metadata", "-1", "-metadata", "title=",
             "-metadata", "comment=", "-vf", "fps=25,format=yuv420p",
         ]
@@ -80,13 +81,21 @@ def main() -> int:
         if path.stat().st_size >= MAX_MEDIA_BYTES:
             raise SystemExit("SOS_DEMO_MEDIA_LIMIT_EXCEEDED")
         media[name] = {"codec": codec, "container": container, "sha256": digest(path), "size": path.stat().st_size}
+    receipt = json.loads(CAPTURE_RECEIPT.read_text(encoding="utf-8"))
+    if receipt.get("contract") != "sos_fresh_codex_capture_receipt_v1" or receipt.get("status") != "passed":
+        raise SystemExit("SOS_DEMO_CAPTURE_RECEIPT_INVALID")
     manifest = {
-        "contract": "sos_demo_media_manifest_v1",
+        "candidate": receipt["candidate"],
+        "contract": "sos_demo_media_manifest_v2",
+        "duration_seconds": len(boundaries) * 10,
+        "fresh_codex_receipt_sha256": digest(CAPTURE_RECEIPT),
         "media": media,
-        "provider_calls": 0,
-        "synthetic": True,
+        "provider_calls": receipt["provider_calls"],
+        "synthetic_repository": True,
         "terminal_frame_sha256": digest(SOURCE),
         "transcript_sha256": digest(TRANSCRIPT),
+        "tree": receipt["tree"],
+        "wheel_sha256": receipt["wheel_sha256"],
     }
     (ROOT / "media-manifest.json").write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
     return 0

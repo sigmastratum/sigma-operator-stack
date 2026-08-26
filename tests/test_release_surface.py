@@ -136,9 +136,19 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         for name in ("recovery-loop.png", "recovery-terminal.png"):
             self.assertLess((root / "demo" / name).stat().st_size, 2 * 1024 * 1024)
         manifest = json.loads((root / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v1")
-        self.assertTrue(manifest["synthetic"])
-        self.assertEqual(manifest["provider_calls"], 0)
+        self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v2")
+        self.assertTrue(manifest["synthetic_repository"])
+        self.assertEqual(manifest["provider_calls"], 1)
+        self.assertGreaterEqual(manifest["duration_seconds"], 60)
+        self.assertLessEqual(manifest["duration_seconds"], 120)
+        receipt = json.loads((root / "demo" / "fresh-codex-receipt.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["contract"], "sos_fresh_codex_capture_receipt_v1")
+        self.assertEqual(receipt["status"], "passed")
+        self.assertEqual(receipt["provider_calls"], 1)
+        self.assertEqual(receipt["shell_calls"], 0)
+        self.assertEqual(receipt["mutation_tool_calls"], 0)
+        for field in ("candidate", "tree", "wheel_sha256"):
+            self.assertEqual(manifest[field], receipt[field])
         for name in ("recovery-demo.mp4", "recovery-demo.webm"):
             data = (root / "demo" / name).read_bytes()
             self.assertLess(len(data), 2 * 1024 * 1024)
