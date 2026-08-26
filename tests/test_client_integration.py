@@ -13,7 +13,6 @@ from unittest import mock
 from sos.client_integration import (
     ClientIntegrationError,
     LauncherBinding,
-    _canonical_python_executable,
     client_status,
     install_client,
     preview_client_install,
@@ -28,18 +27,6 @@ def git(root: Path, *args: str) -> None:
 
 
 class CodexClientIntegrationTests(unittest.TestCase):
-    def test_launcher_path_is_stable_across_python_symlink_spellings(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            prefix = Path(temporary)
-            binary = prefix / "bin"
-            binary.mkdir()
-            (binary / "python3").symlink_to(sys.executable)
-            (binary / "python").symlink_to("python3")
-            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.object(
-                sys, "executable", str(binary / "python")
-            ):
-                self.assertEqual(_canonical_python_executable(), binary / "python3")
-
     def make_project(self, config: bytes | None = None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
@@ -165,7 +152,7 @@ class CodexClientIntegrationTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), before)
 
     def test_concurrent_install_edits_are_rolled_back_without_overwrite(self) -> None:
-        from sos import client_integration as integration
+        from sos.platforms.linux import LinuxPlatformServices
 
         for strategy in ("in_place", "atomic_replace"):
             with self.subTest(strategy=strategy):
@@ -174,12 +161,12 @@ class CodexClientIntegrationTests(unittest.TestCase):
                 temporary, root = self.make_project(original)
                 self.addCleanup(temporary.cleanup)
                 target = root / ".codex" / "config.toml"
-                real_exchange = integration._rename_with_flags
+                real_exchange = LinuxPlatformServices._rename_exchange
                 injected = False
 
-                def concurrent_exchange(directory, source, destination, flags):
+                def concurrent_exchange(directory, source, destination):
                     nonlocal injected
-                    if not injected and flags == integration._RENAME_EXCHANGE:
+                    if not injected:
                         injected = True
                         if strategy == "in_place":
                             target.write_bytes(foreign)
@@ -187,18 +174,22 @@ class CodexClientIntegrationTests(unittest.TestCase):
                             competing = target.with_name("competing.toml")
                             competing.write_bytes(foreign)
                             os.replace(competing, target)
-                    return real_exchange(directory, source, destination, flags)
+                    return real_exchange(directory, source, destination)
 
-                with mock.patch.object(integration, "_rename_with_flags", side_effect=concurrent_exchange):
+                with mock.patch.object(
+                    LinuxPlatformServices,
+                    "_rename_exchange",
+                    side_effect=concurrent_exchange,
+                ):
                     result = self.install(root)
                 self.assertTrue(injected)
                 self.assertEqual(result.status, "stale")
                 self.assertEqual(result.reasons, ("SOS_CLIENT_CONFIG_DRIFT",))
                 self.assertEqual(target.read_bytes(), foreign)
-                self.assertFalse(any(target.parent.glob(".sos-config.*")))
+                self.assertFalse(any(target.parent.glob(".sos-platform.*")))
 
     def test_concurrent_remove_edits_are_preserved_without_overwrite_or_delete(self) -> None:
-        from sos import client_integration as integration
+        from sos.platforms.linux import LinuxPlatformServices
 
         for original in (None, b'model = "synthetic"\n'):
             with self.subTest(original_existed=original is not None):
@@ -207,23 +198,26 @@ class CodexClientIntegrationTests(unittest.TestCase):
                 self.assertEqual(self.install(root).status, "success")
                 target = root / ".codex" / "config.toml"
                 foreign = b"# concurrent remove edit\n"
-                real_rename = integration._rename_with_flags
+                method = "_rename_exchange" if original is not None else "_rename_noreplace"
+                real_rename = getattr(LinuxPlatformServices, method)
                 injected = False
 
-                def concurrent_rename(directory, source, destination, flags):
+                def concurrent_rename(*arguments):
                     nonlocal injected
                     if not injected:
                         injected = True
                         target.write_bytes(foreign)
-                    return real_rename(directory, source, destination, flags)
+                    return real_rename(*arguments)
 
-                with mock.patch.object(integration, "_rename_with_flags", side_effect=concurrent_rename):
+                with mock.patch.object(
+                    LinuxPlatformServices, method, side_effect=concurrent_rename
+                ):
                     result = self.remove(root)
                 self.assertTrue(injected)
                 self.assertEqual(result.status, "stale")
                 self.assertEqual(result.reasons, ("SOS_CLIENT_CONFIG_DRIFT",))
                 self.assertEqual(target.read_bytes(), foreign)
-                self.assertFalse(any(target.parent.glob(".sos-config.*")))
+                self.assertFalse(any(target.parent.glob(".sos-platform.*")))
 
     def test_existing_server_and_symlink_fail_closed(self) -> None:
         collision = b'[mcp_servers.sigma_operator_stack]\ncommand = "other"\n'

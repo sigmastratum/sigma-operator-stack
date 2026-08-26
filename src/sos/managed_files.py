@@ -7,13 +7,17 @@ import json
 import os
 import re
 import stat
-import fcntl
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .contracts import digest_value
+from .platform_services import (
+    FilePublicationOperation,
+    PlatformServiceError,
+    current_platform_services,
+)
 from .result import Status
 
 
@@ -311,50 +315,48 @@ def replay_managed_file_journal(root: Path, journal_id: str) -> dict[str, Any] |
     _validate_journal_id(journal_id)
     repository_id = _observed_repository_id(root)
     try:
-        journal = _open_control_directory(root, ("managed-files", "journals", journal_id), create=False)
-    except FileNotFoundError:
+        names = _list_directory(root, f"managed-files/journals/{journal_id}", _MAX_EVENTS)
+    except ManagedFileError as exc:
+        if exc.reason != "SOS_MANAGED_FILE_ARTIFACT_MISSING":
+            raise
         return None
-    try:
-        names = sorted(os.listdir(journal))
-        if len(names) > _MAX_EVENTS:
-            raise ManagedFileError("SOS_MANAGED_FILE_EVENT_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-        events: list[dict[str, Any]] = []
-        predecessor: str | None = None
-        active_plan: str | None = None
-        previous_state: str | None = None
-        for expected_ordinal, name in enumerate(names, start=1):
-            match = _EVENT_NAME.fullmatch(name)
-            if match is None or int(match.group(1)) != expected_ordinal:
-                raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
-            event = _read_json(journal, name, _MAX_EVENT_BYTES)
-            _validate_event(event)
-            if event["journal_id"] != journal_id or event["sequence_ordinal"] != expected_ordinal:
-                raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
-            if event["repository_id"] != repository_id:
-                raise ManagedFileError("SOS_MANAGED_FILE_REPOSITORY_MISMATCH", Status.STALE)
-            if event["predecessor_event"] != predecessor:
-                raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
-            expected_state = _TRANSITIONS[previous_state]
-            if event["state"] != expected_state:
-                raise ManagedFileError("SOS_MANAGED_FILE_STATE_TRANSITION_INVALID")
-            if event["state"] == "apply_prepared":
-                active_plan = event["plan_digest"]
-                observed_plan = _read_plan(root, active_plan)
-                if observed_plan["journal_id"] != journal_id or observed_plan["repository_id"] != repository_id:
-                    raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
-            elif event["plan_digest"] != active_plan:
-                raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
-            predecessor = event["event_digest"]
-            previous_state = event["state"]
-            events.append(event)
-        if not events:
+    if len(names) > _MAX_EVENTS:
+        raise ManagedFileError("SOS_MANAGED_FILE_EVENT_LIMIT_EXCEEDED", Status.UNSUPPORTED)
+    events: list[dict[str, Any]] = []
+    predecessor: str | None = None
+    active_plan: str | None = None
+    previous_state: str | None = None
+    for expected_ordinal, name in enumerate(names, start=1):
+        match = _EVENT_NAME.fullmatch(name)
+        if match is None or int(match.group(1)) != expected_ordinal:
             raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
-        plan = _read_plan(root, events[-1]["plan_digest"])
-        if plan["journal_id"] != journal_id:
+        event = _read_json(root, f"managed-files/journals/{journal_id}/{name}", _MAX_EVENT_BYTES)
+        _validate_event(event)
+        if event["journal_id"] != journal_id or event["sequence_ordinal"] != expected_ordinal:
+            raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
+        if event["repository_id"] != repository_id:
+            raise ManagedFileError("SOS_MANAGED_FILE_REPOSITORY_MISMATCH", Status.STALE)
+        if event["predecessor_event"] != predecessor:
+            raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
+        expected_state = _TRANSITIONS[previous_state]
+        if event["state"] != expected_state:
+            raise ManagedFileError("SOS_MANAGED_FILE_STATE_TRANSITION_INVALID")
+        if event["state"] == "apply_prepared":
+            active_plan = event["plan_digest"]
+            observed_plan = _read_plan(root, active_plan)
+            if observed_plan["journal_id"] != journal_id or observed_plan["repository_id"] != repository_id:
+                raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
+        elif event["plan_digest"] != active_plan:
             raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
-        return {"plan": plan, "latest": events[-1], "event_count": len(events)}
-    finally:
-        os.close(journal)
+        predecessor = event["event_digest"]
+        previous_state = event["state"]
+        events.append(event)
+    if not events:
+        raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_INVALID")
+    plan = _read_plan(root, events[-1]["plan_digest"])
+    if plan["journal_id"] != journal_id:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
+    return {"plan": plan, "latest": events[-1], "event_count": len(events)}
 
 
 def record_managed_file_state(root: Path, plan: dict[str, Any], state: str) -> dict[str, Any]:
@@ -398,18 +400,18 @@ def record_managed_file_state(root: Path, plan: dict[str, Any], state: str) -> d
     }
     event["event_digest"] = _sealed_digest(event, "event_digest")
     _validate_event(event)
-    journal = _open_control_directory(root, ("managed-files", "journals", journal_id), create=True)
+    name = f"{ordinal:08d}.json"
     try:
-        name = f"{ordinal:08d}.json"
-        try:
-            _write_immutable_json(journal, name, event, _MAX_EVENT_BYTES)
-        except FileExistsError:
-            observed = replay_managed_file_journal(root, journal_id)
-            if observed is not None and observed["latest"] == event:
-                return event
-            raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_CONFLICT", Status.BLOCKED)
-    finally:
-        os.close(journal)
+        _write_immutable_json(
+            root, f"managed-files/journals/{journal_id}/{name}", event, _MAX_EVENT_BYTES
+        )
+    except ManagedFileError as exc:
+        if exc.reason != "SOS_MANAGED_FILE_ARTIFACT_COLLISION":
+            raise
+        observed = replay_managed_file_journal(root, journal_id)
+        if observed is not None and observed["latest"] == event:
+            return event
+        raise ManagedFileError("SOS_MANAGED_FILE_JOURNAL_CONFLICT", Status.BLOCKED) from exc
     return event
 
 
@@ -483,36 +485,29 @@ def _bind_batch(
         if stored != batch:
             raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_MISMATCH", Status.STALE)
         return
-    descriptor = _open_control_directory(root, ("managed-files", "batches"), create=True)
     try:
-        try:
-            _write_immutable_json(
-                descriptor, batch["batch_id"] + ".json", batch, _MAX_BATCH_BYTES
-            )
-        except FileExistsError:
-            observed = _read_json(
-                descriptor, batch["batch_id"] + ".json", _MAX_BATCH_BYTES
-            )
-            _validate_batch(observed)
-            if observed != batch:
-                raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_MISMATCH", Status.STALE)
-    finally:
-        os.close(descriptor)
+        _write_immutable_json(
+            root, f"managed-files/batches/{batch['batch_id']}.json", batch, _MAX_BATCH_BYTES
+        )
+    except ManagedFileError as exc:
+        if exc.reason != "SOS_MANAGED_FILE_ARTIFACT_COLLISION":
+            raise
+        observed = _read_json(
+            root, f"managed-files/batches/{batch['batch_id']}.json", _MAX_BATCH_BYTES
+        )
+        _validate_batch(observed)
+        if observed != batch:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_MISMATCH", Status.STALE) from exc
 
 
 def _read_batch(root: Path, batch_id: str) -> dict[str, Any] | None:
     _validate_journal_id(batch_id)
     try:
-        descriptor = _open_control_directory(root, ("managed-files", "batches"), create=False)
-    except FileNotFoundError:
-        return None
-    try:
-        try:
-            value = _read_json(descriptor, batch_id + ".json", _MAX_BATCH_BYTES)
-        except FileNotFoundError:
+        value = _read_json(root, f"managed-files/batches/{batch_id}.json", _MAX_BATCH_BYTES)
+    except ManagedFileError as exc:
+        if exc.reason == "SOS_MANAGED_FILE_ARTIFACT_MISSING":
             return None
-    finally:
-        os.close(descriptor)
+        raise
     _validate_batch(value)
     if value["batch_id"] != batch_id:
         raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_MISMATCH", Status.STALE)
@@ -666,49 +661,43 @@ def _require_batch_repository(root: Path, batch: dict[str, Any]) -> None:
 @contextmanager
 def _managed_batch_lock(root: Path, batch_id: str) -> Iterator[None]:
     _validate_journal_id(batch_id)
-    descriptor = _open_control_directory(root, ("managed-files", "batch-locks"), create=True)
-    lock = -1
     try:
-        lock = os.open(
-            batch_id + ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=descriptor
-        )
-        observed = os.fstat(lock)
-        if not stat.S_ISREG(observed.st_mode):
-            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_LOCK_INVALID")
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
-    finally:
-        if lock >= 0:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_UN)
-            finally:
-                os.close(lock)
-        os.close(descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            with service.acquire_repository_lock(
+                repository,
+                None,
+                relative_lock_path=f".sigma/managed-files/batch-locks/{batch_id}.lock",
+            ):
+                yield
+    except PlatformServiceError as exc:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_LOCK_INVALID") from exc
 
 
 def _write_plan(root: Path, plan: dict[str, Any]) -> None:
-    descriptor = _open_control_directory(root, ("managed-files", "plans"), create=True)
+    name = plan["plan_digest"].removeprefix("sha256:") + ".json"
     try:
-        name = plan["plan_digest"].removeprefix("sha256:") + ".json"
-        try:
-            _write_immutable_json(descriptor, name, plan, _MAX_PLAN_BYTES)
-        except FileExistsError:
-            if _read_json(descriptor, name, _MAX_PLAN_BYTES) != plan:
-                raise ManagedFileError("SOS_MANAGED_FILE_PLAN_COLLISION")
-    finally:
-        os.close(descriptor)
+        _write_immutable_json(root, f"managed-files/plans/{name}", plan, _MAX_PLAN_BYTES)
+    except ManagedFileError as exc:
+        if exc.reason != "SOS_MANAGED_FILE_ARTIFACT_COLLISION":
+            raise
+        if _read_json(root, f"managed-files/plans/{name}", _MAX_PLAN_BYTES) != plan:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_COLLISION") from exc
 
 
 def _read_plan(root: Path, digest: str) -> dict[str, Any]:
     if not _DIGEST.fullmatch(digest):
         raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
-    descriptor = _open_control_directory(root, ("managed-files", "plans"), create=False)
     try:
-        plan = _read_json(descriptor, digest.removeprefix("sha256:") + ".json", _MAX_PLAN_BYTES)
-    except FileNotFoundError as exc:
-        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISSING") from exc
-    finally:
-        os.close(descriptor)
+        plan = _read_json(
+            root,
+            "managed-files/plans/" + digest.removeprefix("sha256:") + ".json",
+            _MAX_PLAN_BYTES,
+        )
+    except ManagedFileError as exc:
+        if exc.reason == "SOS_MANAGED_FILE_ARTIFACT_MISSING":
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISSING") from exc
+        raise
     _validate_plan(plan)
     if plan["plan_digest"] != digest:
         raise ManagedFileError("SOS_MANAGED_FILE_PLAN_MISMATCH", Status.STALE)
@@ -930,71 +919,35 @@ def _observed_repository_id(root: Path) -> str:
     return repository_id
 
 
-def _open_control_directory(root: Path, parts: tuple[str, ...], *, create: bool) -> int:
-    descriptor = os.open(root / ".sigma", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        for part in parts:
-            if create:
-                try:
-                    os.mkdir(part, mode=0o700, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
-            os.close(descriptor)
-            descriptor = child
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _write_immutable_json(directory: int, name: str, value: dict[str, Any], limit: int) -> None:
+def _write_immutable_json(root: Path, relative: str, value: dict[str, Any], limit: int) -> None:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     if len(payload) > limit:
         raise ManagedFileError("SOS_MANAGED_FILE_OUTPUT_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-    temporary = f".sos-managed.{os.getpid()}.{os.urandom(8).hex()}"
     try:
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=directory,
-        )
-        try:
-            offset = 0
-            while offset < len(payload):
-                written = os.write(descriptor, payload[offset:])
-                if written <= 0:
-                    raise ManagedFileError("SOS_MANAGED_FILE_WRITE_FAILED", Status.BLOCKED)
-                offset += written
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.link(temporary, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
-        os.fsync(directory)
-    finally:
-        try:
-            os.unlink(temporary, dir_fd=directory)
-        except FileNotFoundError:
-            pass
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            service.publish_file(
+                FilePublicationOperation(
+                    repository, ".sigma/" + relative, payload, None, False, 0o600
+                )
+            )
+    except PlatformServiceError as exc:
+        if exc.kind in {"collision", "identity_changed"}:
+            raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_COLLISION", Status.BLOCKED) from exc
+        raise ManagedFileError("SOS_MANAGED_FILE_WRITE_FAILED", Status.BLOCKED) from exc
 
 
-def _read_json(directory: int, name: str, limit: int) -> dict[str, Any]:
-    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+def _read_json(root: Path, relative: str, limit: int) -> dict[str, Any]:
     try:
-        observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode) or observed.st_size > limit:
-            raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_INVALID")
-        payload = bytearray()
-        while len(payload) <= limit:
-            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - len(payload)))
-            if not chunk:
-                break
-            payload.extend(chunk)
-        if len(payload) > limit:
-            raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_INVALID")
-    finally:
-        os.close(descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            payload = service.read_regular_file_bounded(
+                repository, ".sigma/" + relative, limit
+            ).payload
+    except PlatformServiceError as exc:
+        if exc.kind == "not_found":
+            raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_MISSING") from exc
+        raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_INVALID") from exc
     try:
         value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1002,3 +955,19 @@ def _read_json(directory: int, name: str, limit: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_INVALID")
     return value
+
+
+def _list_directory(root: Path, relative: str, limit: int) -> list[str]:
+    try:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            observed = service.enumerate_directory_bounded(
+                repository, ".sigma/" + relative, limit
+            )
+    except PlatformServiceError as exc:
+        if exc.kind == "not_found":
+            raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_MISSING") from exc
+        if exc.kind == "directory_limit_exceeded":
+            raise ManagedFileError("SOS_MANAGED_FILE_EVENT_LIMIT_EXCEEDED", Status.UNSUPPORTED) from exc
+        raise ManagedFileError("SOS_MANAGED_FILE_ARTIFACT_INVALID") from exc
+    return sorted(entry.name for entry in observed.entries)

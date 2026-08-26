@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import stat
 import subprocess
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from .platform_services import PlatformServiceError, current_platform_services
 
 
 MAX_PATHS = 10_000
@@ -21,7 +22,6 @@ MAX_SUBMODULES = 256
 _COMMAND_TIMEOUT_SECONDS = 10
 _MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024
 _SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-_GIT_EXECUTABLE = shutil.which("git", path=_SAFE_PATH)
 _STAGING_ROOT = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}(?:/|$)")
 _PUBLIC_ENV_TEMPLATE_BASENAMES = frozenset(
     {".env.dist", ".env.example", ".env.sample", ".env.template"}
@@ -154,7 +154,7 @@ def observe_application(
         }
         entries: list[_Entry] = []
         protected: dict[str, dict[str, object]] = {}
-        signatures: dict[tuple[str, int], tuple[int, ...] | None] = {}
+        signatures: dict[tuple[str, int], str | None] = {}
 
         submodule_paths = {
             change.path for change in staged
@@ -356,12 +356,14 @@ def _ignored_paths(root: Path, paths: tuple[str, ...]) -> frozenset[str]:
 
 def _projected_git_mode(root: Path, path: str) -> int:
     try:
-        observed = (root / path).lstat()
-    except FileNotFoundError:
+        kind, _identity, mode = _object_kind_identity_mode(root, path)
+    except _ObservationFailure:
         return 0o100644
-    if not stat.S_ISREG(observed.st_mode):
+    if kind == "absent":
+        return 0o100644
+    if kind != "regular":
         raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED")
-    return _git_mode(observed.st_mode)
+    return _git_mode_from_kind(kind, mode)
 
 
 def _overlay_entry(root: Path, path: str, category: int, payload: bytes) -> tuple[_Entry, int]:
@@ -417,8 +419,10 @@ def _git(
     input_bytes: bytes | None = None,
     accepted_returncodes: tuple[int, ...] = (0,),
 ) -> bytes:
-    if _GIT_EXECUTABLE is None:
-        raise _ObservationFailure("SOS_DIRTY_GIT_INSPECTION_FAILED")
+    try:
+        executable = current_platform_services().observe_launcher("git").executable
+    except PlatformServiceError as exc:
+        raise _ObservationFailure("SOS_DIRTY_GIT_INSPECTION_FAILED") from exc
     environment = {
         "PATH": _SAFE_PATH,
         "LANG": "C.UTF-8",
@@ -432,7 +436,7 @@ def _git(
     try:
         completed = subprocess.run(
             [
-                _GIT_EXECUTABLE,
+                os.fspath(executable),
                 "-c",
                 "core.fsmonitor=false",
                 "-c",
@@ -564,47 +568,43 @@ def _validate_path(path: str) -> None:
         )
 
 
-def _filesystem_entry(root: Path, path: str, category: int) -> tuple[_Entry, int, tuple[int, int, int, int, int]]:
-    parent_fd, name = _open_parent(root, path)
+def _filesystem_entry(root: Path, path: str, category: int) -> tuple[_Entry, int, str]:
+    service = current_platform_services()
     try:
-        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-        mode = _git_mode(before.st_mode)
-        signature = _signature(before)
-        if stat.S_ISLNK(before.st_mode):
-            target = os.readlink(name, dir_fd=parent_fd)
-            target_bytes = os.fsencode(target)
-            if len(target_bytes) > MAX_FILE_BYTES:
-                raise _ObservationFailure("SOS_DIRTY_FILE_LIMIT_EXCEEDED")
-            after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-            if _signature(after) != signature:
-                raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
-            return _Entry(path, category, mode, 0, _SYMLINK_TARGET_SHA256, hashlib.sha256(target_bytes).digest()), len(target_bytes), signature
-        if not stat.S_ISREG(before.st_mode):
-            raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED")
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(name, flags, dir_fd=parent_fd)
-        try:
-            opened = os.fstat(descriptor)
-            if _signature(opened) != signature:
-                raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
-            digest = hashlib.sha256()
-            total = 0
-            while True:
-                chunk = os.read(descriptor, min(1024 * 1024, MAX_FILE_BYTES + 1 - total))
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_FILE_BYTES:
+        with service.open_repository(root) as repository:
+            observed = service.observe_object(repository, path)
+            signature = observed.identity_digest
+            mode = _git_mode_from_kind(observed.kind, observed.mode)
+            if observed.kind == "symlink":
+                if observed.byte_count > MAX_FILE_BYTES or observed.content_digest is None:
                     raise _ObservationFailure("SOS_DIRTY_FILE_LIMIT_EXCEEDED")
-                digest.update(chunk)
-            after = os.fstat(descriptor)
-            if _signature(after) != signature:
+                return _Entry(
+                    path,
+                    category,
+                    mode,
+                    0,
+                    _SYMLINK_TARGET_SHA256,
+                    bytes.fromhex(observed.content_digest.removeprefix("sha256:")),
+                ), observed.byte_count, signature
+            if observed.kind != "regular":
+                raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED")
+            read = service.read_regular_file_bounded(repository, path, MAX_FILE_BYTES)
+            if read.observation.identity_digest != signature:
                 raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
-        finally:
-            os.close(descriptor)
-        return _Entry(path, category, mode, 0, _FILE_SHA256, digest.digest()), total, signature
-    finally:
-        os.close(parent_fd)
+            return _Entry(
+                path,
+                category,
+                mode,
+                0,
+                _FILE_SHA256,
+                bytes.fromhex(read.content_digest.removeprefix("sha256:")),
+            ), len(read.payload), signature
+    except PlatformServiceError as exc:
+        if exc.kind == "file_limit_exceeded":
+            raise _ObservationFailure("SOS_DIRTY_FILE_LIMIT_EXCEEDED")
+        if exc.kind == "identity_changed":
+            raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE") from exc
+        raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED") from exc
 
 
 def _protected_entry(
@@ -613,14 +613,15 @@ def _protected_entry(
     category: int,
     mode: int,
     sensitive_class: str,
-) -> tuple[_Entry, dict[str, object], tuple[int]]:
-    parent_fd, name = _open_parent(root, path)
+) -> tuple[_Entry, dict[str, object], str]:
+    service = current_platform_services()
     try:
-        observed = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    finally:
-        os.close(parent_fd)
-    filesystem_type, type_code = _filesystem_type(observed.st_mode)
-    effective_mode = mode or _git_mode(observed.st_mode)
+        with service.open_repository(root) as repository:
+            observed = service.observe_object(repository, path)
+    except PlatformServiceError as exc:
+        raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED") from exc
+    filesystem_type, type_code = _filesystem_type_from_kind(observed.kind)
+    effective_mode = mode or _git_mode_from_kind(observed.kind, observed.mode)
     identity = _text(path) + bytes((type_code,)) + hashlib.sha256(sensitive_class.encode("utf-8")).digest()
     presence = {
         "path_projection": path,
@@ -629,7 +630,7 @@ def _protected_entry(
         "content_opened": False,
         "content_hashed": False,
     }
-    return _Entry(path, category, effective_mode, 0, _SENSITIVE_PRESENCE, identity), presence, (_type_bits(observed.st_mode),)
+    return _Entry(path, category, effective_mode, 0, _SENSITIVE_PRESENCE, identity), presence, "type:" + observed.kind
 
 
 def _submodule_entry(root: Path, path: str, staged: tuple[_RawChange, ...] | list[_RawChange]) -> _Entry:
@@ -641,7 +642,7 @@ def _submodule_entry(root: Path, path: str, staged: tuple[_RawChange, ...] | lis
             None,
         )
     module = root / path
-    initialized = module.is_dir() and (module / ".git").exists()
+    initialized = _object_kind(root, path) == "directory" and _object_kind(root, f"{path}/.git") != "absent"
     worktree_head: str | None = None
     tracked_dirty = False
     untracked_dirty = False
@@ -665,43 +666,36 @@ def _submodule_entry(root: Path, path: str, staged: tuple[_RawChange, ...] | lis
 
 def _verify_signatures(
     root: Path,
-    signatures: dict[tuple[str, int], tuple[int, ...] | None],
+    signatures: dict[tuple[str, int], str | None],
 ) -> None:
     for path, _category in signatures:
-        parent_fd, name = _open_parent(root, path)
         try:
-            try:
-                observed = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-                expected = signatures[(path, _category)]
-                current = (_type_bits(observed.st_mode),) if expected is not None and len(expected) == 1 else _signature(observed)
-            except FileNotFoundError:
-                current = None
-        finally:
-            os.close(parent_fd)
+            observed_kind, identity = _object_kind_and_identity(root, path)
+            expected = signatures[(path, _category)]
+            current = "type:" + observed_kind if expected is not None and expected.startswith("type:") else identity
+        except _ObservationFailure:
+            current = None
         if current != signatures[(path, _category)]:
             raise _ObservationFailure("SOS_DIRTY_SNAPSHOT_RACE")
 
 
-def _open_parent(root: Path, path: str) -> tuple[int, str]:
-    parts = path.split("/")
-    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+def _object_kind(root: Path, path: str) -> str:
+    return _object_kind_identity_mode(root, path)[0]
+
+
+def _object_kind_and_identity(root: Path, path: str) -> tuple[str, str]:
+    kind, identity, _mode = _object_kind_identity_mode(root, path)
+    return kind, identity
+
+
+def _object_kind_identity_mode(root: Path, path: str) -> tuple[str, str, int]:
+    service = current_platform_services()
     try:
-        for component in parts[:-1]:
-            next_descriptor = os.open(
-                component,
-                os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=descriptor,
-            )
-            os.close(descriptor)
-            descriptor = next_descriptor
-        return descriptor, parts[-1]
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns)
+        with service.open_repository(root) as repository:
+            observed = service.observe_object(repository, path)
+            return observed.kind, observed.identity_digest, observed.mode
+    except PlatformServiceError as exc:
+        raise _ObservationFailure("SOS_DIRTY_FILESYSTEM_TYPE_UNSUPPORTED") from exc
 
 
 def _type_bits(mode: int) -> int:
@@ -718,6 +712,16 @@ def _git_mode(mode: int) -> int:
     return 0
 
 
+def _git_mode_from_kind(kind: str, mode: int) -> int:
+    if kind == "regular":
+        return 0o100755 if mode & stat.S_IXUSR else 0o100644
+    if kind == "symlink":
+        return 0o120000
+    if kind == "directory":
+        return 0o040000
+    return 0
+
+
 def _filesystem_type(mode: int) -> tuple[str, int]:
     if stat.S_ISREG(mode):
         return "regular", 0x01
@@ -726,6 +730,14 @@ def _filesystem_type(mode: int) -> tuple[str, int]:
     if stat.S_ISLNK(mode):
         return "symlink", 0x03
     return "other", 0x04
+
+
+def _filesystem_type_from_kind(kind: str) -> tuple[str, int]:
+    return {
+        "regular": ("regular", 0x01),
+        "directory": ("directory", 0x02),
+        "symlink": ("symlink", 0x03),
+    }.get(kind, ("other", 0x04))
 
 
 def _sensitive_class(path: str) -> str | None:

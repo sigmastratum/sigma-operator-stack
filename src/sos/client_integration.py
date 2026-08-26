@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import ctypes
-import errno
 import hashlib
 import json
 import os
 import re
 import stat
-import sys
 import tomllib
 from dataclasses import dataclass
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +28,11 @@ from .managed_files import (
     rollback_managed_file_batch,
     render_applied_managed_file_batch_files,
 )
+from .platform_services import (
+    FilePublicationOperation,
+    PlatformServiceError,
+    current_platform_services,
+)
 from .repository import RepositoryError, discover_repository_root
 from .result import Status, TerminalResult
 from .workspace import WorkspaceError, project_workspace_application, workspace_status
@@ -44,7 +45,6 @@ _TARGET = ".codex/config.toml"
 _MANIFEST = "integrations/codex-mcp.json"
 _SERVER = "sigma_operator_stack"
 _MAX_CONFIG_BYTES = 1024 * 1024
-_MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _BEGIN = "# >>> SOS managed Codex MCP (sos_codex_mcp_v1)"
 _END = "# <<< SOS managed Codex MCP (sos_codex_mcp_v1)"
 _TOOLS = (
@@ -78,8 +78,6 @@ _INSTRUCTION_BLOCK = (
     + _INSTRUCTION_END
     + "\n"
 ).encode("utf-8")
-_RENAME_NOREPLACE = 1
-_RENAME_EXCHANGE = 2
 
 
 class ClientIntegrationError(RuntimeError):
@@ -142,8 +140,13 @@ def prepare_codex_bootstrap_setup(
 ) -> CodexBootstrapSetup:
     """Build the exact two-target setup before a canonical `.sigma` exists."""
     root = discover_repository_root(path)
-    if (root / ".sigma").exists() or (root / ".sigma").is_symlink():
-        raise ClientIntegrationError("SOS_CONTROL_PLANE_COLLISION", Status.BLOCKED)
+    try:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            if service.observe_object(repository, ".sigma").kind != "absent":
+                raise ClientIntegrationError("SOS_CONTROL_PLANE_COLLISION", Status.BLOCKED)
+    except PlatformServiceError as exc:
+        raise ClientIntegrationError("SOS_CONTROL_PLANE_COLLISION", Status.BLOCKED) from exc
     binding = launcher or observe_installed_launcher()
     prepared = _prepare_setup(root, repository_id, binding)
     targets = _prepared_setup_target_bytes(root, binding, prepared)
@@ -228,45 +231,23 @@ def render_codex_bootstrap_control_files(setup: CodexBootstrapSetup) -> dict[str
 
 def observe_installed_launcher() -> LauncherBinding:
     try:
-        distribution = metadata.distribution("sigma-operator-stack")
-    except metadata.PackageNotFoundError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_PACKAGE_NOT_INSTALLED", Status.UNSUPPORTED) from exc
-    if distribution.version != __version__:
+        observed = current_platform_services().observe_launcher(_CLIENT)
+    except PlatformServiceError as exc:
+        reason = (
+            "SOS_CLIENT_PACKAGE_NOT_INSTALLED"
+            if exc.kind == "package_not_installed"
+            else "SOS_CLIENT_LAUNCHER_INVALID"
+        )
+        raise ClientIntegrationError(reason, Status.UNSUPPORTED) from exc
+    if observed.package_version != __version__:
         raise ClientIntegrationError("SOS_CLIENT_PACKAGE_VERSION_MISMATCH", Status.STALE)
-    direct_url = distribution.read_text("direct_url.json")
-    if direct_url:
-        try:
-            direct = json.loads(direct_url)
-        except json.JSONDecodeError as exc:
-            raise ClientIntegrationError("SOS_CLIENT_PACKAGE_IDENTITY_INVALID") from exc
-        if isinstance(direct, dict) and isinstance(direct.get("dir_info"), dict):
-            if direct["dir_info"].get("editable") is True:
-                raise ClientIntegrationError("SOS_CLIENT_EDITABLE_PACKAGE_UNSUPPORTED", Status.UNSUPPORTED)
-    try:
-        executable = _canonical_python_executable()
-        if not executable.is_absolute():
-            raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_INVALID", Status.UNSUPPORTED)
-        observed = executable.stat()
-        if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_EXECUTABLE_BYTES:
-            raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_INVALID", Status.UNSUPPORTED)
-        executable_digest = _sha256_file(executable, _MAX_EXECUTABLE_BYTES)
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_INVALID", Status.UNSUPPORTED) from exc
-    return LauncherBinding(os.fspath(executable), distribution.version, executable_digest)
-
-
-def _canonical_python_executable() -> Path:
-    """Choose one stable path spelling for the active Linux tool environment."""
-    current = Path(sys.executable)
-    tool_bin = Path(sys.prefix) / "bin"
-    for name in ("python3", "python"):
-        candidate = tool_bin / name
-        try:
-            if candidate.is_absolute() and candidate.samefile(current):
-                return candidate
-        except OSError:
-            continue
-    return current
+    if observed.editable_install:
+        raise ClientIntegrationError("SOS_CLIENT_EDITABLE_PACKAGE_UNSUPPORTED", Status.UNSUPPORTED)
+    return LauncherBinding(
+        os.fspath(observed.executable),
+        observed.package_version,
+        observed.executable_digest,
+    )
 
 
 def preview_client_install(
@@ -1128,14 +1109,15 @@ def _read_setup_target(root: Path, target: str) -> tuple[bytes, bool]:
 def _read_setup_target_mode(root: Path, target: str, existed: bool, default: int) -> int:
     if not existed:
         return default
-    descriptor = _open_root(root)
     try:
-        observed = os.stat(target, dir_fd=descriptor, follow_symlinks=False)
-    except OSError as exc:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            observed = service.observe_object(repository, target)
+        if observed.kind != "regular":
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+    except PlatformServiceError as exc:
         raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE) from exc
-    finally:
-        os.close(descriptor)
-    return stat.S_IMODE(observed.st_mode)
+    return observed.mode
 
 
 def _verify_setup(
@@ -1291,25 +1273,9 @@ def _with_setup_state(manifest: dict[str, Any], state: str) -> dict[str, Any]:
 
 
 def _read_setup_manifest(root: Path) -> dict[str, Any] | None:
-    try:
-        descriptor = _open_control_directory(root, ("integrations",), create=False)
-    except ClientIntegrationError as exc:
-        if exc.reason == "SOS_CLIENT_MANIFEST_MISSING":
-            return None
-        raise
-    try:
-        try:
-            file_descriptor = os.open("codex-first.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-        except FileNotFoundError:
-            return None
-        try:
-            payload = _read_bounded(file_descriptor, _MAX_CONFIG_BYTES)
-        finally:
-            os.close(file_descriptor)
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID") from exc
-    finally:
-        os.close(descriptor)
+    payload = _read_optional_platform_file(root, ".sigma/" + _SETUP_MANIFEST)
+    if payload is None:
+        return None
     try:
         value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1320,28 +1286,10 @@ def _read_setup_manifest(root: Path) -> dict[str, Any] | None:
 
 def _write_setup_manifest(root: Path, manifest: dict[str, Any]) -> None:
     _validate_setup_manifest(manifest)
-    descriptor = _open_control_directory(root, ("integrations",), create=True)
-    temporary = f".codex-first.{os.getpid()}.{os.urandom(8).hex()}"
-    try:
-        file_descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=descriptor
-        )
-        try:
-            payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-            if len(payload) > _MAX_CONFIG_BYTES:
-                raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
-            _write_all(file_descriptor, payload)
-            os.fsync(file_descriptor)
-        finally:
-            os.close(file_descriptor)
-        os.replace(temporary, "codex-first.json", src_dir_fd=descriptor, dst_dir_fd=descriptor)
-        os.fsync(descriptor)
-    finally:
-        try:
-            os.unlink(temporary, dir_fd=descriptor)
-        except FileNotFoundError:
-            pass
-        os.close(descriptor)
+    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    if len(payload) > _MAX_CONFIG_BYTES:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_MANIFEST_INVALID")
+    _publish_control_file(root, _SETUP_MANIFEST, payload)
 
 
 def _validate_setup_manifest(value: object) -> None:
@@ -1404,25 +1352,9 @@ def _setup_manifest_digest(value: dict[str, Any]) -> str:
 
 
 def _read_manifest(root: Path) -> dict[str, Any] | None:
-    try:
-        descriptor = _open_control_directory(root, ("integrations",), create=False)
-    except ClientIntegrationError as exc:
-        if exc.reason == "SOS_CLIENT_MANIFEST_MISSING":
-            return None
-        raise
-    try:
-        try:
-            file_descriptor = os.open("codex-mcp.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-        except FileNotFoundError:
-            return None
-        try:
-            payload = _read_bounded(file_descriptor, _MAX_CONFIG_BYTES)
-        finally:
-            os.close(file_descriptor)
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID") from exc
-    finally:
-        os.close(descriptor)
+    payload = _read_optional_platform_file(root, ".sigma/" + _MANIFEST)
+    if payload is None:
+        return None
     if len(payload) > _MAX_CONFIG_BYTES:
         raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
     try:
@@ -1552,165 +1484,63 @@ def _verify_removable(root: Path, manifest: dict[str, Any]) -> None:
 
 
 def _read_target(root: Path) -> tuple[bytes, bool, bool]:
-    root_descriptor = _open_root(root)
     try:
-        try:
-            parent = os.open(".codex", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor)
-        except FileNotFoundError:
-            return b"", False, False
-        except OSError as exc:
-            raise ClientIntegrationError("SOS_CLIENT_CONFIG_PARENT_INVALID") from exc
-        try:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            parent = service.observe_object(repository, ".codex")
+            if parent.kind == "absent":
+                return b"", False, False
+            if parent.kind != "directory":
+                raise ClientIntegrationError("SOS_CLIENT_CONFIG_PARENT_INVALID")
             try:
-                descriptor = os.open("config.toml", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
-            except FileNotFoundError:
-                return b"", False, True
-            except OSError as exc:
-                raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
-            try:
-                observed = os.fstat(descriptor)
-                if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_CONFIG_BYTES:
-                    raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID")
-                payload = _read_bounded(descriptor, _MAX_CONFIG_BYTES)
-            finally:
-                os.close(descriptor)
-            if len(payload) > _MAX_CONFIG_BYTES:
-                raise ClientIntegrationError("SOS_CLIENT_CONFIG_LIMIT_EXCEEDED", Status.UNSUPPORTED)
+                payload = service.read_regular_file_bounded(
+                    repository, _TARGET, _MAX_CONFIG_BYTES
+                ).payload
+            except PlatformServiceError as exc:
+                if exc.kind == "not_found":
+                    return b"", False, True
+                raise
             return payload, True, True
-        finally:
-            os.close(parent)
-    finally:
-        os.close(root_descriptor)
+    except PlatformServiceError as exc:
+        raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
 
 
 def _read_instruction_target(root: Path) -> tuple[bytes, bool]:
-    descriptor = _open_root(root)
     try:
-        try:
-            file_descriptor = os.open(_INSTRUCTION_TARGET, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-        except FileNotFoundError:
-            return b"", False
-        except OSError as exc:
-            raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_INVALID") from exc
-        try:
-            observed = os.fstat(file_descriptor)
-            if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_CONFIG_BYTES:
-                raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_INVALID")
-            return _read_bounded(file_descriptor, _MAX_CONFIG_BYTES), True
-        finally:
-            os.close(file_descriptor)
-    finally:
-        os.close(descriptor)
+        payload = _read_optional_platform_file(root, _INSTRUCTION_TARGET)
+        return (b"", False) if payload is None else (payload, True)
+    except ClientIntegrationError as exc:
+        raise ClientIntegrationError("SOS_CODEX_SETUP_INSTRUCTION_INVALID") from exc
 
 
 def _replace_instruction_target(
     root: Path, payload: bytes, *, expected: bytes, expected_existed: bool, mode: int
 ) -> None:
-    descriptor = _open_root(root)
-    temporary = f".sos-agents.{os.getpid()}.{os.urandom(8).hex()}"
-    try:
-        current = _read_relative_file(descriptor, _INSTRUCTION_TARGET)
-        if (current is not None) != expected_existed or (current or b"") != expected:
-            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
-        temporary_descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=descriptor
-        )
-        try:
-            _write_all(temporary_descriptor, payload)
-            os.fsync(temporary_descriptor)
-            replacement_identity = _file_identity(os.fstat(temporary_descriptor))
-        finally:
-            os.close(temporary_descriptor)
-        preserve_temporary = False
-        try:
-            if expected_existed:
-                outcome = _exchange_if_expected(
-                    descriptor,
-                    temporary,
-                    _INSTRUCTION_TARGET,
-                    expected=expected,
-                    replacement=payload,
-                    replacement_identity=replacement_identity,
-                )
-                if outcome == "rolled_back":
-                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
-                if outcome == "recovery_required":
-                    preserve_temporary = True
-                    raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
-            else:
-                try:
-                    os.link(
-                        temporary,
-                        _INSTRUCTION_TARGET,
-                        src_dir_fd=descriptor,
-                        dst_dir_fd=descriptor,
-                        follow_symlinks=False,
-                    )
-                except FileExistsError as exc:
-                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE) from exc
-                os.unlink(temporary, dir_fd=descriptor)
-            os.fsync(descriptor)
-        finally:
-            if not preserve_temporary:
-                try:
-                    os.unlink(temporary, dir_fd=descriptor)
-                except FileNotFoundError:
-                    pass
-    finally:
-        os.close(descriptor)
+    _publish_managed_target(
+        root,
+        _INSTRUCTION_TARGET,
+        payload,
+        expected=expected,
+        expected_existed=expected_existed,
+        mode=mode,
+        drift_reason="SOS_CODEX_SETUP_TARGET_DRIFT",
+        recovery_reason="SOS_CODEX_SETUP_RECOVERY_REQUIRED",
+    )
 
 
 def _restore_instruction_target(
     root: Path, original: bytes, *, original_existed: bool, expected: bytes, mode: int
 ) -> None:
-    descriptor = _open_root(root)
-    temporary = f".sos-agents.{os.getpid()}.{os.urandom(8).hex()}"
-    try:
-        current = _read_relative_file(descriptor, _INSTRUCTION_TARGET)
-        if current != expected:
-            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
-        if original_existed:
-            temporary_descriptor = os.open(
-                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=descriptor
-            )
-            try:
-                _write_all(temporary_descriptor, original)
-                os.fsync(temporary_descriptor)
-                replacement_identity = _file_identity(os.fstat(temporary_descriptor))
-            finally:
-                os.close(temporary_descriptor)
-            preserve_temporary = False
-            try:
-                outcome = _exchange_if_expected(
-                    descriptor,
-                    temporary,
-                    _INSTRUCTION_TARGET,
-                    expected=expected,
-                    replacement=original,
-                    replacement_identity=replacement_identity,
-                )
-                if outcome == "rolled_back":
-                    raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
-                if outcome == "recovery_required":
-                    preserve_temporary = True
-                    raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
-            finally:
-                if not preserve_temporary:
-                    try:
-                        os.unlink(temporary, dir_fd=descriptor)
-                    except FileNotFoundError:
-                        pass
-        else:
-            outcome = _move_away_if_expected(
-                descriptor, _INSTRUCTION_TARGET, temporary, expected=expected
-            )
-            if outcome == "rolled_back":
-                raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
-            if outcome == "recovery_required":
-                raise ClientIntegrationError("SOS_CODEX_SETUP_RECOVERY_REQUIRED", Status.BLOCKED)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    _publish_managed_target(
+        root,
+        _INSTRUCTION_TARGET,
+        original if original_existed else None,
+        expected=expected,
+        expected_existed=True,
+        mode=mode,
+        drift_reason="SOS_CODEX_SETUP_TARGET_DRIFT",
+        recovery_reason="SOS_CODEX_SETUP_RECOVERY_REQUIRED",
+    )
 
 
 def _replace_target(
@@ -1721,69 +1551,20 @@ def _replace_target(
     expected_existed: bool,
     mode: int = 0o600,
 ) -> None:
-    root_descriptor = _open_root(root)
-    parent_created = False
     try:
-        try:
-            os.mkdir(".codex", mode=0o700, dir_fd=root_descriptor)
-            parent_created = True
-        except FileExistsError:
-            pass
-        try:
-            parent = os.open(".codex", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor)
-        except OSError as exc:
-            raise ClientIntegrationError("SOS_CLIENT_CONFIG_PARENT_INVALID") from exc
-        try:
-            current = _read_relative_file(parent, "config.toml")
-            if (current is not None) != expected_existed or (current or b"") != expected:
-                raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-            temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
-            descriptor = os.open(
-                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent
-            )
-            try:
-                _write_all(descriptor, payload)
-                os.fsync(descriptor)
-                replacement_identity = _file_identity(os.fstat(descriptor))
-            finally:
-                os.close(descriptor)
-            preserve_temporary = False
-            try:
-                if expected_existed:
-                    outcome = _exchange_if_expected(
-                        parent,
-                        temporary,
-                        "config.toml",
-                        expected=expected,
-                        replacement=payload,
-                        replacement_identity=replacement_identity,
-                    )
-                    if outcome == "rolled_back":
-                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-                    if outcome == "recovery_required":
-                        preserve_temporary = True
-                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
-                else:
-                    os.link(temporary, "config.toml", src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
-                    os.unlink(temporary, dir_fd=parent)
-                os.fsync(parent)
-            finally:
-                if not preserve_temporary:
-                    try:
-                        os.unlink(temporary, dir_fd=parent)
-                    except FileNotFoundError:
-                        pass
-        finally:
-            os.close(parent)
+        _publish_managed_target(
+            root,
+            _TARGET,
+            payload,
+            expected=expected,
+            expected_existed=expected_existed,
+            mode=mode,
+            drift_reason="SOS_CLIENT_CONFIG_DRIFT",
+            recovery_reason="SOS_CLIENT_CONFIG_RECOVERY_REQUIRED",
+            parent_policy="create_managed_and_prune_if_empty_on_abort",
+        )
     except BaseException:
-        if parent_created:
-            try:
-                os.rmdir(".codex", dir_fd=root_descriptor)
-            except OSError:
-                pass
         raise
-    finally:
-        os.close(root_descriptor)
 
 
 def _restore_target(
@@ -1795,219 +1576,116 @@ def _restore_target(
     expected: bytes,
     mode: int = 0o600,
 ) -> None:
-    root_descriptor = _open_root(root)
+    _publish_managed_target(
+        root,
+        _TARGET,
+        original if original_existed else None,
+        expected=expected,
+        expected_existed=True,
+        mode=mode,
+        drift_reason="SOS_CLIENT_CONFIG_DRIFT",
+        recovery_reason="SOS_CLIENT_CONFIG_RECOVERY_REQUIRED",
+        parent_policy=(
+            "preserve_existing"
+            if parent_existed
+            else "create_managed_and_prune_if_empty_on_abort"
+        ),
+    )
+
+
+def _publish_managed_target(
+    root: Path,
+    relative_path: str,
+    payload: bytes | None,
+    *,
+    expected: bytes,
+    expected_existed: bool,
+    mode: int,
+    drift_reason: str,
+    recovery_reason: str,
+    parent_policy: str = "preserve_existing",
+) -> None:
     try:
-        try:
-            parent = os.open(".codex", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor)
-        except OSError as exc:
-            raise ClientIntegrationError("SOS_CLIENT_CONFIG_PARENT_INVALID") from exc
-        try:
-            current = _read_relative_file(parent, "config.toml")
-            if current != expected:
-                raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-            if original_existed:
-                temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
-                descriptor = os.open(
-                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            parent_policy_enabled = parent_policy == "create_managed_and_prune_if_empty_on_abort"
+            parent_observation = (
+                service.observe_object(repository, ".codex")
+                if parent_policy_enabled
+                else None
+            )
+            service.publish_file(
+                FilePublicationOperation(
+                    repository,
+                    relative_path,
+                    payload,
+                    expected if expected_existed else None,
+                    expected_existed,
+                    mode,
+                    parent_policy,
+                    parent_observation.kind if parent_observation is not None else None,
+                    parent_observation.stable_identity_digest if parent_observation is not None else None,
                 )
-                try:
-                    _write_all(descriptor, original)
-                    os.fsync(descriptor)
-                    replacement_identity = _file_identity(os.fstat(descriptor))
-                finally:
-                    os.close(descriptor)
-                preserve_temporary = False
-                try:
-                    outcome = _exchange_if_expected(
-                        parent,
-                        temporary,
-                        "config.toml",
-                        expected=expected,
-                        replacement=original,
-                        replacement_identity=replacement_identity,
-                    )
-                    if outcome == "rolled_back":
-                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-                    if outcome == "recovery_required":
-                        preserve_temporary = True
-                        raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
-                finally:
-                    if not preserve_temporary:
-                        try:
-                            os.unlink(temporary, dir_fd=parent)
-                        except FileNotFoundError:
-                            pass
-            else:
-                temporary = f".sos-config.{os.getpid()}.{os.urandom(8).hex()}"
-                outcome = _move_away_if_expected(parent, "config.toml", temporary, expected=expected)
-                if outcome == "rolled_back":
-                    raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-                if outcome == "recovery_required":
-                    raise ClientIntegrationError("SOS_CLIENT_CONFIG_RECOVERY_REQUIRED", Status.BLOCKED)
-            os.fsync(parent)
-        finally:
-            os.close(parent)
-        if not parent_existed:
-            try:
-                os.rmdir(".codex", dir_fd=root_descriptor)
-                os.fsync(root_descriptor)
-            except OSError:
-                pass
-    finally:
-        os.close(root_descriptor)
+            )
+    except PlatformServiceError as exc:
+        if exc.kind in {"identity_changed", "collision"}:
+            raise ClientIntegrationError(drift_reason, Status.STALE) from exc
+        if exc.kind == "recovery_required":
+            raise ClientIntegrationError(recovery_reason, Status.BLOCKED) from exc
+        if exc.kind == "noreplace_unsupported":
+            raise ClientIntegrationError(
+                "SOS_CLIENT_ATOMIC_RENAME_UNSUPPORTED", Status.UNSUPPORTED
+            ) from exc
+        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_FAILED", Status.BLOCKED) from exc
 
 
 def _write_manifest(root: Path, manifest: dict[str, Any]) -> None:
     _validate_manifest(manifest)
-    descriptor = _open_control_directory(root, ("integrations",), create=True)
-    temporary = f".codex-mcp.{os.getpid()}.{os.urandom(8).hex()}"
-    try:
-        file_descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=descriptor
-        )
-        try:
-            payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-            _write_all(file_descriptor, payload)
-            os.fsync(file_descriptor)
-        finally:
-            os.close(file_descriptor)
-        os.replace(temporary, "codex-mcp.json", src_dir_fd=descriptor, dst_dir_fd=descriptor)
-        os.fsync(descriptor)
-    finally:
-        try:
-            os.unlink(temporary, dir_fd=descriptor)
-        except FileNotFoundError:
-            pass
-        os.close(descriptor)
+    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    _publish_control_file(root, _MANIFEST, payload)
 
 
-def _open_root(root: Path) -> int:
+def _read_optional_platform_file(root: Path, relative: str) -> bytes | None:
     try:
-        return os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_REPOSITORY_ROOT_INVALID") from exc
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            return service.read_regular_file_bounded(
+                repository, relative, _MAX_CONFIG_BYTES
+            ).payload
+    except PlatformServiceError as exc:
+        if exc.kind == "not_found":
+            return None
+        raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
 
 
-def _open_control_directory(root: Path, parts: tuple[str, ...], *, create: bool) -> int:
+def _publish_control_file(root: Path, relative: str, payload: bytes) -> None:
+    if len(payload) > _MAX_CONFIG_BYTES:
+        raise ClientIntegrationError("SOS_CLIENT_MANIFEST_INVALID")
     try:
-        descriptor = os.open(root / ".sigma", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except FileNotFoundError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_MANIFEST_MISSING") from exc
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CONTROL_PLANE_INTEGRITY_INVALID") from exc
-    try:
-        for part in parts:
-            if create:
-                try:
-                    os.mkdir(part, mode=0o700, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
             try:
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
-            except FileNotFoundError as exc:
-                raise ClientIntegrationError("SOS_CLIENT_MANIFEST_MISSING") from exc
-            except OSError as exc:
-                raise ClientIntegrationError("SOS_CONTROL_PLANE_INTEGRITY_INVALID") from exc
-            os.close(descriptor)
-            descriptor = child
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _read_relative_file(directory: int, name: str) -> bytes | None:
-    try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
-    try:
-        observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_CONFIG_BYTES:
-            raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID")
-        return _read_bounded(descriptor, _MAX_CONFIG_BYTES)
-    finally:
-        os.close(descriptor)
-
-
-def _rename_with_flags(directory: int, source: str, target: str, flags: int) -> None:
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is None:
-        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_UNSUPPORTED", Status.UNSUPPORTED)
-    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    renameat2.restype = ctypes.c_int
-    if renameat2(directory, os.fsencode(source), directory, os.fsencode(target), flags) == 0:
-        return
-    error = ctypes.get_errno()
-    if error in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
-        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_UNSUPPORTED", Status.UNSUPPORTED)
-    if flags == _RENAME_NOREPLACE and error in (errno.EEXIST, errno.ENOTEMPTY):
-        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-    if error == errno.ENOENT:
-        raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE)
-    raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_FAILED", Status.BLOCKED)
-
-
-def _file_identity(observed: os.stat_result) -> tuple[int, int]:
-    return observed.st_dev, observed.st_ino
-
-
-def _relative_identity(directory: int, name: str) -> tuple[int, int] | None:
-    try:
-        return _file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False))
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise ClientIntegrationError("SOS_CLIENT_CONFIG_INVALID") from exc
-
-
-def _exchange_if_expected(
-    directory: int,
-    temporary: str,
-    target: str,
-    *,
-    expected: bytes,
-    replacement: bytes,
-    replacement_identity: tuple[int, int],
-) -> str:
-    """Exchange atomically, then either admit or restore the displaced target."""
-    _rename_with_flags(directory, temporary, target, _RENAME_EXCHANGE)
-    try:
-        displaced = _read_relative_file(directory, temporary)
-    except ClientIntegrationError:
-        displaced = None
-    if displaced == expected:
-        return "matched"
-    if _relative_identity(directory, target) != replacement_identity:
-        return "recovery_required"
-    _rename_with_flags(directory, temporary, target, _RENAME_EXCHANGE)
-    try:
-        restored_replacement = _read_relative_file(directory, temporary)
-    except ClientIntegrationError:
-        return "recovery_required"
-    if restored_replacement == replacement:
-        return "rolled_back"
-    return "recovery_required"
-
-
-def _move_away_if_expected(directory: int, target: str, temporary: str, *, expected: bytes) -> str:
-    """Move a deletion target aside without ever unlinking a racing pathname."""
-    _rename_with_flags(directory, target, temporary, _RENAME_NOREPLACE)
-    try:
-        displaced = _read_relative_file(directory, temporary)
-    except ClientIntegrationError:
-        displaced = None
-    if displaced == expected:
-        os.unlink(temporary, dir_fd=directory)
-        return "matched"
-    try:
-        _rename_with_flags(directory, temporary, target, _RENAME_NOREPLACE)
-    except ClientIntegrationError:
-        return "recovery_required"
-    return "rolled_back"
+                current = service.read_regular_file_bounded(
+                    repository, ".sigma/" + relative, _MAX_CONFIG_BYTES
+                ).payload
+            except PlatformServiceError as exc:
+                if exc.kind != "not_found":
+                    raise
+                current = None
+            service.publish_file(
+                FilePublicationOperation(
+                    repository,
+                    ".sigma/" + relative,
+                    payload,
+                    current,
+                    current is not None,
+                    0o600,
+                )
+            )
+    except PlatformServiceError as exc:
+        if exc.kind in {"collision", "identity_changed"}:
+            raise ClientIntegrationError("SOS_CLIENT_CONFIG_DRIFT", Status.STALE) from exc
+        raise ClientIntegrationError("SOS_CLIENT_ATOMIC_RENAME_FAILED", Status.BLOCKED) from exc
 
 
 def _safe_details(manifest: dict[str, Any] | None) -> dict[str, Any]:
@@ -2128,43 +1806,9 @@ def _bytes_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
-def _sha256_file(path: Path, limit: int) -> str:
-    digest = hashlib.sha256()
-    total = 0
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            total += len(chunk)
-            if total > limit:
-                raise ClientIntegrationError("SOS_CLIENT_LAUNCHER_INVALID", Status.UNSUPPORTED)
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
-
-
 def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
 def _toml_array(values: list[str]) -> str:
     return "[" + ", ".join(_toml_string(value) for value in values) + "]"
-
-
-def _write_all(descriptor: int, payload: bytes) -> None:
-    offset = 0
-    while offset < len(payload):
-        written = os.write(descriptor, payload[offset:])
-        if written <= 0:
-            raise ClientIntegrationError("SOS_CLIENT_WRITE_FAILED", Status.BLOCKED)
-        offset += written
-
-
-def _read_bounded(descriptor: int, limit: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = os.read(descriptor, min(64 * 1024, limit + 1 - total))
-        if not chunk:
-            return b"".join(chunks)
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > limit:
-            raise ClientIntegrationError("SOS_CLIENT_CONFIG_LIMIT_EXCEEDED", Status.UNSUPPORTED)

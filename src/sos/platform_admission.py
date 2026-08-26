@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from .platforms import process_platform_name
+from .platform_services import current_platform_services
 from .result import Status, TerminalResult
 
 
-_MOUNTINFO = Path("/proc/self/mountinfo")
-_MAX_MOUNTINFO_BYTES = 2 * 1024 * 1024
 _MAX_MOUNTS = 8192
 _ADMITTED_FILESYSTEMS = frozenset({"ext2", "ext3", "ext4", "xfs", "btrfs"})
 _KNOWN_UNSUPPORTED_FILESYSTEMS = frozenset(
@@ -39,7 +38,7 @@ _KNOWN_UNSUPPORTED_FILESYSTEMS = frozenset(
 
 
 def admit_host(*, platform_name: str | None = None) -> TerminalResult:
-    observed = sys.platform if platform_name is None else platform_name
+    observed = process_platform_name(platform_name)
     if observed == "linux":
         return TerminalResult(
             "sos_host_admission_v2",
@@ -84,8 +83,13 @@ def admit_project_filesystem(
             "sos_filesystem_admission_v1", host.status, host.reasons, host.details
         )
     try:
-        text = _read_mountinfo() if mountinfo_text is None else mountinfo_text
-        filesystem_type = _filesystem_for_path(Path(path), text)
+        if mountinfo_text is None:
+            report = current_platform_services().inspect_host(Path(path))
+            filesystem_type = str(report.get("filesystem_type", "unknown"))
+            if report.get("filesystem_observation_status") != "observed":
+                raise ValueError("filesystem observation unavailable")
+        else:
+            filesystem_type = _filesystem_for_path(PurePosixPath(path), mountinfo_text)
     except (OSError, UnicodeError, ValueError):
         return TerminalResult(
             "sos_filesystem_admission_v1",
@@ -133,15 +137,8 @@ class FilesystemAdmissionError(RuntimeError):
         self.details = result.details
 
 
-def _read_mountinfo() -> str:
-    payload = _MOUNTINFO.read_bytes()
-    if len(payload) > _MAX_MOUNTINFO_BYTES:
-        raise ValueError("mount inventory limit exceeded")
-    return payload.decode("utf-8", errors="strict")
-
-
-def _filesystem_for_path(path: Path, mountinfo_text: str) -> str:
-    target = path.resolve(strict=False)
+def _filesystem_for_path(path: PurePosixPath, mountinfo_text: str) -> str:
+    target = path
     best: tuple[int, str] | None = None
     lines = mountinfo_text.splitlines()
     if not lines or len(lines) > _MAX_MOUNTS:
@@ -154,7 +151,7 @@ def _filesystem_for_path(path: Path, mountinfo_text: str) -> str:
         right_fields = right.split()
         if len(left_fields) < 6 or len(right_fields) < 3:
             raise ValueError("mount record invalid")
-        mount_point = Path(_unescape_mount_field(left_fields[4])).resolve(strict=False)
+        mount_point = PurePosixPath(_unescape_mount_field(left_fields[4]))
         try:
             target.relative_to(mount_point)
         except ValueError:

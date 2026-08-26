@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
-import os
+import hashlib
 import re
-import ctypes
-import errno
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from .platform_admission import FilesystemAdmissionError, require_project_filesystem
+from .platform_services import (
+    PlatformServiceError,
+    TreeStagingCapability,
+    TreePublicationOperation,
+    current_platform_services,
+)
 
 
 _TX = re.compile(r"^[0-9a-f]{64}$")
@@ -23,41 +26,17 @@ class TransactionError(RuntimeError):
     pass
 
 
-_RENAME_NOREPLACE = 1
 _MAX_BOOTSTRAP_BYTES = 4 * 1024 * 1024
+_STAGING_CAPABILITIES: dict[tuple[str, str], TreeStagingCapability] = {}
 
 
-def _rename_noreplace(source_directory_fd: int, source: str, target_directory_fd: int, target: str) -> None:
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is None:
-        raise TransactionError("SOS_NOREPLACE_RENAME_UNSUPPORTED")
-    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    renameat2.restype = ctypes.c_int
-    result = renameat2(
-        source_directory_fd,
-        os.fsencode(source),
-        target_directory_fd,
-        os.fsencode(target),
-        _RENAME_NOREPLACE,
-    )
-    if result == 0:
-        return
-    error = ctypes.get_errno()
-    if error in (errno.EEXIST, errno.ENOTEMPTY):
-        raise TransactionError("SOS_CONTROL_PLANE_COLLISION")
-    if error in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
-        raise TransactionError("SOS_NOREPLACE_RENAME_UNSUPPORTED")
-    raise TransactionError("SOS_ATOMIC_RENAME_FAILED")
+def _capability_key(root: Path, transaction_id: str) -> tuple[str, str]:
+    return root.as_posix(), transaction_id
 
 
-def _write_all(descriptor: int, payload: bytes) -> None:
-    offset = 0
-    while offset < len(payload):
-        written = os.write(descriptor, payload[offset:])
-        if written <= 0:
-            raise TransactionError("SOS_BOOTSTRAP_WRITE_FAILED")
-        offset += written
+def _recovery_binding(files: Mapping[tuple[str, ...], bytes]) -> str:
+    pending = files.get(("lifecycle", "p106-pending.json"))
+    return "none" if pending is None else "sha256:" + hashlib.sha256(pending).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,58 +56,55 @@ class BootstrapPlan:
 
 def execute_disposable_bootstrap(root: Path, plan: BootstrapPlan, records: dict[str, dict], *, allow_disposable: bool) -> Path:
     """Atomically create `.sigma` only in an explicitly marked disposable root."""
-    if not allow_disposable or not (root / _DISPOSABLE_MARKER).is_file():
+    if not allow_disposable or not _is_regular_repository_object(root, _DISPOSABLE_MARKER):
         raise TransactionError("SOS_DISPOSABLE_AUTHORITY_REQUIRED")
-    if root.is_symlink() or not root.is_dir():
-        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
     _require_admitted_filesystem(root)
     target = root / ".sigma"
     staging = root / f".sigma.init.{plan.transaction_id}"
-    if target.exists() or target.is_symlink() or staging.exists() or staging.is_symlink():
-        raise TransactionError("SOS_CONTROL_PLANE_COLLISION")
-    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    staged_capability: TreeStagingCapability | None = None
     try:
-        os.mkdir(staging.name, mode=0o700, dir_fd=root_descriptor)
-        staging_descriptor = os.open(
-            staging.name,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-            dir_fd=root_descriptor,
-        )
-        try:
-            manifest = {
-                "contract": "sos_disposable_bootstrap_v1",
-                "repository_id": plan.repository_id,
-                "plan_digest": plan.plan_digest,
-                "records": records,
-            }
-            payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-            if len(payload) > _MAX_BOOTSTRAP_BYTES:
-                raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
-            descriptor = os.open(
-                "bootstrap.json",
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=staging_descriptor,
+        manifest = {
+            "contract": "sos_disposable_bootstrap_v1",
+            "repository_id": plan.repository_id,
+            "plan_digest": plan.plan_digest,
+            "records": records,
+        }
+        payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if len(payload) > _MAX_BOOTSTRAP_BYTES:
+            raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            staged = service.publish_tree(
+                TreePublicationOperation(
+                    repository,
+                    staging.name,
+                    target.name,
+                    "create",
+                    (("bootstrap.json", payload),),
+                    recovery_binding_digest="none",
+                )
             )
-            try:
-                _write_all(descriptor, payload)
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            os.fsync(staging_descriptor)
-        finally:
-            os.close(staging_descriptor)
-        _rename_noreplace(root_descriptor, staging.name, root_descriptor, target.name)
-        os.fsync(root_descriptor)
+            if staged.capability is None:
+                raise PlatformServiceError("staging_recovery_required")
+            staged_capability = staged.capability
+            service.publish_tree(
+                TreePublicationOperation(
+                    repository, staging.name, target.name, capability=staged.capability
+                )
+            )
         return target
+    except PlatformServiceError as exc:
+        _discard_live_capability(root, staging.name, target.name, staged_capability)
+        reason = {
+            "collision": "SOS_CONTROL_PLANE_COLLISION",
+            "noreplace_unsupported": "SOS_NOREPLACE_RENAME_UNSUPPORTED",
+            "publication_failed": "SOS_ATOMIC_RENAME_FAILED",
+            "invalid_root": "SOS_REPOSITORY_ROOT_INVALID",
+        }.get(exc.kind, "SOS_ATOMIC_RENAME_FAILED")
+        raise TransactionError(reason) from exc
     except BaseException:
-        if staging.exists() and not target.exists():
-            for child in staging.iterdir():
-                child.unlink()
-            staging.rmdir()
+        _discard_live_capability(root, staging.name, target.name, staged_capability)
         raise
-    finally:
-        os.close(root_descriptor)
 
 
 def execute_bootstrap_files(
@@ -143,8 +119,7 @@ def execute_bootstrap_files(
         raise TransactionError("SOS_BOOTSTRAP_CONFIRMATION_REQUIRED")
     if not _TX.fullmatch(transaction_id):
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
-    if root.is_symlink() or not root.is_dir():
-        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    _require_repository_root(root)
     target_name = ".sigma"
     staging_name = f".sigma.init.{transaction_id}"
     if not files:
@@ -175,39 +150,37 @@ def create_bootstrap_staging(
     """Create one exact sibling staging tree without making it canonical."""
     if not _TX.fullmatch(transaction_id):
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
-    if root.is_symlink() or not root.is_dir():
-        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID")
+    _require_repository_root(root)
     _require_admitted_filesystem(root)
     normalized = _normalize_files(files)
     if not normalized:
         raise TransactionError("SOS_BOOTSTRAP_PLAN_EMPTY")
     target_name = ".sigma"
     staging_name = f".sigma.init.{transaction_id}"
-    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        if _entry_exists(root_descriptor, target_name):
-            raise TransactionError("SOS_CONTROL_PLANE_COLLISION")
-        try:
-            os.mkdir(staging_name, mode=0o700, dir_fd=root_descriptor)
-        except FileExistsError as exc:
-            raise TransactionError("SOS_CONTROL_PLANE_COLLISION") from exc
-        staging_descriptor = os.open(
-            staging_name,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-            dir_fd=root_descriptor,
-        )
-        try:
-            directories = sorted({parts[:depth] for parts in normalized for depth in range(1, len(parts))})
-            for directory_parts in directories:
-                _mkdir_relative(staging_descriptor, directory_parts)
-            for parts, payload in sorted(normalized.items()):
-                _write_relative(staging_descriptor, parts, payload)
-            os.fsync(staging_descriptor)
-        finally:
-            os.close(staging_descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            receipt = service.publish_tree(
+                TreePublicationOperation(
+                    repository,
+                    staging_name,
+                    target_name,
+                    "create",
+                    tuple(("/".join(parts), payload) for parts, payload in sorted(normalized.items())),
+                    recovery_binding_digest=_recovery_binding(normalized),
+                )
+            )
+            if receipt.capability is None:
+                raise PlatformServiceError("staging_recovery_required")
+            _STAGING_CAPABILITIES[_capability_key(root, transaction_id)] = receipt.capability
         return root / staging_name
-    finally:
-        os.close(root_descriptor)
+    except PlatformServiceError as exc:
+        reason = {
+            "collision": "SOS_CONTROL_PLANE_COLLISION",
+            "publication_failed": "SOS_BOOTSTRAP_WRITE_FAILED",
+            "invalid_root": "SOS_REPOSITORY_ROOT_INVALID",
+        }.get(exc.kind, "SOS_BOOTSTRAP_WRITE_FAILED")
+        raise TransactionError(reason) from exc
 
 
 def extend_bootstrap_staging(
@@ -221,25 +194,27 @@ def extend_bootstrap_staging(
     _require_admitted_filesystem(root)
     normalized = _normalize_files(files)
     staging_name = f".sigma.init.{transaction_id}"
-    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        staging_descriptor = os.open(
-            staging_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor
-        )
-        try:
-            directories = sorted({parts[:depth] for parts in normalized for depth in range(1, len(parts))})
-            for directory_parts in directories:
-                _mkdir_relative(staging_descriptor, directory_parts)
-            for parts, payload in sorted(normalized.items()):
-                _write_relative(staging_descriptor, parts, payload)
-            os.fsync(staging_descriptor)
-        finally:
-            os.close(staging_descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            capability = _STAGING_CAPABILITIES.get(_capability_key(root, transaction_id))
+            if capability is None:
+                raise PlatformServiceError("staging_recovery_required")
+            receipt = service.publish_tree(
+                TreePublicationOperation(
+                    repository,
+                    staging_name,
+                    ".sigma",
+                    "extend",
+                    tuple(("/".join(parts), payload) for parts, payload in sorted(normalized.items())),
+                    capability=capability,
+                )
+            )
+            if receipt.capability is not capability:
+                raise PlatformServiceError("staging_recovery_required")
         return root / staging_name
-    except (FileNotFoundError, NotADirectoryError) as exc:
+    except PlatformServiceError as exc:
         raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
-    finally:
-        os.close(root_descriptor)
 
 
 def commit_bootstrap_staging(root: Path, transaction_id: str) -> Path:
@@ -248,63 +223,71 @@ def commit_bootstrap_staging(root: Path, transaction_id: str) -> Path:
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
     _require_admitted_filesystem(root)
     staging_name = f".sigma.init.{transaction_id}"
-    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        staging_descriptor = os.open(
-            staging_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_descriptor
-        )
-        os.fsync(staging_descriptor)
-        os.close(staging_descriptor)
-        _rename_noreplace(root_descriptor, staging_name, root_descriptor, ".sigma")
-        os.fsync(root_descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            capability = _STAGING_CAPABILITIES.get(_capability_key(root, transaction_id))
+            if capability is None:
+                raise PlatformServiceError("staging_recovery_required")
+            service.publish_tree(
+                TreePublicationOperation(
+                    repository, staging_name, ".sigma", capability=capability
+                )
+            )
+            _STAGING_CAPABILITIES.pop(_capability_key(root, transaction_id), None)
         return root / ".sigma"
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
-    finally:
-        os.close(root_descriptor)
+    except PlatformServiceError as exc:
+        reason = {
+            "staging_missing": "SOS_STAGING_RECOVERY_REQUIRED",
+            "collision": "SOS_CONTROL_PLANE_COLLISION",
+            "noreplace_unsupported": "SOS_NOREPLACE_RENAME_UNSUPPORTED",
+            "publication_failed": "SOS_ATOMIC_RENAME_FAILED",
+            "invalid_root": "SOS_REPOSITORY_ROOT_INVALID",
+        }.get(exc.kind, "SOS_ATOMIC_RENAME_FAILED")
+        raise TransactionError(reason) from exc
 
 
-def discard_bootstrap_staging(root: Path, transaction_id: str) -> None:
+def discard_bootstrap_staging(
+    root: Path,
+    transaction_id: str,
+    *,
+    recovery_binding_digest: str | None = None,
+) -> None:
     """Remove only one validated sibling staging tree; never follow symlinks."""
     if not _TX.fullmatch(transaction_id):
         raise TransactionError("SOS_TRANSACTION_ID_INVALID")
     staging_name = f".sigma.init.{transaction_id}"
-    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        try:
-            staging_descriptor = os.open(
-                staging_name,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                dir_fd=root_descriptor,
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            capability = _STAGING_CAPABILITIES.get(_capability_key(root, transaction_id))
+            if capability is None:
+                if recovery_binding_digest is None:
+                    raise PlatformServiceError("staging_recovery_required")
+                recovered = service.publish_tree(
+                    TreePublicationOperation(
+                        repository,
+                        staging_name,
+                        ".sigma",
+                        "recover",
+                        recovery_binding_digest=recovery_binding_digest,
+                    )
+                )
+                capability = recovered.capability
+            if capability is None:
+                raise PlatformServiceError("staging_recovery_required")
+            service.publish_tree(
+                TreePublicationOperation(
+                    repository,
+                    staging_name,
+                    ".sigma",
+                    "discard",
+                    capability=capability,
+                )
             )
-        except FileNotFoundError:
-            return
-        try:
-            _discard_directory_contents(staging_descriptor)
-        finally:
-            os.close(staging_descriptor)
-        os.rmdir(staging_name, dir_fd=root_descriptor)
-        os.fsync(root_descriptor)
-    except (NotADirectoryError, OSError) as exc:
+            _STAGING_CAPABILITIES.pop(_capability_key(root, transaction_id), None)
+    except PlatformServiceError as exc:
         raise TransactionError("SOS_STAGING_RECOVERY_REQUIRED") from exc
-    finally:
-        os.close(root_descriptor)
-
-
-def _discard_directory_contents(directory_fd: int) -> None:
-    for name in os.listdir(directory_fd):
-        observed = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        if stat.S_ISDIR(observed.st_mode):
-            child = os.open(
-                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
-            )
-            try:
-                _discard_directory_contents(child)
-            finally:
-                os.close(child)
-            os.rmdir(name, dir_fd=directory_fd)
-        else:
-            os.unlink(name, dir_fd=directory_fd)
 
 
 def _require_admitted_filesystem(root: Path) -> None:
@@ -312,6 +295,48 @@ def _require_admitted_filesystem(root: Path) -> None:
         require_project_filesystem(root)
     except FilesystemAdmissionError as exc:
         raise TransactionError(exc.reason) from exc
+
+
+def _require_repository_root(root: Path) -> None:
+    service = current_platform_services()
+    try:
+        with service.open_repository(root):
+            return
+    except PlatformServiceError as exc:
+        raise TransactionError("SOS_REPOSITORY_ROOT_INVALID") from exc
+
+
+def _is_regular_repository_object(root: Path, relative: str) -> bool:
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            return service.observe_object(repository, relative).kind == "regular"
+    except PlatformServiceError:
+        return False
+
+
+def _discard_live_capability(
+    root: Path,
+    staging_name: str,
+    target_name: str,
+    capability: TreeStagingCapability | None,
+) -> None:
+    if capability is None or capability.consumed:
+        return
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            service.publish_tree(
+                TreePublicationOperation(
+                    repository,
+                    staging_name,
+                    target_name,
+                    "discard",
+                    capability=capability,
+                )
+            )
+    except PlatformServiceError:
+        return
 
 
 def _normalize_files(
@@ -333,63 +358,3 @@ def _normalize_files(
             raise TransactionError("SOS_BOOTSTRAP_OUTPUT_LIMIT_EXCEEDED")
         normalized[parts] = payload
     return normalized
-
-
-def _entry_exists(directory_fd: int, name: str) -> bool:
-    try:
-        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    return True
-
-
-def _open_directory_chain(root_descriptor: int, parts: tuple[str, ...]) -> int:
-    descriptor = os.dup(root_descriptor)
-    try:
-        for part in parts:
-            next_descriptor = os.open(
-                part,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                dir_fd=descriptor,
-            )
-            os.close(descriptor)
-            descriptor = next_descriptor
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _mkdir_relative(root_descriptor: int, parts: tuple[str, ...]) -> None:
-    parent = _open_directory_chain(root_descriptor, parts[:-1])
-    try:
-        try:
-            os.mkdir(parts[-1], mode=0o700, dir_fd=parent)
-        except FileExistsError:
-            existing = os.open(
-                parts[-1],
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                dir_fd=parent,
-            )
-            os.close(existing)
-    finally:
-        os.close(parent)
-
-
-def _write_relative(root_descriptor: int, parts: tuple[str, ...], payload: bytes) -> None:
-    parent = _open_directory_chain(root_descriptor, parts[:-1])
-    try:
-        descriptor = os.open(
-            parts[-1],
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=parent,
-        )
-        try:
-            _write_all(descriptor, payload)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.fsync(parent)
-    finally:
-        os.close(parent)

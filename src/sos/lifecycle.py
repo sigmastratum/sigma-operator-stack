@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import secrets
-import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +32,7 @@ from .compatibility import (
 )
 from .dirty import observe_application
 from .platform_admission import admit_project_filesystem
+from .platform_services import PlatformServiceError, current_platform_services
 from .repository import (
     RepositoryError,
     discover_repository_root,
@@ -408,7 +409,7 @@ def recover_one_command_init(
             return TerminalResult("sos_p106_recovery_result_v1", status, (reason,), {})
         staging_name = inspection.staging_roots[0]
         transaction_id = staging_name.removeprefix(".sigma.init.")
-        pending = _read_pending(root, staging_name)
+        pending, pending_digest = _read_pending(root, staging_name)
         if pending["transaction_id"] != transaction_id:
             raise LifecycleError("SOS_P106_PENDING_INVALID")
         binding = launcher or observe_installed_launcher()
@@ -420,7 +421,9 @@ def recover_one_command_init(
             rollback_codex_bootstrap_setup(setup)
         elif observed != "before":
             raise LifecycleError("SOS_P106_TARGET_DRIFT", Status.STALE)
-        discard_bootstrap_staging(root, transaction_id)
+        discard_bootstrap_staging(
+            root, transaction_id, recovery_binding_digest=pending_digest
+        )
         return TerminalResult(
             "sos_p106_recovery_result_v1",
             Status.SUCCESS,
@@ -512,55 +515,20 @@ def _actual_application(plan: OneCommandPlan):
     return observed
 
 
-def _read_pending(root: Path, staging_name: str) -> dict[str, Any]:
+def _read_pending(root: Path, staging_name: str) -> tuple[dict[str, Any], str]:
     if re.fullmatch(r"\.sigma\.init\.[0-9a-f]{64}", staging_name) is None:
         raise LifecycleError("SOS_P106_PENDING_INVALID")
-    descriptors: list[int] = []
     try:
-        descriptors.append(
-            os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
-        )
-        descriptors.append(
-            os.open(
-                staging_name,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-                dir_fd=descriptors[-1],
-            )
-        )
-        descriptors.append(
-            os.open(
-                "lifecycle",
-                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-                dir_fd=descriptors[-1],
-            )
-        )
-        descriptors.append(
-            os.open(
-                "p106-pending.json",
-                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
-                dir_fd=descriptors[-1],
-            )
-        )
-        observed = os.fstat(descriptors[-1])
-        if not stat.S_ISREG(observed.st_mode) or observed.st_size > _MAX_PENDING_BYTES:
-            raise LifecycleError("SOS_P106_PENDING_INVALID")
-        payload = bytearray()
-        while len(payload) <= _MAX_PENDING_BYTES:
-            chunk = os.read(
-                descriptors[-1],
-                min(64 * 1024, _MAX_PENDING_BYTES + 1 - len(payload)),
-            )
-            if not chunk:
-                break
-            payload.extend(chunk)
-        if len(payload) > _MAX_PENDING_BYTES:
-            raise LifecycleError("SOS_P106_PENDING_INVALID")
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            payload = service.read_regular_file_bounded(
+                repository,
+                f"{staging_name}/lifecycle/p106-pending.json",
+                _MAX_PENDING_BYTES,
+            ).payload
         value = json.loads(payload.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (PlatformServiceError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LifecycleError("SOS_P106_PENDING_INVALID") from exc
-    finally:
-        for descriptor in reversed(descriptors):
-            os.close(descriptor)
     required = {
         "contract", "transaction_id", "bootstrap_intent_id", "bootstrap_plan_id",
         "local_nonce", "repository_id", "setup_manifest", "setup_plan_digest",
@@ -595,7 +563,7 @@ def _read_pending(root: Path, staging_name: str) -> dict[str, Any]:
         "raw_project_content_serialized", "absolute_paths_serialized", "qualification_included", "network_performed"
     )):
         raise LifecycleError("SOS_P106_PENDING_INVALID")
-    return value
+    return value, "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _json_bytes(value: dict[str, Any]) -> bytes:

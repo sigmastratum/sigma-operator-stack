@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from .platform_services import PlatformServiceError, current_platform_services
 
 
 _STAGING_ROOT = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}(?:/|$)")
@@ -17,7 +18,13 @@ _STAGING_ROOT_NAME = re.compile(r"^\.sigma\.init\.[0-9a-f]{64}$")
 _COMMAND_TIMEOUT_SECONDS = 5
 _MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024
 _SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-_GIT_EXECUTABLE = shutil.which("git", path=_SAFE_PATH)
+
+
+def _git_executable() -> Path:
+    try:
+        return current_platform_services().observe_launcher("git").executable
+    except PlatformServiceError as exc:
+        raise RepositoryError("SOS_GIT_INSPECTION_FAILED") from exc
 
 
 class RepositoryError(RuntimeError):
@@ -78,8 +85,7 @@ class RepositoryIdentity:
 
 
 def _bounded_git(root: Path, *args: str) -> bytes:
-    if _GIT_EXECUTABLE is None:
-        raise RepositoryError("SOS_GIT_INSPECTION_FAILED")
+    executable = _git_executable()
     environment = {
         "PATH": _SAFE_PATH,
         "LANG": "C.UTF-8",
@@ -93,7 +99,7 @@ def _bounded_git(root: Path, *args: str) -> bytes:
     try:
         completed = subprocess.run(
             [
-                _GIT_EXECUTABLE,
+                os.fspath(executable),
                 "-c",
                 "core.fsmonitor=false",
                 "-c",
@@ -122,8 +128,7 @@ def _bounded_git(root: Path, *args: str) -> bytes:
 
 
 def _optional_git(root: Path, *args: str) -> bytes | None:
-    if _GIT_EXECUTABLE is None:
-        raise RepositoryError("SOS_GIT_INSPECTION_FAILED")
+    executable = _git_executable()
     environment = {
         "PATH": _SAFE_PATH,
         "LANG": "C.UTF-8",
@@ -137,7 +142,7 @@ def _optional_git(root: Path, *args: str) -> bytes | None:
     try:
         completed = subprocess.run(
             [
-                _GIT_EXECUTABLE,
+                os.fspath(executable),
                 "-c",
                 "core.fsmonitor=false",
                 "-c",
@@ -168,20 +173,21 @@ def _optional_git(root: Path, *args: str) -> bytes | None:
 
 
 def _discover_root(candidate: Path) -> Path:
-    if candidate.is_symlink():
-        raise RepositoryError("SOS_REPOSITORY_ROOT_SYMLINK")
     try:
-        resolved = candidate.resolve(strict=True)
-    except OSError as exc:
+        service = current_platform_services()
+        with service.open_repository(candidate):
+            pass
+    except PlatformServiceError as exc:
         raise RepositoryError("SOS_REPOSITORY_ROOT_NOT_FOUND") from exc
-    if not resolved.is_dir():
-        raise RepositoryError("SOS_REPOSITORY_ROOT_NOT_DIRECTORY")
-    raw = _bounded_git(resolved, "rev-parse", "--show-toplevel")
+    raw = _bounded_git(candidate, "rev-parse", "--show-toplevel")
     try:
-        discovered = Path(os.fsdecode(raw.rstrip(b"\n"))).resolve(strict=True)
-    except (OSError, UnicodeError) as exc:
+        discovered = Path(os.fsdecode(raw.rstrip(b"\n")))
+    except UnicodeError as exc:
         raise RepositoryError("SOS_REPOSITORY_ROOT_INVALID") from exc
-    if not discovered.is_dir() or discovered.is_symlink():
+    try:
+        with service.open_repository(discovered):
+            pass
+    except PlatformServiceError:
         raise RepositoryError("SOS_REPOSITORY_ROOT_INVALID")
     return discovered
 
@@ -229,16 +235,18 @@ def _status_entries(raw: bytes) -> tuple[list[bytes], set[str]]:
 
 
 def _control_plane_state(root: Path) -> str:
-    control = root / ".sigma"
     try:
-        mode = control.lstat().st_mode
-    except FileNotFoundError:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            kind = service.observe_object(repository, ".sigma").kind
+    except PlatformServiceError as exc:
+        raise RepositoryError("SOS_REPOSITORY_INVENTORY_FAILED") from exc
+    if kind == "absent":
         return "absent"
-    if control.is_symlink():
+    if kind == "symlink":
         return "invalid_symlink"
-    if not control.is_dir():
+    if kind != "directory":
         return "invalid_type"
-    del mode
     return "present_unverified"
 
 
@@ -246,13 +254,15 @@ def _staging_inventory(root: Path) -> tuple[set[str], bool]:
     staging: set[str] = set()
     collision = False
     try:
-        entries = list(os.scandir(root))
-    except OSError as exc:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            entries = service.enumerate_directory_bounded(repository, ".", 100_000).entries
+    except PlatformServiceError as exc:
         raise RepositoryError("SOS_REPOSITORY_INVENTORY_FAILED") from exc
     for entry in entries:
         if not entry.name.startswith(".sigma.init."):
             continue
-        if _STAGING_ROOT_NAME.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+        if _STAGING_ROOT_NAME.fullmatch(entry.name) and entry.kind == "directory":
             staging.add(entry.name)
         else:
             collision = True

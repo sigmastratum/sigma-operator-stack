@@ -6,11 +6,12 @@ import copy
 import hashlib
 import json
 from functools import lru_cache
-from importlib import resources
 from typing import Any
 
 from jsonschema import Draft202012Validator, RefResolver
 from jsonschema.exceptions import ValidationError
+
+from .package_resources import PackageResourceError, read_package_resource
 
 
 V1_SCHEMA_SHA256 = "19164d394c55ed29e30ddef638dc79241e19692b552e3a91ef81233c6bd59208"
@@ -165,8 +166,8 @@ def _reject_noncanonical_numbers(value: object) -> None:
 
 def _schema_bytes(name: str) -> bytes:
     try:
-        return resources.files("sos.schemas").joinpath(name).read_bytes()
-    except (OSError, TypeError) as exc:
+        return read_package_resource(f"schema:{name}").payload
+    except PackageResourceError as exc:
         raise ContractError() from exc
 
 

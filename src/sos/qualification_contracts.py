@@ -7,13 +7,13 @@ import json
 import os
 import stat
 from datetime import datetime, timezone
-from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
 from . import __version__
+from .package_resources import PackageResourceError, read_package_resource
 
 
 _SCHEMAS = {
@@ -156,7 +156,10 @@ def validate_contract(value: object, expected_contract: str) -> dict[str, Any]:
     if value.get("contract") != expected_contract:
         raise QualificationContractError()
     filename, expected_hash, digest_field = _SCHEMAS[expected_contract]
-    raw_schema = resources.files("sos.schemas").joinpath(filename).read_bytes()
+    try:
+        raw_schema = read_package_resource(f"schema:{filename}").payload
+    except PackageResourceError as exc:
+        raise QualificationContractError("SOS_QUALIFICATION_SCHEMA_INTEGRITY_INVALID") from exc
     if hashlib.sha256(raw_schema).hexdigest() != expected_hash:
         raise QualificationContractError("SOS_QUALIFICATION_SCHEMA_INTEGRITY_INVALID")
     try:

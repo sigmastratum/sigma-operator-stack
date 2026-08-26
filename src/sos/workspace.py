@@ -50,6 +50,11 @@ from .repository import (
     worktree_identity,
 )
 from .result import Status, TerminalResult
+from .platform_services import (
+    FilePublicationOperation,
+    PlatformServiceError,
+    current_platform_services,
+)
 from .transaction import TransactionError, execute_bootstrap_files
 
 
@@ -205,9 +210,7 @@ def build_workspace_bootstrap_files(
     plan = discover_checks(os.fspath(root))
     created_at = _timestamp()
     if recognized_authority_paths is None:
-        authority_paths = tuple(
-            candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file()
-        )
+        authority_paths = _existing_objects(root, _AUTHORITY_CANDIDATES, {"regular"})
     else:
         authority_paths = tuple(
             dict.fromkeys(
@@ -216,13 +219,13 @@ def build_workspace_bootstrap_files(
                     *(
                         candidate
                         for candidate in _AUTHORITY_CANDIDATES
-                        if (root / candidate).is_file()
+                        if _object_kind(root, candidate) == "regular"
                     ),
                 )
             )
         )
-    docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
-    task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
+    docs = _existing_objects(root, _DOC_CANDIDATES, {"regular", "directory"})
+    task_path = next((candidate for candidate in _TASK_CANDIDATES if _object_kind(root, candidate) == "regular"), None)
     source = _source_observation(root, inspection, identity, transaction_id, created_at)
     actor = _actor()
     records = _bootstrap_records(
@@ -421,8 +424,13 @@ def accept_proposal(
         return _failure(Status.OWNER_REQUIRED, "SOS_ACCEPTANCE_TTY_REQUIRED", contract="sos_accept_result_v1")
     try:
         root = discover_repository_root(path)
-        lock = _acquire_acceptance_lock(root)
-        try:
+        service = current_platform_services()
+        with service.open_repository(root) as repository, service.acquire_repository_lock(
+            repository,
+            0.0,
+            relative_lock_path=".sigma/ledger/accept.lock",
+            exclusive_create=True,
+        ):
             _root, inspection, _manifest, replay = _load_and_replay(os.fspath(root))
             accepted_receipt = replay["record_receipts"].get(revision)
             if accepted_receipt is not None:
@@ -517,8 +525,6 @@ def accept_proposal(
                 f"{_LEDGER_TIP_ROOT}/{replay['successor_count'] + 1:08d}.json",
                 tip,
             )
-        finally:
-            _release_acceptance_lock(lock)
         current = workspace_status(os.fspath(root))
         return TerminalResult(
             "sos_accept_result_v1",
@@ -538,6 +544,10 @@ def accept_proposal(
         reason = str(exc)
         status = Status.BLOCKED if reason == "SOS_ACCEPTANCE_LOCKED" else Status.INVALID
         return _failure(status, reason, contract="sos_accept_result_v1")
+    except PlatformServiceError as exc:
+        if exc.kind == "lock_timeout":
+            return _failure(Status.BLOCKED, "SOS_ACCEPTANCE_LOCKED", contract="sos_accept_result_v1")
+        return _failure(Status.INVALID, "SOS_CONTROL_PLANE_INTEGRITY_INVALID", contract="sos_accept_result_v1")
     except ContractError:
         return _failure(Status.INVALID, "SOS_PROPOSAL_INVALID", contract="sos_accept_result_v1")
 
@@ -1020,8 +1030,10 @@ def store_qualification(path: str, receipt: dict[str, Any]) -> None:
     ):
         raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_REPLAYED")
     _validate_receipt_history(root, receipt)
-    view_directory = _open_control_directory(root, ("views",), create=False)
-    os.close(view_directory)
+    service = current_platform_services()
+    with service.open_repository(root) as repository:
+        if service.observe_object(repository, ".sigma/views").kind != "directory":
+            raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
     receipt_digest = receipt["receipt_digest"]
     _write_immutable_json(root, _qualification_artifact_path("receipts", receipt_digest), receipt)
     tip = _seal_digest_object(
@@ -1703,17 +1715,16 @@ def _validate_receipt_history(root: Path, receipt: dict[str, Any]) -> None:
 
 def _validate_qualification_tip_ledger(root: Path, view: dict[str, Any] | None) -> None:
     try:
-        descriptor = _open_control_directory(root, tuple(_QUALIFICATION_TIP_ROOT.split("/")), create=False)
-    except WorkspaceError as exc:
-        if str(exc) == "SOS_WORKSPACE_RECORD_MISSING" and view is None:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            listing = service.enumerate_directory_bounded(
+                repository, ".sigma/" + _QUALIFICATION_TIP_ROOT, 10_000
+            )
+    except PlatformServiceError as exc:
+        if exc.kind == "not_found" and view is None:
             return
-        raise
-    try:
-        names = sorted(os.listdir(descriptor))
-    except OSError as exc:
-        os.close(descriptor)
         raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
-    os.close(descriptor)
+    names = sorted(entry.name for entry in listing.entries)
     expected_names = [f"{ordinal:08d}.json" for ordinal in range(1, len(names) + 1)]
     if not names or names != expected_names or len(names) > 10_000 or view is None:
         raise WorkspaceError("SOS_QUALIFICATION_RECEIPT_CHAIN_INVALID")
@@ -2052,9 +2063,9 @@ def _successor_proposals(
     created_at: str,
 ) -> dict[str, dict[str, Any]]:
     current = replay["records"]
-    authority_paths = tuple(candidate for candidate in _AUTHORITY_CANDIDATES if (root / candidate).is_file())
-    docs = tuple(candidate for candidate in _DOC_CANDIDATES if (root / candidate).exists())
-    task_path = next((candidate for candidate in _TASK_CANDIDATES if (root / candidate).is_file()), None)
+    authority_paths = _existing_objects(root, _AUTHORITY_CANDIDATES, {"regular"})
+    docs = _existing_objects(root, _DOC_CANDIDATES, {"regular", "directory"})
+    task_path = next((candidate for candidate in _TASK_CANDIDATES if _object_kind(root, candidate) == "regular"), None)
 
     authority = _successor_record(
         current["authority"],
@@ -2492,35 +2503,48 @@ def _control_plane_digest(
 
 
 def _read_json(root: Path, relative: str) -> dict[str, Any]:
-    parts = Path(relative).parts
-    descriptor = _open_control_directory(root, parts[:-1], create=False)
     try:
-        try:
-            file_descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-        except FileNotFoundError as exc:
-            raise WorkspaceError("SOS_WORKSPACE_RECORD_MISSING") from exc
-        try:
-            metadata = os.fstat(file_descriptor)
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_RECORD_BYTES:
-                raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
-            payload = bytearray()
-            while len(payload) <= _MAX_RECORD_BYTES:
-                chunk = os.read(file_descriptor, min(65536, _MAX_RECORD_BYTES + 1 - len(payload)))
-                if not chunk:
-                    break
-                payload.extend(chunk)
-            if len(payload) > _MAX_RECORD_BYTES:
-                raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
-        finally:
-            os.close(file_descriptor)
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            payload = service.read_regular_file_bounded(
+                repository, ".sigma/" + relative, _MAX_RECORD_BYTES
+            ).payload
         value = json.loads(payload.decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except PlatformServiceError as exc:
+        if exc.kind == "not_found":
+            raise WorkspaceError("SOS_WORKSPACE_RECORD_MISSING") from exc
         raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
-    finally:
-        os.close(descriptor)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
     if not isinstance(value, dict):
         raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
     return value
+
+
+def _object_kind(root: Path, relative: str) -> str:
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            return service.observe_object(repository, relative).kind
+    except PlatformServiceError as exc:
+        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
+
+
+def _existing_objects(
+    root: Path,
+    candidates: tuple[str, ...],
+    admitted_kinds: set[str],
+) -> tuple[str, ...]:
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            return tuple(
+                candidate
+                for candidate in candidates
+                if service.observe_object(repository, candidate).kind in admitted_kinds
+            )
+    except PlatformServiceError as exc:
+        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
 
 
 def _read_optional_json(root: Path, relative: str) -> dict[str, Any] | None:
@@ -2534,17 +2558,16 @@ def _read_optional_json(root: Path, relative: str) -> dict[str, Any] | None:
 
 def _read_ledger_tip(root: Path) -> dict[str, Any] | None:
     try:
-        descriptor = _open_control_directory(root, tuple(_LEDGER_TIP_ROOT.split("/")), create=False)
-    except WorkspaceError as exc:
-        if str(exc) == "SOS_WORKSPACE_RECORD_MISSING":
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            listing = service.enumerate_directory_bounded(
+                repository, ".sigma/" + _LEDGER_TIP_ROOT, _SUCCESSOR_LIMIT
+            )
+    except PlatformServiceError as exc:
+        if exc.kind in {"not_found", "enumeration_failed"}:
             return None
-        raise
-    try:
-        names = sorted(os.listdir(descriptor))
-    except OSError as exc:
-        os.close(descriptor)
         raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
-    os.close(descriptor)
+    names = sorted(entry.name for entry in listing.entries)
     names = [name for name in names if not name.startswith(".tmp.")]
     if not names:
         return None
@@ -2562,56 +2585,29 @@ def _read_ledger_tip(root: Path) -> dict[str, Any] | None:
 
 
 def _write_immutable_json(root: Path, relative: str, value: dict[str, Any]) -> None:
-    parts = Path(relative).parts
-    descriptor = _open_control_directory(root, parts[:-1], create=True)
     payload = _json_bytes(value)
-    temporary = f".tmp.{secrets.token_hex(32)}"
-    temporary_created = False
     try:
-        try:
-            temporary_descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=descriptor,
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            try:
+                existing = service.read_regular_file_bounded(
+                    repository, ".sigma/" + relative, _MAX_RECORD_BYTES
+                ).payload
+            except PlatformServiceError as exc:
+                if exc.kind != "not_found":
+                    raise
+                existing = None
+            if existing is not None:
+                if existing != payload:
+                    raise WorkspaceError("SOS_RECEIPT_COLLISION")
+                return
+            service.publish_file(
+                FilePublicationOperation(repository, ".sigma/" + relative, payload, None, False, 0o600)
             )
-            temporary_created = True
-            try:
-                _write_all(temporary_descriptor, payload)
-                os.fsync(temporary_descriptor)
-            finally:
-                os.close(temporary_descriptor)
-            os.link(
-                temporary,
-                parts[-1],
-                src_dir_fd=descriptor,
-                dst_dir_fd=descriptor,
-                follow_symlinks=False,
-            )
-            os.fsync(descriptor)
-        except FileExistsError as exc:
-            try:
-                existing_descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-                try:
-                    existing_payload = os.read(existing_descriptor, _MAX_RECORD_BYTES + 1)
-                finally:
-                    os.close(existing_descriptor)
-                existing = json.loads(existing_payload.decode("utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError) as read_exc:
-                raise WorkspaceError("SOS_RECEIPT_COLLISION") from read_exc
-            if existing != value:
-                raise WorkspaceError("SOS_RECEIPT_COLLISION") from exc
-            return
-        except OSError as exc:
-            raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
-    finally:
-        if temporary_created:
-            try:
-                os.unlink(temporary, dir_fd=descriptor)
-                os.fsync(descriptor)
-            except FileNotFoundError:
-                pass
-        os.close(descriptor)
+    except PlatformServiceError as exc:
+        if exc.kind in {"collision", "identity_changed"}:
+            raise WorkspaceError("SOS_RECEIPT_COLLISION") from exc
+        raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
 
 
 def _write_exclusive_json(
@@ -2621,131 +2617,42 @@ def _write_exclusive_json(
     *,
     collision_reason: str,
 ) -> None:
-    parts = Path(relative).parts
-    descriptor = _open_control_directory(root, parts[:-1], create=True)
     try:
-        try:
-            file_descriptor = os.open(
-                parts[-1],
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=descriptor,
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            service.publish_file(
+                FilePublicationOperation(
+                    repository, ".sigma/" + relative, _json_bytes(value), None, False, 0o600
+                )
             )
-        except FileExistsError as exc:
+    except PlatformServiceError as exc:
+        if exc.kind in {"collision", "identity_changed"}:
             raise WorkspaceError(collision_reason) from exc
-        try:
-            _write_all(file_descriptor, _json_bytes(value))
-            os.fsync(file_descriptor)
-        finally:
-            os.close(file_descriptor)
-        os.fsync(descriptor)
-    except OSError as exc:
         raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
-    finally:
-        os.close(descriptor)
 
 
 def _replace_view_json(root: Path, relative: str, value: dict[str, Any]) -> None:
-    parts = Path(relative).parts
-    descriptor = _open_control_directory(root, parts[:-1], create=False)
-    temporary = parts[-1] + ".tmp"
     payload = _json_bytes(value)
     try:
-        try:
-            file_descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=descriptor,
-            )
-        except FileExistsError as exc:
-            raise WorkspaceError("SOS_VIEW_UPDATE_COLLISION") from exc
-        try:
-            _write_all(file_descriptor, payload)
-            os.fsync(file_descriptor)
-        finally:
-            os.close(file_descriptor)
-        os.replace(temporary, parts[-1], src_dir_fd=descriptor, dst_dir_fd=descriptor)
-        os.fsync(descriptor)
-    finally:
-        try:
-            os.unlink(temporary, dir_fd=descriptor)
-        except FileNotFoundError:
-            pass
-        os.close(descriptor)
-
-
-def _acquire_acceptance_lock(root: Path) -> int:
-    descriptor = _open_control_directory(root, ("ledger",), create=True)
-    try:
-        lock = os.open(
-            "accept.lock",
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=descriptor,
-        )
-    except FileExistsError as exc:
-        os.close(descriptor)
-        raise WorkspaceError("SOS_ACCEPTANCE_LOCKED") from exc
-    try:
-        _write_all(lock, b"sos_acceptance_lock_v1\n")
-        os.fsync(lock)
-    finally:
-        os.close(lock)
-    os.fsync(descriptor)
-    return descriptor
-
-
-def _release_acceptance_lock(descriptor: int) -> None:
-    try:
-        os.unlink("accept.lock", dir_fd=descriptor)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _open_control_directory(root: Path, parts: tuple[str, ...], *, create: bool) -> int:
-    try:
-        descriptor = os.open(root / ".sigma", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except FileNotFoundError as exc:
-        raise WorkspaceError("SOS_WORKSPACE_NOT_INITIALIZED") from exc
-    except OSError as exc:
-        raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
-    try:
-        for part in parts:
-            if part in ("", ".", "..") or "/" in part or "\\" in part:
-                raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
-            if create:
-                try:
-                    os.mkdir(part, mode=0o700, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
             try:
-                next_descriptor = os.open(
-                    part,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                    dir_fd=descriptor,
+                existing = service.read_regular_file_bounded(
+                    repository, ".sigma/" + relative, _MAX_RECORD_BYTES
+                ).payload
+            except PlatformServiceError as exc:
+                if exc.kind != "not_found":
+                    raise
+                existing = None
+            service.publish_file(
+                FilePublicationOperation(
+                    repository, ".sigma/" + relative, payload, existing, existing is not None, 0o600
                 )
-            except FileNotFoundError as exc:
-                reason = "SOS_WORKSPACE_RECORD_MISSING" if not create else "SOS_WORKSPACE_RECORD_INVALID"
-                raise WorkspaceError(reason) from exc
-            except OSError as exc:
-                raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID") from exc
-            os.close(descriptor)
-            descriptor = next_descriptor
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _write_all(descriptor: int, payload: bytes) -> None:
-    offset = 0
-    while offset < len(payload):
-        written = os.write(descriptor, payload[offset:])
-        if written <= 0:
-            raise WorkspaceError("SOS_WORKSPACE_RECORD_INVALID")
-        offset += written
+            )
+    except PlatformServiceError as exc:
+        if exc.kind in {"collision", "identity_changed"}:
+            raise WorkspaceError("SOS_VIEW_UPDATE_COLLISION") from exc
+        raise WorkspaceError("SOS_WORKSPACE_WRITE_FAILED") from exc
 
 
 def _recovery_payload(

@@ -23,6 +23,7 @@ from .capabilities import (
     SECCOMP_FILTER_UNAVAILABLE,
 )
 from .dirty import observe_application, sensitive_path_class
+from .platforms import process_platform_name
 from .repository import RepositoryError, RepositoryInspection, inspect_repository
 
 
@@ -69,7 +70,7 @@ class _AdmittedSourceBinding:
 
 def profile_declared_available() -> bool:
     """Return a zero-execution platform declaration; runtime still probes fail-closed."""
-    return sys.platform == "linux" and platform.machine() == "x86_64"
+    return process_platform_name() == "linux" and platform.machine() == "x86_64"
 
 
 def _capability_failure_reason(report: dict[str, object]) -> str:

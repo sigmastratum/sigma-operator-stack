@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 from .contracts import digest_value
+from .platform_services import PlatformServiceError, current_platform_services
 from .repository import RepositoryError, discover_repository_root
 from .result import Status, TerminalResult
 
@@ -249,16 +250,15 @@ def compatibility_status(
 def _observe_managed_file(
     root: Path, relative: str, *, authority: bool
 ) -> dict[str, Any]:
-    path = root / relative
     try:
-        observed = path.lstat()
-    except FileNotFoundError:
-        return _observation(relative, "managed_file", "absent", "create", None, None)
-    except OSError as exc:
+        kind = _object_kind(root, relative)
+    except PlatformServiceError as exc:
         raise CompatibilityError(
             "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
         ) from exc
-    if stat.S_ISLNK(observed.st_mode):
+    if kind == "absent":
+        return _observation(relative, "managed_file", "absent", "create", None, None)
+    if kind == "symlink":
         return _observation(
             relative,
             "managed_file",
@@ -267,7 +267,7 @@ def _observe_managed_file(
             None,
             "SOS_COMPATIBILITY_SYMLINK_BLOCKED",
         )
-    if not stat.S_ISREG(observed.st_mode):
+    if kind != "regular":
         return _observation(
             relative,
             "managed_file",
@@ -277,7 +277,7 @@ def _observe_managed_file(
             "SOS_COMPATIBILITY_NON_REGULAR_BLOCKED",
         )
     try:
-        payload = _read_regular_bytes(path)
+        payload = _read_regular_bytes(root, relative)
     except CompatibilityError as exc:
         return _observation(
             relative,
@@ -346,16 +346,15 @@ def _observe_managed_file(
 
 
 def _observe_sigma(root: Path) -> dict[str, Any]:
-    path = root / ".sigma"
     try:
-        observed = path.lstat()
-    except FileNotFoundError:
-        return _observation(".sigma", "control_plane", "absent", "create", None, None)
-    except OSError as exc:
+        kind = _object_kind(root, ".sigma")
+    except PlatformServiceError as exc:
         raise CompatibilityError(
             "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
         ) from exc
-    state = "symlink" if stat.S_ISLNK(observed.st_mode) else "present"
+    if kind == "absent":
+        return _observation(".sigma", "control_plane", "absent", "create", None, None)
+    state = "symlink" if kind == "symlink" else "present"
     return _observation(
         ".sigma",
         "control_plane",
@@ -380,19 +379,18 @@ def _observe_directory(
             component_reason,
             family=family,
         )
-    path = root / relative
     try:
-        observed = path.lstat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
+        kind = _object_kind(root, relative)
+    except PlatformServiceError as exc:
         raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
-    if stat.S_ISLNK(observed.st_mode):
+    if kind == "absent":
+        return None
+    if kind == "symlink":
         return _observation(relative, "directory", "symlink", "block", None, "SOS_COMPATIBILITY_SYMLINK_BLOCKED", family=family)
-    if not stat.S_ISDIR(observed.st_mode):
+    if kind != "directory":
         return _observation(relative, "directory", "non_directory", "block", None, "SOS_COMPATIBILITY_NON_DIRECTORY_BLOCKED", family=family)
     try:
-        digest, entries, byte_count = _directory_digest(path, root)
+        digest, entries, byte_count = _directory_digest(root / relative, root)
     except CompatibilityError as exc:
         return _observation(relative, "authority_directory" if authority_id else "directory", "invalid", "block", None, exc.reason, family=family)
     return _observation(
@@ -412,43 +410,42 @@ def _discover_nested_agents(root: Path) -> tuple[list[dict[str, Any]], list[str]
     observations: list[dict[str, Any]] = []
     blocked: list[str] = []
     entries = 0
-    stack: list[tuple[Path, int]] = [(root, 0)]
-    while stack:
-        directory, depth = stack.pop()
-        try:
-            with os.scandir(directory) as iterator:
-                children = sorted(iterator, key=lambda item: item.name)
-        except OSError as exc:
-            raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
-        for child in children:
-            entries += 1
-            if entries > _MAX_DISCOVERY_ENTRIES:
-                raise CompatibilityError("SOS_COMPATIBILITY_DISCOVERY_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-            relative = Path(child.path).relative_to(root).as_posix()
-            if relative == "AGENTS.md":
-                continue
-            try:
-                if child.is_symlink():
-                    if child.name == "AGENTS.md":
-                        observations.append(_observation(relative, "scoped_authority_file", "symlink", "block", None, "SOS_COMPATIBILITY_SYMLINK_BLOCKED"))
-                        blocked.append("SOS_COMPATIBILITY_SYMLINK_BLOCKED")
-                    continue
-                if child.is_dir(follow_symlinks=False):
-                    if depth < _MAX_DEPTH and child.name not in _IGNORED_DIRECTORY_NAMES and not child.name.startswith(".sigma.init."):
-                        stack.append((Path(child.path), depth + 1))
-                    continue
-                if child.name != "AGENTS.md":
-                    continue
-                if not child.is_file(follow_symlinks=False):
-                    observations.append(_observation(relative, "scoped_authority_file", "non_regular", "block", None, "SOS_COMPATIBILITY_NON_REGULAR_BLOCKED"))
-                    blocked.append("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED")
-                    continue
-                digest, size = _file_digest(Path(child.path))
-                observations.append(_observation(relative, "scoped_authority_file", "present", "preserve", digest, None, byte_count=size))
-                if len(observations) > _MAX_NESTED_AGENTS:
-                    raise CompatibilityError("SOS_COMPATIBILITY_NESTED_AGENTS_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-            except OSError as exc:
-                raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
+    stack: list[tuple[str, int]] = [(".", 0)]
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            while stack:
+                directory, depth = stack.pop()
+                remaining = _MAX_DISCOVERY_ENTRIES - entries
+                listing = service.enumerate_directory_bounded(repository, directory, remaining)
+                for child in listing.entries:
+                    entries += 1
+                    relative = child.name if directory == "." else f"{directory}/{child.name}"
+                    if relative == "AGENTS.md":
+                        continue
+                    if child.kind == "symlink":
+                        if child.name == "AGENTS.md":
+                            observations.append(_observation(relative, "scoped_authority_file", "symlink", "block", None, "SOS_COMPATIBILITY_SYMLINK_BLOCKED"))
+                            blocked.append("SOS_COMPATIBILITY_SYMLINK_BLOCKED")
+                        continue
+                    if child.kind == "directory":
+                        if depth < _MAX_DEPTH and child.name not in _IGNORED_DIRECTORY_NAMES and not child.name.startswith(".sigma.init."):
+                            stack.append((relative, depth + 1))
+                        continue
+                    if child.name != "AGENTS.md":
+                        continue
+                    if child.kind != "regular":
+                        observations.append(_observation(relative, "scoped_authority_file", "non_regular", "block", None, "SOS_COMPATIBILITY_NON_REGULAR_BLOCKED"))
+                        blocked.append("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED")
+                        continue
+                    digest, size = _file_digest(root, relative)
+                    observations.append(_observation(relative, "scoped_authority_file", "present", "preserve", digest, None, byte_count=size))
+                    if len(observations) > _MAX_NESTED_AGENTS:
+                        raise CompatibilityError("SOS_COMPATIBILITY_NESTED_AGENTS_LIMIT_EXCEEDED", Status.UNSUPPORTED)
+    except PlatformServiceError as exc:
+        if exc.kind == "directory_limit_exceeded":
+            raise CompatibilityError("SOS_COMPATIBILITY_DISCOVERY_LIMIT_EXCEEDED", Status.UNSUPPORTED) from exc
+        raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
     return observations, blocked
 
 
@@ -456,72 +453,77 @@ def _directory_digest(path: Path, root: Path) -> tuple[str, int, int]:
     hasher = hashlib.sha256()
     entries = 0
     byte_count = 0
-    stack = [path]
-    while stack:
-        directory = stack.pop()
-        try:
-            with os.scandir(directory) as iterator:
-                children = sorted(iterator, key=lambda item: item.name)
-        except OSError as exc:
-            raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
-        for child in children:
-            entries += 1
-            if entries > _MAX_AUTHORITY_TREE_ENTRIES:
-                raise CompatibilityError("SOS_COMPATIBILITY_AUTHORITY_TREE_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-            relative = Path(child.path).relative_to(root).as_posix()
-            _require_relative(relative)
-            hasher.update(relative.encode("utf-8") + b"\0")
-            try:
-                if child.is_symlink():
-                    raise CompatibilityError("SOS_COMPATIBILITY_SYMLINK_BLOCKED")
-                if child.is_dir(follow_symlinks=False):
-                    hasher.update(b"d\0")
-                    stack.append(Path(child.path))
-                elif child.is_file(follow_symlinks=False):
-                    digest, size = _file_digest(Path(child.path))
-                    byte_count += size
-                    if byte_count > _MAX_AUTHORITY_TREE_BYTES:
-                        raise CompatibilityError("SOS_COMPATIBILITY_AUTHORITY_TREE_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-                    hasher.update(b"f\0" + str(size).encode("ascii") + b"\0" + digest.encode("ascii") + b"\0")
-                else:
-                    raise CompatibilityError("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED")
-            except OSError as exc:
-                raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
+    start = path.relative_to(root).as_posix()
+    stack = [start]
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            while stack:
+                directory = stack.pop()
+                remaining = _MAX_AUTHORITY_TREE_ENTRIES - entries
+                listing = service.enumerate_directory_bounded(
+                    repository, directory, remaining
+                )
+                for child in listing.entries:
+                    entries += 1
+                    relative = f"{directory}/{child.name}" if directory != "." else child.name
+                    _require_relative(relative)
+                    hasher.update(relative.encode("utf-8") + b"\0")
+                    if child.kind == "symlink":
+                        raise CompatibilityError("SOS_COMPATIBILITY_SYMLINK_BLOCKED")
+                    if child.kind == "directory":
+                        hasher.update(b"d\0")
+                        stack.append(relative)
+                    elif child.kind == "regular":
+                        digest, size = _file_digest(root, relative)
+                        byte_count += size
+                        if byte_count > _MAX_AUTHORITY_TREE_BYTES:
+                            raise CompatibilityError(
+                                "SOS_COMPATIBILITY_AUTHORITY_TREE_LIMIT_EXCEEDED",
+                                Status.UNSUPPORTED,
+                            )
+                        hasher.update(
+                            b"f\0"
+                            + str(size).encode("ascii")
+                            + b"\0"
+                            + digest.encode("ascii")
+                            + b"\0"
+                        )
+                    else:
+                        raise CompatibilityError("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED")
+    except PlatformServiceError as exc:
+        if exc.kind == "directory_limit_exceeded":
+            raise CompatibilityError(
+                "SOS_COMPATIBILITY_AUTHORITY_TREE_LIMIT_EXCEEDED", Status.UNSUPPORTED
+            ) from exc
+        raise CompatibilityError(
+            "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
+        ) from exc
     return "sha256:" + hasher.hexdigest(), entries, byte_count
 
 
-def _file_digest(path: Path) -> tuple[str, int]:
-    payload = _read_regular_bytes(path)
+def _file_digest(root: Path, relative: str) -> tuple[str, int]:
+    payload = _read_regular_bytes(root, relative)
     return "sha256:" + hashlib.sha256(payload).hexdigest(), len(payload)
 
 
-def _read_regular_bytes(path: Path) -> bytes:
-    flags = os.O_RDONLY | os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+def _read_regular_bytes(root: Path, relative: str) -> bytes:
     try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED) from exc
-    try:
-        observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode):
-            raise CompatibilityError("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED")
-        if observed.st_size > _MAX_FILE_BYTES:
+        service = current_platform_services()
+        with service.open_repository(root) as repository:
+            return service.read_regular_file_bounded(
+                repository, relative, _MAX_FILE_BYTES
+            ).payload
+    except PlatformServiceError as exc:
+        if exc.kind == "not_regular":
+            raise CompatibilityError("SOS_COMPATIBILITY_NON_REGULAR_BLOCKED") from exc
+        if exc.kind == "file_limit_exceeded":
             raise CompatibilityError("SOS_COMPATIBILITY_FILE_LIMIT_EXCEEDED", Status.UNSUPPORTED)
-        remaining = observed.st_size
-        payload = bytearray()
-        while remaining:
-            chunk = os.read(descriptor, min(remaining, 64 * 1024))
-            if not chunk:
-                raise CompatibilityError("SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED)
-            payload.extend(chunk)
-            remaining -= len(chunk)
-        if os.read(descriptor, 1):
+        if exc.kind == "identity_changed":
             raise CompatibilityError("SOS_COMPATIBILITY_PREVIEW_STALE", Status.STALE)
-        return bytes(payload)
-    finally:
-        os.close(descriptor)
+        raise CompatibilityError(
+            "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
+        ) from exc
 
 
 def _observation(
@@ -586,20 +588,27 @@ def _require_relative(value: str) -> None:
 
 def _path_component_reason(root: Path, relative: str) -> str | None:
     _require_relative(relative)
-    current = root
     parts = PurePosixPath(relative).parts
-    for index, part in enumerate(parts):
-        current = current / part
-        try:
-            observed = current.lstat()
-        except FileNotFoundError:
-            return None
-        except OSError as exc:
-            raise CompatibilityError(
-                "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
-            ) from exc
-        if stat.S_ISLNK(observed.st_mode):
-            return "SOS_COMPATIBILITY_SYMLINK_BLOCKED"
-        if index < len(parts) - 1 and not stat.S_ISDIR(observed.st_mode):
-            return "SOS_COMPATIBILITY_NON_DIRECTORY_BLOCKED"
+    service = current_platform_services()
+    try:
+        with service.open_repository(root) as repository:
+            for index in range(len(parts)):
+                current = "/".join(parts[: index + 1])
+                kind = service.observe_object(repository, current).kind
+                if kind == "absent":
+                    return None
+                if kind == "symlink":
+                    return "SOS_COMPATIBILITY_SYMLINK_BLOCKED"
+                if index < len(parts) - 1 and kind != "directory":
+                    return "SOS_COMPATIBILITY_NON_DIRECTORY_BLOCKED"
+    except PlatformServiceError as exc:
+        raise CompatibilityError(
+            "SOS_COMPATIBILITY_OBSERVATION_FAILED", Status.NOT_VERIFIED
+        ) from exc
     return None
+
+
+def _object_kind(root: Path, relative: str) -> str:
+    service = current_platform_services()
+    with service.open_repository(root) as repository:
+        return service.observe_object(repository, relative).kind

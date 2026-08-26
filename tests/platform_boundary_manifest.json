@@ -1,0 +1,33 @@
+{
+  "contract": "sos_platform_boundary_manifest_v1",
+  "modules": {
+    "src/sos/__init__.py": {"class": "shared_core"},
+    "src/sos/__main__.py": {"class": "shared_core"},
+    "src/sos/_isolation_worker.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/agent_api.py": {"class": "shared_core"},
+    "src/sos/capabilities.py": {"class": "shared_core", "proven_non_filesystem_symbols": ["_run_bounded_process"]},
+    "src/sos/checks.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/cli.py": {"class": "shared_core"},
+    "src/sos/client_integration.py": {"class": "shared_core"},
+    "src/sos/compatibility.py": {"class": "shared_core"},
+    "src/sos/contracts.py": {"class": "shared_core"},
+    "src/sos/dirty.py": {"class": "shared_core"},
+    "src/sos/entrypoint.py": {"class": "shared_core"},
+    "src/sos/isolation.py": {"class": "qualification_execution_mechanism", "symbols": ["*"]},
+    "src/sos/lifecycle.py": {"class": "shared_core"},
+    "src/sos/managed_files.py": {"class": "shared_core"},
+    "src/sos/mcp.py": {"class": "shared_core"},
+    "src/sos/package_resources.py": {"class": "package_resource_mechanism"},
+    "src/sos/platform_admission.py": {"class": "shared_core"},
+    "src/sos/platform_services.py": {"class": "shared_core"},
+    "src/sos/platforms/__init__.py": {"class": "platform_mechanism"},
+    "src/sos/platforms/linux.py": {"class": "platform_mechanism"},
+    "src/sos/qualification_contracts.py": {"class": "qualification_execution_mechanism", "symbols": ["package_execution_identity"]},
+    "src/sos/repository.py": {"class": "shared_core"},
+    "src/sos/result.py": {"class": "shared_core"},
+    "src/sos/schemas/__init__.py": {"class": "shared_core"},
+    "src/sos/transaction.py": {"class": "shared_core"},
+    "src/sos/validation.py": {"class": "shared_core"},
+    "src/sos/workspace.py": {"class": "shared_core"}
+  }
+}
