@@ -8,6 +8,7 @@ import threading
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from sos.platform_services import (
@@ -19,10 +20,49 @@ from sos.platform_services import (
 from sos.platforms.macos import MacOSPlatformServices
 
 
-def _volume_capability_payload(*, case_sensitive: bool, valid: bool = True) -> bytes:
-    capabilities = [0, 1 if case_sensitive else 0, 0, 0]
-    validity = [0, 1 if valid else 0, 0, 0]
-    return struct.pack("=I8I", 36, *(capabilities + validity))
+_CASE_SENSITIVE_PAYLOAD = bytes.fromhex(
+    "24000000 00010000 00000000 00000000 00000000"
+    " 00010000 00000000 00000000 00000000"
+)
+_CASE_INSENSITIVE_PAYLOAD = bytes.fromhex(
+    "24000000 00000000 00000000 00000000 00000000"
+    " 00010000 00000000 00000000 00000000"
+)
+_UNKNOWN_PAYLOAD = bytes.fromhex(
+    "24000000 00010000 00000000 00000000 00000000"
+    " 00000000 00000000 00000000 00000000"
+)
+
+
+class _FakeFGetAttrList:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.request: tuple[int, int, int, int, int, int, int] | None = None
+        self.options: int | None = None
+        self.argtypes: object = None
+        self.restype: object = None
+
+    def __call__(
+        self,
+        descriptor: int,
+        attributes_pointer: object,
+        output_pointer: object,
+        output_size: int,
+        options: int,
+    ) -> int:
+        attributes = attributes_pointer._obj
+        self.request = (
+            attributes.bitmapcount,
+            attributes.commonattr,
+            attributes.volattr,
+            attributes.dirattr,
+            attributes.fileattr,
+            attributes.forkattr,
+            output_size,
+        )
+        self.options = options
+        struct.pack_into(f"={len(self.payload)}s", output_pointer._obj, 0, self.payload)
+        return 0
 
 
 class _HermeticMacOSPlatformServices(MacOSPlatformServices):
@@ -45,7 +85,11 @@ class _HermeticMacOSPlatformServices(MacOSPlatformServices):
 
     def _read_volume_capability_payload(self, descriptor: int) -> bytes:
         del descriptor
-        return _volume_capability_payload(case_sensitive=self._test_case_sensitive)
+        return (
+            _CASE_SENSITIVE_PAYLOAD
+            if self._test_case_sensitive
+            else _CASE_INSENSITIVE_PAYLOAD
+        )
 
     def _rename_noreplace(
         self, source_fd: int, source: str, target_fd: int, target: str
@@ -74,20 +118,53 @@ class MacOSPlatformServicesTests(unittest.TestCase):
     def test_native_volume_capability_parser_binds_apfs_case_mode(self) -> None:
         self.assertTrue(
             MacOSPlatformServices._parse_volume_capabilities(
-                _volume_capability_payload(case_sensitive=True)
+                _CASE_SENSITIVE_PAYLOAD
             )
         )
         self.assertFalse(
             MacOSPlatformServices._parse_volume_capabilities(
-                _volume_capability_payload(case_sensitive=False)
+                _CASE_INSENSITIVE_PAYLOAD
             )
         )
         with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
-            MacOSPlatformServices._parse_volume_capabilities(
-                _volume_capability_payload(case_sensitive=True, valid=False)
-            )
+            MacOSPlatformServices._parse_volume_capabilities(_UNKNOWN_PAYLOAD)
+
+        wrong_index = bytes.fromhex(
+            "24000000 00000000 00010000 00000000 00000000"
+            " 00000000 00010000 00000000 00000000"
+        )
         with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
-            MacOSPlatformServices._parse_volume_capabilities(b"\x00" * 35)
+            MacOSPlatformServices._parse_volume_capabilities(wrong_index)
+
+        old_bit = bytes.fromhex(
+            "24000000 01000000 00000000 00000000 00000000"
+            " 01000000 00000000 00000000 00000000"
+        )
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(old_bit)
+
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(
+                _CASE_SENSITIVE_PAYLOAD[:-1]
+            )
+        overdeclared = b"\x28\x00\x00\x00" + _CASE_SENSITIVE_PAYLOAD[4:]
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(overdeclared)
+        malformed = b"\x00\x00\x00\x00" + _CASE_SENSITIVE_PAYLOAD[4:]
+        with self.assertRaisesRegex(PlatformServiceError, "filesystem_not_verified"):
+            MacOSPlatformServices._parse_volume_capabilities(malformed)
+
+    def test_native_volume_capability_request_uses_exact_darwin_mask(self) -> None:
+        native_call = _FakeFGetAttrList(_CASE_SENSITIVE_PAYLOAD)
+        with mock.patch(
+            "sos.platforms.macos.ctypes.CDLL",
+            return_value=SimpleNamespace(fgetattrlist=native_call),
+        ):
+            payload = MacOSPlatformServices._read_volume_capability_payload(17)
+
+        self.assertEqual(payload, _CASE_SENSITIVE_PAYLOAD)
+        self.assertEqual(native_call.request, (5, 0, 0x80020000, 0, 0, 0, 4096))
+        self.assertEqual(native_call.options, 0)
 
     def test_admission_is_fail_closed_and_report_is_content_safe(self) -> None:
         unsupported = [

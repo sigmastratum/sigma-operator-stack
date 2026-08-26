@@ -51,10 +51,11 @@ _RENAME_SWAP = 0x00000002
 _MNT_LOCAL = 0x00001000
 _UF_DATALESS = 0x40000000
 _ATTR_BIT_MAP_COUNT = 5
-_ATTR_VOL_INFO = 0x00000080
+_ATTR_VOL_INFO = 0x80000000
 _ATTR_VOL_CAPABILITIES = 0x00020000
-_VOL_CAPABILITIES_FORMAT = 1
-_VOL_CAP_FMT_CASE_SENSITIVE = 0x00000001
+_VOL_CAPABILITIES_FORMAT = 0
+_VOL_CAP_FMT_CASE_SENSITIVE = 0x00000100
+_VOLUME_CAPABILITY_PAYLOAD_SIZE = 36
 _STAGING_MARKER = ".sos-staging-binding-v1"
 
 
@@ -249,16 +250,16 @@ class MacOSPlatformServices:
         ) != 0:
             raise PlatformServiceError("filesystem_not_verified")
         length = struct.unpack_from("=I", output.raw, 0)[0]
-        if length < 36 or length > len(output.raw):
+        if length != _VOLUME_CAPABILITY_PAYLOAD_SIZE or length > len(output.raw):
             raise PlatformServiceError("filesystem_not_verified")
         return output.raw[:length]
 
     @staticmethod
     def _parse_volume_capabilities(payload: bytes) -> bool:
-        if len(payload) < 36:
+        if len(payload) < _VOLUME_CAPABILITY_PAYLOAD_SIZE:
             raise PlatformServiceError("filesystem_not_verified")
         declared = struct.unpack_from("=I", payload, 0)[0]
-        if declared < 36 or declared > len(payload):
+        if declared != _VOLUME_CAPABILITY_PAYLOAD_SIZE or declared > len(payload):
             raise PlatformServiceError("filesystem_not_verified")
         values = struct.unpack_from("=8I", payload, 4)
         capabilities = values[_VOL_CAPABILITIES_FORMAT]
