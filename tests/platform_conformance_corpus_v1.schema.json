@@ -22,10 +22,68 @@
       "type": "array",
       "minItems": 14,
       "maxItems": 14,
-      "items": {"$ref": "#/$defs/family"}
+      "items": {"$ref": "#/$defs/family"},
+      "allOf": [
+        {"$ref": "#/$defs/exact_family_repository_state"},
+        {"$ref": "#/$defs/exact_family_existing_control_surfaces"},
+        {"$ref": "#/$defs/exact_family_ignored_managed_target"},
+        {"$ref": "#/$defs/exact_family_primary_authority"},
+        {"$ref": "#/$defs/exact_family_unicode_case_collision"},
+        {"$ref": "#/$defs/exact_family_platform_path_grammar"},
+        {"$ref": "#/$defs/exact_family_object_kind_and_escape"},
+        {"$ref": "#/$defs/exact_family_concurrency_and_lock"},
+        {"$ref": "#/$defs/exact_family_crash_recovery"},
+        {"$ref": "#/$defs/exact_family_package_lifecycle"},
+        {"$ref": "#/$defs/exact_family_receipt_integrity"},
+        {"$ref": "#/$defs/exact_family_codex_prerequisite"},
+        {"$ref": "#/$defs/exact_family_mcp_boundary"},
+        {"$ref": "#/$defs/exact_family_qualification_profile"}
+      ]
     }
   },
   "$defs": {
+    "exact_family_repository_state": {"$ref": "#/$defs/family_presence_repository_state"},
+    "exact_family_existing_control_surfaces": {"$ref": "#/$defs/family_presence_existing_control_surfaces"},
+    "exact_family_ignored_managed_target": {"$ref": "#/$defs/family_presence_ignored_managed_target"},
+    "exact_family_primary_authority": {"$ref": "#/$defs/family_presence_primary_authority"},
+    "exact_family_unicode_case_collision": {"$ref": "#/$defs/family_presence_unicode_case_collision"},
+    "exact_family_platform_path_grammar": {"$ref": "#/$defs/family_presence_platform_path_grammar"},
+    "exact_family_object_kind_and_escape": {"$ref": "#/$defs/family_presence_object_kind_and_escape"},
+    "exact_family_concurrency_and_lock": {"$ref": "#/$defs/family_presence_concurrency_and_lock"},
+    "exact_family_crash_recovery": {"$ref": "#/$defs/family_presence_crash_recovery"},
+    "exact_family_package_lifecycle": {"$ref": "#/$defs/family_presence_package_lifecycle"},
+    "exact_family_receipt_integrity": {"$ref": "#/$defs/family_presence_receipt_integrity"},
+    "exact_family_codex_prerequisite": {"$ref": "#/$defs/family_presence_codex_prerequisite"},
+    "exact_family_mcp_boundary": {"$ref": "#/$defs/family_presence_mcp_boundary"},
+    "exact_family_qualification_profile": {"$ref": "#/$defs/family_presence_qualification_profile"},
+    "family_presence_repository_state": {"contains": {"$ref": "#/$defs/family_id_repository_state"}, "minContains": 1, "maxContains": 1},
+    "family_presence_existing_control_surfaces": {"contains": {"$ref": "#/$defs/family_id_existing_control_surfaces"}, "minContains": 1, "maxContains": 1},
+    "family_presence_ignored_managed_target": {"contains": {"$ref": "#/$defs/family_id_ignored_managed_target"}, "minContains": 1, "maxContains": 1},
+    "family_presence_primary_authority": {"contains": {"$ref": "#/$defs/family_id_primary_authority"}, "minContains": 1, "maxContains": 1},
+    "family_presence_unicode_case_collision": {"contains": {"$ref": "#/$defs/family_id_unicode_case_collision"}, "minContains": 1, "maxContains": 1},
+    "family_presence_platform_path_grammar": {"contains": {"$ref": "#/$defs/family_id_platform_path_grammar"}, "minContains": 1, "maxContains": 1},
+    "family_presence_object_kind_and_escape": {"contains": {"$ref": "#/$defs/family_id_object_kind_and_escape"}, "minContains": 1, "maxContains": 1},
+    "family_presence_concurrency_and_lock": {"contains": {"$ref": "#/$defs/family_id_concurrency_and_lock"}, "minContains": 1, "maxContains": 1},
+    "family_presence_crash_recovery": {"contains": {"$ref": "#/$defs/family_id_crash_recovery"}, "minContains": 1, "maxContains": 1},
+    "family_presence_package_lifecycle": {"contains": {"$ref": "#/$defs/family_id_package_lifecycle"}, "minContains": 1, "maxContains": 1},
+    "family_presence_receipt_integrity": {"contains": {"$ref": "#/$defs/family_id_receipt_integrity"}, "minContains": 1, "maxContains": 1},
+    "family_presence_codex_prerequisite": {"contains": {"$ref": "#/$defs/family_id_codex_prerequisite"}, "minContains": 1, "maxContains": 1},
+    "family_presence_mcp_boundary": {"contains": {"$ref": "#/$defs/family_id_mcp_boundary"}, "minContains": 1, "maxContains": 1},
+    "family_presence_qualification_profile": {"contains": {"$ref": "#/$defs/family_id_qualification_profile"}, "minContains": 1, "maxContains": 1},
+    "family_id_repository_state": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "repository_state"}}},
+    "family_id_existing_control_surfaces": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "existing_control_surfaces"}}},
+    "family_id_ignored_managed_target": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "ignored_managed_target"}}},
+    "family_id_primary_authority": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "primary_authority"}}},
+    "family_id_unicode_case_collision": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "unicode_case_collision"}}},
+    "family_id_platform_path_grammar": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "platform_path_grammar"}}},
+    "family_id_object_kind_and_escape": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "object_kind_and_escape"}}},
+    "family_id_concurrency_and_lock": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "concurrency_and_lock"}}},
+    "family_id_crash_recovery": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "crash_recovery"}}},
+    "family_id_package_lifecycle": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "package_lifecycle"}}},
+    "family_id_receipt_integrity": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "receipt_integrity"}}},
+    "family_id_codex_prerequisite": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "codex_prerequisite"}}},
+    "family_id_mcp_boundary": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "mcp_boundary"}}},
+    "family_id_qualification_profile": {"type": "object", "required": ["family_id"], "properties": {"family_id": {"const": "qualification_profile"}}},
     "family": {
       "type": "object",
       "additionalProperties": false,
@@ -38,7 +96,23 @@
           "minItems": 1,
           "items": {"$ref": "#/$defs/case"}
         }
-      }
+      },
+      "allOf": [
+        {"if": {"$ref": "#/$defs/family_id_repository_state"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_repository_state"}}}},
+        {"if": {"$ref": "#/$defs/family_id_existing_control_surfaces"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_existing_control_surfaces"}}}},
+        {"if": {"$ref": "#/$defs/family_id_ignored_managed_target"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_ignored_managed_target"}}}},
+        {"if": {"$ref": "#/$defs/family_id_primary_authority"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_primary_authority"}}}},
+        {"if": {"$ref": "#/$defs/family_id_unicode_case_collision"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_unicode_case_collision"}}}},
+        {"if": {"$ref": "#/$defs/family_id_platform_path_grammar"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_platform_path_grammar"}}}},
+        {"if": {"$ref": "#/$defs/family_id_object_kind_and_escape"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_object_kind_and_escape"}}}},
+        {"if": {"$ref": "#/$defs/family_id_concurrency_and_lock"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_concurrency_and_lock"}}}},
+        {"if": {"$ref": "#/$defs/family_id_crash_recovery"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_crash_recovery"}}}},
+        {"if": {"$ref": "#/$defs/family_id_package_lifecycle"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_package_lifecycle"}}}},
+        {"if": {"$ref": "#/$defs/family_id_receipt_integrity"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_receipt_integrity"}}}},
+        {"if": {"$ref": "#/$defs/family_id_codex_prerequisite"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_codex_prerequisite"}}}},
+        {"if": {"$ref": "#/$defs/family_id_mcp_boundary"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_mcp_boundary"}}}},
+        {"if": {"$ref": "#/$defs/family_id_qualification_profile"}, "then": {"properties": {"cases": {"$ref": "#/$defs/cases_qualification_profile"}}}}
+      ]
     },
     "case": {
       "type": "object",
@@ -64,6 +138,151 @@
         }
       }
     },
+    "cases_repository_state": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_clean_current_repository"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_source_status_changed"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_existing_control_surfaces": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_compatible_foreign_surfaces_preserved"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_foreign_sigma_blocks"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_ignored_managed_target": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_ignored_exact_managed_bytes"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_ignored_managed_bytes_drift"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_primary_authority": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_multiple_authorities_unselected"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_multiple_authorities_explicit_selection"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_unicode_case_collision": {
+      "type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/case_id_lookup_key_collision"}
+    },
+    "cases_platform_path_grammar": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_non_utf8_git_path"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_windows_reserved_or_ads_path"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_object_kind_and_escape": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_managed_ancestry_indirection"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_cloud_placeholder"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_concurrency_and_lock": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_identity_changes_after_preview"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_repository_lock_deadline"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_crash_recovery": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_valid_staging_journal_after_crash"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_invalid_staging_journal_after_crash"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_package_lifecycle": {
+      "type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_same_version_rerun"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_compatible_package_rebind"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_setup_remove_preserves_workspace"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_receipt_integrity": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_forged_or_replayed_receipt"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_valid_receipt_for_stale_source"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_codex_prerequisite": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_codex_missing"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_codex_auth_missing"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_mcp_boundary": {
+      "type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/case"},
+      "allOf": [
+        {"contains": {"$ref": "#/$defs/case_id_exact_eight_tools"}, "minContains": 1, "maxContains": 1},
+        {"contains": {"$ref": "#/$defs/case_id_unknown_or_mutating_tool"}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cases_qualification_profile": {
+      "type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/case_id_executable_project_check"}
+    },
+    "case_id_clean_current_repository": {"$ref": "#/$defs/case_with_id_clean_current_repository"},
+    "case_id_source_status_changed": {"$ref": "#/$defs/case_with_id_source_status_changed"},
+    "case_id_compatible_foreign_surfaces_preserved": {"$ref": "#/$defs/case_with_id_compatible_foreign_surfaces_preserved"},
+    "case_id_foreign_sigma_blocks": {"$ref": "#/$defs/case_with_id_foreign_sigma_blocks"},
+    "case_id_ignored_exact_managed_bytes": {"$ref": "#/$defs/case_with_id_ignored_exact_managed_bytes"},
+    "case_id_ignored_managed_bytes_drift": {"$ref": "#/$defs/case_with_id_ignored_managed_bytes_drift"},
+    "case_id_multiple_authorities_unselected": {"$ref": "#/$defs/case_with_id_multiple_authorities_unselected"},
+    "case_id_multiple_authorities_explicit_selection": {"$ref": "#/$defs/case_with_id_multiple_authorities_explicit_selection"},
+    "case_id_lookup_key_collision": {"allOf": [{"$ref": "#/$defs/case"}, {"$ref": "#/$defs/case_with_id_lookup_key_collision"}]},
+    "case_id_non_utf8_git_path": {"$ref": "#/$defs/case_with_id_non_utf8_git_path"},
+    "case_id_windows_reserved_or_ads_path": {"$ref": "#/$defs/case_with_id_windows_reserved_or_ads_path"},
+    "case_id_managed_ancestry_indirection": {"$ref": "#/$defs/case_with_id_managed_ancestry_indirection"},
+    "case_id_cloud_placeholder": {"$ref": "#/$defs/case_with_id_cloud_placeholder"},
+    "case_id_identity_changes_after_preview": {"$ref": "#/$defs/case_with_id_identity_changes_after_preview"},
+    "case_id_repository_lock_deadline": {"$ref": "#/$defs/case_with_id_repository_lock_deadline"},
+    "case_id_valid_staging_journal_after_crash": {"$ref": "#/$defs/case_with_id_valid_staging_journal_after_crash"},
+    "case_id_invalid_staging_journal_after_crash": {"$ref": "#/$defs/case_with_id_invalid_staging_journal_after_crash"},
+    "case_id_same_version_rerun": {"$ref": "#/$defs/case_with_id_same_version_rerun"},
+    "case_id_compatible_package_rebind": {"$ref": "#/$defs/case_with_id_compatible_package_rebind"},
+    "case_id_setup_remove_preserves_workspace": {"$ref": "#/$defs/case_with_id_setup_remove_preserves_workspace"},
+    "case_id_forged_or_replayed_receipt": {"$ref": "#/$defs/case_with_id_forged_or_replayed_receipt"},
+    "case_id_valid_receipt_for_stale_source": {"$ref": "#/$defs/case_with_id_valid_receipt_for_stale_source"},
+    "case_id_codex_missing": {"$ref": "#/$defs/case_with_id_codex_missing"},
+    "case_id_codex_auth_missing": {"$ref": "#/$defs/case_with_id_codex_auth_missing"},
+    "case_id_exact_eight_tools": {"$ref": "#/$defs/case_with_id_exact_eight_tools"},
+    "case_id_unknown_or_mutating_tool": {"$ref": "#/$defs/case_with_id_unknown_or_mutating_tool"},
+    "case_id_executable_project_check": {"allOf": [{"$ref": "#/$defs/case"}, {"$ref": "#/$defs/case_with_id_executable_project_check"}]},
+    "case_with_id_clean_current_repository": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "clean_current_repository"}}},
+    "case_with_id_source_status_changed": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "source_status_changed"}}},
+    "case_with_id_compatible_foreign_surfaces_preserved": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "compatible_foreign_surfaces_preserved"}}},
+    "case_with_id_foreign_sigma_blocks": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "foreign_sigma_blocks"}}},
+    "case_with_id_ignored_exact_managed_bytes": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "ignored_exact_managed_bytes"}}},
+    "case_with_id_ignored_managed_bytes_drift": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "ignored_managed_bytes_drift"}}},
+    "case_with_id_multiple_authorities_unselected": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "multiple_authorities_unselected"}}},
+    "case_with_id_multiple_authorities_explicit_selection": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "multiple_authorities_explicit_selection"}}},
+    "case_with_id_lookup_key_collision": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "lookup_key_collision"}}},
+    "case_with_id_non_utf8_git_path": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "non_utf8_git_path"}}},
+    "case_with_id_windows_reserved_or_ads_path": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "windows_reserved_or_ads_path"}}},
+    "case_with_id_managed_ancestry_indirection": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "managed_ancestry_indirection"}}},
+    "case_with_id_cloud_placeholder": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "cloud_placeholder"}}},
+    "case_with_id_identity_changes_after_preview": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "identity_changes_after_preview"}}},
+    "case_with_id_repository_lock_deadline": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "repository_lock_deadline"}}},
+    "case_with_id_valid_staging_journal_after_crash": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "valid_staging_journal_after_crash"}}},
+    "case_with_id_invalid_staging_journal_after_crash": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "invalid_staging_journal_after_crash"}}},
+    "case_with_id_same_version_rerun": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "same_version_rerun"}}},
+    "case_with_id_compatible_package_rebind": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "compatible_package_rebind"}}},
+    "case_with_id_setup_remove_preserves_workspace": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "setup_remove_preserves_workspace"}}},
+    "case_with_id_forged_or_replayed_receipt": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "forged_or_replayed_receipt"}}},
+    "case_with_id_valid_receipt_for_stale_source": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "valid_receipt_for_stale_source"}}},
+    "case_with_id_codex_missing": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "codex_missing"}}},
+    "case_with_id_codex_auth_missing": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "codex_auth_missing"}}},
+    "case_with_id_exact_eight_tools": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "exact_eight_tools"}}},
+    "case_with_id_unknown_or_mutating_tool": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "unknown_or_mutating_tool"}}},
+    "case_with_id_executable_project_check": {"type": "object", "required": ["case_id"], "properties": {"case_id": {"const": "executable_project_check"}}},
     "outcome": {
       "type": "object",
       "additionalProperties": false,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import unittest
@@ -60,6 +61,48 @@ class PlatformConformanceCorpusTests(unittest.TestCase):
             for case in family["cases"]
         ]
         self.assertEqual(len(case_ids), len(set(case_ids)))
+
+    def test_schema_rejects_missing_extra_and_duplicate_family_ids(self) -> None:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        validator = Draft202012Validator(schema)
+        corpus = load_corpus()
+
+        missing = copy.deepcopy(corpus)
+        missing["families"].pop()
+        self.assertFalse(validator.is_valid(missing))
+
+        extra = copy.deepcopy(corpus)
+        extra["families"].append(copy.deepcopy(extra["families"][0]))
+        self.assertFalse(validator.is_valid(extra))
+
+        duplicate = copy.deepcopy(corpus)
+        duplicate["families"][1]["family_id"] = duplicate["families"][0]["family_id"]
+        self.assertFalse(validator.is_valid(duplicate))
+
+    def test_schema_rejects_missing_extra_and_duplicate_case_ids(self) -> None:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        validator = Draft202012Validator(schema)
+        corpus = load_corpus()
+        family = next(
+            value for value in corpus["families"]
+            if value["family_id"] == "repository_state"
+        )
+        family_index = corpus["families"].index(family)
+
+        missing = copy.deepcopy(corpus)
+        missing["families"][family_index]["cases"].pop()
+        self.assertFalse(validator.is_valid(missing))
+
+        extra = copy.deepcopy(corpus)
+        extra["families"][family_index]["cases"].append(
+            copy.deepcopy(extra["families"][family_index]["cases"][0])
+        )
+        self.assertFalse(validator.is_valid(extra))
+
+        duplicate = copy.deepcopy(corpus)
+        duplicate_cases = duplicate["families"][family_index]["cases"]
+        duplicate_cases[1]["case_id"] = duplicate_cases[0]["case_id"]
+        self.assertFalse(validator.is_valid(duplicate))
 
     def test_corpus_binds_exact_mcp_and_platform_execution_boundary(self) -> None:
         corpus = load_corpus()
