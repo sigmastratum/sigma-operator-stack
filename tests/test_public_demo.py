@@ -176,6 +176,17 @@ class PublicDemoTests(unittest.TestCase):
         for name in sorted(module.ALLOWED_TOOLS):
             events.append(
                 {
+                    "type": "item.started",
+                    "item": {
+                        "type": "mcp_tool_call",
+                        "server": "sigma_operator_stack",
+                        "tool": name,
+                        "status": "in_progress",
+                    },
+                }
+            )
+            events.append(
+                {
                     "type": "item.completed",
                     "item": {
                         "type": "mcp_tool_call",

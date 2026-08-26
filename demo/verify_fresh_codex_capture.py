@@ -78,7 +78,11 @@ def verify(
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
-        if item_type == "mcp_tool_call" and event.get("type") == "item.completed":
+        if item_type == "mcp_tool_call":
+            if event.get("type") == "item.started":
+                continue
+            if event.get("type") != "item.completed":
+                raise ValueError("SOS_DEMO_MCP_EVENT_INVALID")
             if item.get("server") != "sigma_operator_stack" or item.get("status") != "completed":
                 raise ValueError("SOS_DEMO_MCP_CALL_INCOMPLETE")
             name = item.get("tool")
