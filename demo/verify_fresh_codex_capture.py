@@ -24,7 +24,12 @@ REQUIRED_TOOLS = {
     "sos_active_task",
     "sos_next_action",
 }
-ALLOWED_TOOLS = REQUIRED_TOOLS | {"sos_recover"}
+ALLOWED_TOOLS = REQUIRED_TOOLS | {
+    "sos_qualification_plan",
+    "sos_recover",
+    "sos_propose_qualification_receipt",
+    "sos_propose_update",
+}
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 CLIENT = re.compile(r"^codex-cli [0-9]+\.[0-9]+\.[0-9]+$")

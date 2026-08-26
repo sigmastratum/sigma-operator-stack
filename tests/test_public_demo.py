@@ -170,6 +170,41 @@ class PublicDemoTests(unittest.TestCase):
                         model="gpt-5.6-sol",
                     )
 
+    def test_fresh_codex_verifier_allows_every_manifest_tool(self) -> None:
+        module = self.load_verifier()
+        events = [{"type": "thread.started"}]
+        for name in sorted(module.ALLOWED_TOOLS):
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "mcp_tool_call",
+                        "server": "sigma_operator_stack",
+                        "tool": name,
+                        "status": "completed",
+                    },
+                }
+            )
+        events.append({"type": "turn.completed"})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_path = root / "events.jsonl"
+            response_path = root / "response.json"
+            event_path.write_text(
+                "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+            )
+            response_path.write_text(json.dumps(module.EXPECTED_OUTPUT), encoding="utf-8")
+            receipt = module.verify(
+                event_path,
+                response_path,
+                candidate="a" * 40,
+                tree="b" * 40,
+                wheel_sha256="c" * 64,
+                client="codex-cli 0.145.0",
+                model="gpt-5.6-sol",
+            )
+        self.assertEqual(set(receipt["mcp_tools_completed"]), module.ALLOWED_TOOLS)
+
 
 if __name__ == "__main__":
     unittest.main()
