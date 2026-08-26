@@ -44,6 +44,7 @@
     "src/sos/platform_services.py": {"class": "shared_core"},
     "src/sos/platforms/__init__.py": {"class": "platform_mechanism"},
     "src/sos/platforms/linux.py": {"class": "platform_mechanism"},
+    "src/sos/platforms/windows.py": {"class": "platform_mechanism"},
     "src/sos/qualification_contracts.py": {"class": "qualification_execution_mechanism", "symbols": ["package_execution_identity"]},
     "src/sos/repository.py": {"class": "shared_core"},
     "src/sos/result.py": {"class": "shared_core"},
