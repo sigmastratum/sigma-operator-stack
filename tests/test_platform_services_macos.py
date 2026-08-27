@@ -3,7 +3,10 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import platform
+import plistlib
 import struct
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -12,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import sos.platforms.macos as macos
 from sos.platform_services import (
     FilePublicationOperation,
     PlatformServiceError,
@@ -116,6 +120,40 @@ def _service(*, case_sensitive: bool = True) -> MacOSPlatformServices:
 
 
 class MacOSPlatformServicesTests(unittest.TestCase):
+    def test_filesystem_inventory_uses_statfs_mount_point_not_repository_path(self) -> None:
+        repository = Path("/synthetic/mount/project/nested")
+
+        def statfs(_path, output):
+            observed = ctypes.cast(
+                output, ctypes.POINTER(macos._DarwinStatFS)
+            ).contents
+            observed.f_fstypename = b"apfs"
+            observed.f_mntonname = b"/synthetic/mount"
+            observed.f_flags = macos._MNT_LOCAL
+            return 0
+
+        native = SimpleNamespace(statfs=mock.Mock(side_effect=statfs))
+        inventory = subprocess.CompletedProcess(
+            [],
+            0,
+            plistlib.dumps({"Internal": True, "RemovableMedia": False}),
+            b"",
+        )
+        with mock.patch.object(platform, "system", return_value="Darwin"), mock.patch(
+            "sos.platforms.macos.ctypes.CDLL", return_value=native
+        ), mock.patch(
+            "sos.platforms.macos.subprocess.run", return_value=inventory
+        ) as run:
+            self.assertEqual(
+                MacOSPlatformServices()._filesystem_facts(repository),
+                ("apfs", True, False),
+            )
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/usr/sbin/diskutil", "info", "-plist", "/synthetic/mount"],
+        )
+
     def test_native_volume_capability_parser_binds_apfs_case_mode(self) -> None:
         self.assertTrue(
             MacOSPlatformServices._parse_volume_capabilities(

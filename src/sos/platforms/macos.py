@@ -148,11 +148,24 @@ class MacOSPlatformServices:
             raise PlatformServiceError("filesystem_not_verified")
         filesystem = bytes(statfs_value.f_fstypename).split(b"\0", 1)[0].decode("ascii")
         local = bool(statfs_value.f_flags & _MNT_LOCAL)
+        mount_point_bytes = bytes(statfs_value.f_mntonname).split(b"\0", 1)[0]
+        if (
+            not mount_point_bytes
+            or len(mount_point_bytes) > 1024
+            or not mount_point_bytes.startswith(b"/")
+        ):
+            raise PlatformServiceError("filesystem_not_verified")
+        try:
+            mount_point = os.fsdecode(mount_point_bytes)
+        except UnicodeError as exc:
+            raise PlatformServiceError("filesystem_not_verified") from exc
         # diskutil is a bounded local inventory read.  It is used only to
-        # distinguish removable media; its paths and raw plist never escape.
+        # distinguish removable media. It accepts a device or mount point,
+        # not an arbitrary repository descendant. The statfs-derived mount
+        # point and raw plist never escape this adapter.
         try:
             result = subprocess.run(
-                ["/usr/sbin/diskutil", "info", "-plist", os.fspath(path)],
+                ["/usr/sbin/diskutil", "info", "-plist", mount_point],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
