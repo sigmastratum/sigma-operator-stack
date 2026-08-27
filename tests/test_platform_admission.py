@@ -20,56 +20,60 @@ from sos.result import Status, TerminalResult
 
 
 class PlatformAdmissionTests(unittest.TestCase):
-    def test_native_windows_returns_typed_native_support_boundary(self) -> None:
+    def test_native_windows_control_plane_is_admitted(self) -> None:
         result = admit_host(platform_name="win32")
-        self.assertEqual(result.status, Status.UNSUPPORTED)
-        self.assertEqual(
-            result.reasons, ("SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT",)
-        )
+        self.assertEqual(result.status, Status.SUCCESS)
+        self.assertEqual(result.reasons, ("SOS_WINDOWS_CONTROL_PLANE_ADMITTED",))
         self.assertEqual(result.details["host_platform"], "windows")
-        self.assertEqual(result.details["native_support_status"], "under_development")
+        self.assertEqual(result.details["execution_substrate"], "windows")
         self.assertFalse(result.details["absolute_paths_serialized"])
 
-    def test_macos_returns_typed_demand_gate(self) -> None:
+    def test_macos_control_plane_is_admitted(self) -> None:
         result = admit_host(platform_name="darwin")
-        self.assertEqual(result.status, Status.UNSUPPORTED)
-        self.assertEqual(result.reasons, ("SOS_MACOS_DEMAND_GATED",))
+        self.assertEqual(result.status, Status.SUCCESS)
+        self.assertEqual(result.reasons, ("SOS_MACOS_CONTROL_PLANE_ADMITTED",))
         self.assertEqual(result.details["host_platform"], "macos")
-        self.assertEqual(result.details["native_support_status"], "demand_gated")
+        self.assertEqual(result.details["execution_substrate"], "macos")
 
-    def test_unsupported_entrypoint_does_not_import_posix_implementation(self) -> None:
-        script = """
-import json
-import sys
-from unittest import mock
-from sos import entrypoint
-from sos.platform_admission import admit_host
-assert 'sos.cli' not in sys.modules
-assert 'sos.managed_files' not in sys.modules
-with mock.patch.object(entrypoint, 'admit_host', return_value=admit_host(platform_name='win32')):
-    code = entrypoint.main(['status', '--json'])
-assert code == 2
-assert 'sos.cli' not in sys.modules
-assert 'sos.managed_files' not in sys.modules
-"""
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+    def test_admitted_entrypoint_routes_to_shared_cli(self) -> None:
+        admitted = admit_host(platform_name="win32")
+        with (
+            mock.patch.object(entrypoint, "admit_host", return_value=admitted),
+            mock.patch("sos.cli.main", return_value=7) as shared_main,
+        ):
+            code = entrypoint.main(["status", "--json"])
+        self.assertEqual(code, 7)
+        shared_main.assert_called_once_with(["status", "--json"])
+
+    def test_native_filesystem_profiles_use_selected_service(self) -> None:
+        windows = mock.Mock()
+        windows.inspect_host.return_value = {
+            "filesystem_type": "ntfs",
+            "filesystem_observation_status": "observed",
+        }
+        observed = admit_project_filesystem(
+            "C:/project", platform_name="win32", service=windows
         )
-        self.assertEqual(
-            json.loads(completed.stdout)["reasons"],
-            ["SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT"],
+        self.assertEqual(observed.status, Status.SUCCESS)
+        self.assertEqual(observed.details["filesystem_profile"], "windows_local_ntfs")
+
+        macos = mock.Mock()
+        macos.inspect_host.return_value = {
+            "filesystem_type": "apfs",
+            "filesystem_observation_status": "observed",
+        }
+        observed = admit_project_filesystem(
+            "/project", platform_name="darwin", service=macos
         )
+        self.assertEqual(observed.status, Status.SUCCESS)
+        self.assertEqual(observed.details["filesystem_profile"], "macos_local_apfs")
 
     def test_version_is_available_without_loading_linux_implementation(self) -> None:
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             exit_code = entrypoint.main(["--version"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue().strip(), "sos 0.1.0a1")
+        self.assertEqual(output.getvalue().strip(), "sos 0.1.0a2")
 
     def test_native_linux_filesystem_is_admitted(self) -> None:
         mountinfo = "36 25 0:32 / / rw,relatime - ext4 /dev/root rw\n"

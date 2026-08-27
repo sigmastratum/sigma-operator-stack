@@ -1,9 +1,4 @@
-"""Native macOS mechanisms behind the frozen CPX101 platform boundary.
-
-The selector intentionally does not import this module yet.  CPX103-MAC
-qualifies the mechanism in isolation before a later integration packet may
-make it selectable.
-"""
+"""Native macOS mechanisms behind the frozen platform boundary."""
 
 from __future__ import annotations
 

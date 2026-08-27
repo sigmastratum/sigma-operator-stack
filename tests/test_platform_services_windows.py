@@ -161,7 +161,7 @@ class _FakeWindowsNative:
 
     def observe_launcher(self, client_id: str) -> EphemeralLauncherObservation:
         self.calls.append(("observe_launcher", client_id))
-        return EphemeralLauncherObservation(Path(r"C:\Program Files\SOS\sos.exe"), "0.1.0a1", _digest(b"launcher"))
+        return EphemeralLauncherObservation(Path(r"C:\Program Files\SOS\sos.exe"), "0.1.0a2", _digest(b"launcher"))
 
 
 class _IdentityBoundKernel:
@@ -809,9 +809,9 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
 
     def test_launcher_is_bounded_to_codex_and_git_and_content_safe(self) -> None:
         observed = self.service.observe_launcher("codex")
-        self.assertEqual(observed.package_version, "0.1.0a1")
+        self.assertEqual(observed.package_version, "0.1.0a2")
         self.assertNotIn("C:\\", json.dumps(observed.safe_projection()))
-        self.assertEqual(self.service.observe_launcher("git").package_version, "0.1.0a1")
+        self.assertEqual(self.service.observe_launcher("git").package_version, "0.1.0a2")
         with self.assertRaisesRegex(PlatformServiceError, "launcher_unsupported"):
             self.service.observe_launcher("claude")
 

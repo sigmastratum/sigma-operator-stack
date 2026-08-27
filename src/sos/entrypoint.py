@@ -1,8 +1,4 @@
-"""Host-safe SOS entry point.
-
-Only standard-library and package-identity modules may be imported here. The
-Linux implementation is loaded after host admission succeeds.
-"""
+"""Host-safe SOS entry point for admitted native control planes."""
 
 from __future__ import annotations
 
@@ -27,6 +23,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False))
         return 2
-    from .cli import main as linux_main
+    from .cli import main as platform_main
 
-    return linux_main(arguments)
+    return platform_main(arguments)

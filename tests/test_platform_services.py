@@ -18,6 +18,8 @@ from sos.platform_services import (
 )
 from sos.platforms import _select_platform_services
 from sos.platforms.linux import LinuxPlatformServices
+from sos.platforms.macos import MacOSPlatformServices
+from sos.platforms.windows import WindowsPlatformServices
 
 
 _FORBIDDEN_ATTRIBUTES = frozenset(
@@ -179,13 +181,15 @@ class PortablePlatformServicesTests(unittest.TestCase):
             )
         )
 
-    def test_selector_uses_process_platform_only_and_linux_conforms(self) -> None:
+    def test_selector_uses_process_platform_only_and_all_adapters_conform(self) -> None:
         selected = _select_platform_services("linux")
         self.assertIsInstance(selected, LinuxPlatformServices)
         self.assertIsInstance(selected, PlatformServices)
         self.assertIsInstance(current_platform_services(), LinuxPlatformServices)
+        self.assertIsInstance(_select_platform_services("win32"), WindowsPlatformServices)
+        self.assertIsInstance(_select_platform_services("darwin"), MacOSPlatformServices)
         with self.assertRaisesRegex(RuntimeError, "SOS_PLATFORM_ADAPTER_UNAVAILABLE"):
-            _select_platform_services("win32")
+            _select_platform_services("freebsd")
 
     def test_safe_projections_never_serialize_operational_bytes_or_absolute_paths(self) -> None:
         service = LinuxPlatformServices()

@@ -21,7 +21,7 @@ SPEC.loader.exec_module(alpha)
 
 
 class AlphaOnboardingTests(unittest.TestCase):
-    def make_bundle(self, root: Path) -> Path:
+    def make_bundle(self, root: Path, *, system: str = "Linux") -> Path:
         bundle = root / "bundle"
         bundle.mkdir()
         payloads = {
@@ -33,6 +33,9 @@ class AlphaOnboardingTests(unittest.TestCase):
         }
         for name, data in payloads.items():
             (bundle / name).write_bytes(data)
+        for name in alpha.NATIVE_FILES.get(system, frozenset()):
+            payloads[name] = b"native-private-alpha\n"
+            (bundle / name).write_bytes(payloads[name])
         artifacts = [
             {
                 "filename": name,
@@ -42,6 +45,11 @@ class AlphaOnboardingTests(unittest.TestCase):
                     alpha.SBOM: "application/vnd.cyclonedx+json",
                     "start-sos-alpha": "text/x-python",
                     alpha.WHEEL: "application/zip",
+                    "Install-SOS.ps1": "text/x-powershell",
+                    "Test-SOS.ps1": "text/x-powershell",
+                    "Install-SOS.command": "text/x-shellscript",
+                    "Test-SOS.command": "text/x-shellscript",
+                    "native-smoke": "text/x-python",
                 }[name],
                 "sha256": hashlib.sha256(data).hexdigest(),
             }
@@ -51,7 +59,11 @@ class AlphaOnboardingTests(unittest.TestCase):
             "artifacts": artifacts,
             "build": {"network_allowed": False},
             "candidate": "a" * 40,
-            "contract": "sos_public_release_manifest_v1",
+            "contract": (
+                "sos_native_private_alpha_bundle_v1"
+                if system in alpha.NATIVE_FILES
+                else "sos_public_release_manifest_v1"
+            ),
             "tree": "b" * 40,
             "version": alpha.VERSION,
         }
@@ -61,7 +73,7 @@ class AlphaOnboardingTests(unittest.TestCase):
         )
         sums = {
             name: hashlib.sha256((bundle / name).read_bytes()).hexdigest()
-            for name in alpha.EXPECTED_FILES
+            for name in alpha._expected_files(system)
         }
         (bundle / "SHA256SUMS").write_text(
             "".join(f"{digest}  {name}\n" for name, digest in sorted(sums.items())),
@@ -72,15 +84,29 @@ class AlphaOnboardingTests(unittest.TestCase):
     def test_platform_boundary_is_explicit_and_fail_closed(self) -> None:
         alpha.validate_platform("Linux", "x86_64", (3, 11))
         alpha.validate_platform("Linux", "x86_64", (3, 12))
+        alpha.validate_platform("Windows", "AMD64", (3, 12))
+        alpha.validate_platform("Darwin", "arm64", (3, 11))
         cases = (
-            ("Darwin", "x86_64", (3, 12), "SOS_ALPHA_LINUX_REQUIRED"),
-            ("Linux", "aarch64", (3, 12), "SOS_ALPHA_ARCHITECTURE_UNSUPPORTED"),
+            ("Darwin", "x86_64", (3, 12), "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
+            ("Linux", "aarch64", (3, 12), "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
             ("Linux", "x86_64", (3, 13), "SOS_ALPHA_PYTHON_UNSUPPORTED"),
         )
         for system, machine, version, code in cases:
             with self.subTest(code=code), self.assertRaises(alpha.StartError) as raised:
                 alpha.validate_platform(system, machine, version)
             self.assertEqual(raised.exception.code, code)
+
+    def test_native_bundle_inventory_is_platform_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            windows = self.make_bundle(root, system="Windows")
+            self.assertEqual(
+                alpha.verify_bundle(windows, system="Windows")["contract"],
+                "sos_native_private_alpha_bundle_v1",
+            )
+            with self.assertRaises(alpha.StartError) as raised:
+                alpha.verify_bundle(windows, system="Darwin")
+            self.assertEqual(raised.exception.code, "SOS_ALPHA_BUNDLE_INCOMPLETE")
 
     def test_checked_launcher_installs_exact_wheel_then_only_runs_init(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"
 SBOM = f"sigma-operator-stack-{VERSION}.cdx.json"
 EXPECTED_FILES = frozenset(
@@ -30,6 +30,10 @@ EXPECTED_FILES = frozenset(
         WHEEL,
     }
 )
+NATIVE_FILES = {
+    "Windows": frozenset({"Install-SOS.ps1", "Test-SOS.ps1", "native-smoke"}),
+    "Darwin": frozenset({"Install-SOS.command", "Test-SOS.command", "native-smoke"}),
+}
 MAX_FILE_BYTES = {
     "START-HERE.md": 256 * 1024,
     "alpha-feedback.md": 256 * 1024,
@@ -37,6 +41,11 @@ MAX_FILE_BYTES = {
     SBOM: 16 * 1024 * 1024,
     "start-sos-alpha": 1024 * 1024,
     WHEEL: 64 * 1024 * 1024,
+    "Install-SOS.ps1": 256 * 1024,
+    "Test-SOS.ps1": 256 * 1024,
+    "Install-SOS.command": 256 * 1024,
+    "Test-SOS.command": 256 * 1024,
+    "native-smoke": 1024 * 1024,
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
@@ -66,24 +75,24 @@ def validate_platform(
     machine: str = platform.machine(),
     python_version: tuple[int, int] = sys.version_info[:2],
 ) -> None:
-    if system != "Linux":
+    normalized_machine = machine.lower()
+    supported = (
+        (system == "Linux" and normalized_machine == "x86_64")
+        or (system == "Windows" and normalized_machine in {"amd64", "x86_64"})
+        or (system == "Darwin" and normalized_machine in {"arm64", "aarch64"})
+    )
+    if not supported:
         raise _fail(
-            "SOS_ALPHA_LINUX_REQUIRED",
-            f"This alpha supports Linux only; detected {system or 'unknown'}.",
-            "Use a supported Linux x86_64 machine and run the launcher again.",
-        )
-    if machine != "x86_64":
-        raise _fail(
-            "SOS_ALPHA_ARCHITECTURE_UNSUPPORTED",
-            f"This alpha supports x86_64 only; detected {machine or 'unknown'}.",
-            "Use a Linux x86_64 machine and run the launcher again.",
+            "SOS_ALPHA_PLATFORM_UNSUPPORTED",
+            f"This private alpha does not support {system or 'unknown'} {machine or 'unknown'}.",
+            "Use Linux x86_64, Windows 11 x86_64, or macOS 14+ Apple Silicon.",
         )
     if python_version not in {(3, 11), (3, 12)}:
         observed = ".".join(str(item) for item in python_version)
         raise _fail(
             "SOS_ALPHA_PYTHON_UNSUPPORTED",
             f"This alpha requires Python 3.11 or 3.12; detected {observed}.",
-            "Install Python 3.11 or 3.12, then run the launcher with that python3.",
+            "Install Python 3.11 or 3.12, then run the platform launcher again.",
         )
 
 
@@ -106,6 +115,7 @@ def find_codex(which: Callable[[str], str | None] = shutil.which, home: Path | N
     patterns = (
         ".vscode-server/extensions/openai.chatgpt-*/bin/*/codex",
         ".vscode/extensions/openai.chatgpt-*/bin/*/codex",
+        "Library/Application Support/Code/User/globalStorage/openai.chatgpt/bin/*/codex",
     )
     for pattern_value in patterns:
         for candidate in sorted(root.glob(pattern_value)):
@@ -114,11 +124,47 @@ def find_codex(which: Callable[[str], str | None] = shutil.which, home: Path | N
     raise _fail(
         "SOS_ALPHA_CODEX_MISSING",
         "Codex was not found in PATH or in a supported VS Code extension location.",
-        "Install or enable Codex for this Linux user, then run the launcher again.",
+        "Install or enable Codex for this user, then run the launcher again.",
     )
 
 
-def _read_checksums(path: Path) -> dict[str, str]:
+def _tool_command(tool_bin: Path) -> Path:
+    candidates = (tool_bin / "sos.exe", tool_bin / "sos") if os.name == "nt" else (tool_bin / "sos",)
+    for candidate in candidates:
+        if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+            return candidate
+    raise _fail(
+        "SOS_ALPHA_TOOL_BINDING_MISSING",
+        "The installed SOS command was not found in the uv tool directory.",
+        "Check 'uv tool dir --bin', then run the launcher again.",
+    )
+
+
+def _installed_sos(
+    uv: str,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> Path:
+    tool_bin = runner(
+        [uv, "tool", "dir", "--bin"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if tool_bin.returncode != 0 or not tool_bin.stdout.strip():
+        raise _fail(
+            "SOS_ALPHA_TOOL_BINDING_MISSING",
+            "uv did not report its tool directory.",
+            "Run 'uv tool dir --bin', correct the uv setup, then run the launcher again.",
+        )
+    return _tool_command(Path(tool_bin.stdout.strip()))
+
+
+def _expected_files(system: str) -> frozenset[str]:
+    return EXPECTED_FILES | NATIVE_FILES.get(system, frozenset())
+
+
+def _read_checksums(path: Path, expected_files: frozenset[str]) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -137,7 +183,7 @@ def _read_checksums(path: Path) -> dict[str, str]:
                 "Download or copy the complete alpha bundle again.",
             )
         values[parts[1]] = parts[0]
-    if set(values) != EXPECTED_FILES:
+    if set(values) != expected_files:
         raise _fail(
             "SOS_ALPHA_BUNDLE_INCOMPLETE",
             "The bundle file inventory does not match this alpha.",
@@ -146,7 +192,7 @@ def _read_checksums(path: Path) -> dict[str, str]:
     return values
 
 
-def verify_bundle(bundle: Path) -> dict[str, object]:
+def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str, object]:
     try:
         bundle = bundle.resolve(strict=True)
     except OSError as error:
@@ -155,8 +201,9 @@ def verify_bundle(bundle: Path) -> dict[str, object]:
             "The alpha bundle directory is missing or unreadable.",
             "Download or copy the complete alpha bundle again.",
         ) from error
-    checksums = _read_checksums(bundle / "SHA256SUMS")
-    for filename in sorted(EXPECTED_FILES):
+    expected_files = _expected_files(system)
+    checksums = _read_checksums(bundle / "SHA256SUMS", expected_files)
+    for filename in sorted(expected_files):
         path = bundle / filename
         try:
             invalid_type = path.is_symlink() or not path.is_file()
@@ -209,16 +256,26 @@ def verify_bundle(bundle: Path) -> dict[str, object]:
             "The release manifest is malformed.",
             "Download or copy the complete alpha bundle again.",
         ) from error
-    expected_artifacts = EXPECTED_FILES.difference({"release-manifest.json"})
+    expected_artifacts = expected_files.difference({"release-manifest.json"})
     expected_media = {
         "START-HERE.md": "text/markdown",
         "alpha-feedback.md": "text/markdown",
         SBOM: "application/vnd.cyclonedx+json",
         "start-sos-alpha": "text/x-python",
         WHEEL: "application/zip",
+        "Install-SOS.ps1": "text/x-powershell",
+        "Test-SOS.ps1": "text/x-powershell",
+        "Install-SOS.command": "text/x-shellscript",
+        "Test-SOS.command": "text/x-shellscript",
+        "native-smoke": "text/x-python",
     }
+    expected_contract = (
+        "sos_native_private_alpha_bundle_v1"
+        if system in NATIVE_FILES
+        else "sos_public_release_manifest_v1"
+    )
     if (
-        manifest.get("contract") != "sos_public_release_manifest_v1"
+        manifest.get("contract") != expected_contract
         or manifest.get("version") != VERSION
         or not GIT_OBJECT.fullmatch(str(manifest.get("candidate", "")))
         or not GIT_OBJECT.fullmatch(str(manifest.get("tree", "")))
@@ -321,26 +378,7 @@ def run_onboarding(
             "uv could not install the exact SOS wheel.",
             "Read the uv error above, correct it, then run the launcher again.",
         )
-    tool_bin = runner(
-        [uv, "tool", "dir", "--bin"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if tool_bin.returncode != 0 or not tool_bin.stdout.strip():
-        raise _fail(
-            "SOS_ALPHA_TOOL_BINDING_MISSING",
-            "uv installed the package but did not report its tool directory.",
-            "Run 'uv tool dir --bin', correct the uv setup, then run the launcher again.",
-        )
-    sos = Path(tool_bin.stdout.strip()) / "sos"
-    if not sos.is_file() or not os.access(sos, os.X_OK):
-        raise _fail(
-            "SOS_ALPHA_TOOL_BINDING_MISSING",
-            "The installed SOS command was not found in the uv tool directory.",
-            "Check 'uv tool dir --bin', then run the launcher again.",
-        )
+    sos = _installed_sos(uv, runner)
     compatibility_command = [
         os.fspath(sos),
         "compatibility",
@@ -429,6 +467,80 @@ def run_onboarding(
     return root
 
 
+def run_update(
+    bundle: Path,
+    project: Path,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> Path:
+    validate_platform()
+    git = _required_command("git", which)
+    uv = _required_command("uv", which)
+    find_codex(which=which)
+    verify_bundle(bundle)
+    root = discover_project_root(project, git, runner)
+    updated = runner(
+        [
+            uv,
+            "tool",
+            "install",
+            "--force",
+            "--no-config",
+            "--no-sources",
+            "--no-build",
+            "--no-python-downloads",
+            os.fspath(bundle / WHEEL),
+        ],
+        check=False,
+    )
+    if updated.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_UPDATE_FAILED",
+            "uv could not install the exact replacement SOS wheel.",
+            "Read the uv error and rerun the checked bundle after correcting it.",
+        )
+    sos = _installed_sos(uv, runner)
+    rebound = runner([os.fspath(sos), "setup", "update", "codex", os.fspath(root)], check=False)
+    if rebound.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_SETUP_UPDATE_FAILED",
+            "SOS did not complete the previewed project integration update.",
+            "Do not uninstall; read the typed SOS result and retry the same checked bundle.",
+        )
+    return root
+
+
+def run_remove(
+    bundle: Path,
+    project: Path,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> Path:
+    validate_platform()
+    git = _required_command("git", which)
+    uv = _required_command("uv", which)
+    verify_bundle(bundle)
+    root = discover_project_root(project, git, runner)
+    sos = _installed_sos(uv, runner)
+    removed = runner([os.fspath(sos), "setup", "remove", "codex", os.fspath(root)], check=False)
+    if removed.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_SETUP_REMOVE_FAILED",
+            "SOS did not safely remove its exact managed Codex integration.",
+            "Do not remove the package; read the typed SOS result and retry recovery first.",
+        )
+    uninstalled = runner([uv, "tool", "uninstall", "sigma-operator-stack"], check=False)
+    if uninstalled.returncode != 0:
+        raise _fail(
+            "SOS_ALPHA_PACKAGE_REMOVE_FAILED",
+            "The project integration was removed but uv could not remove the SOS package.",
+            "The project .sigma records were preserved; retry only the uv uninstall command.",
+        )
+    return root
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="start-sos-alpha",
@@ -436,6 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
     parser.add_argument("--primary-authority")
+    parser.add_argument("--mode", choices=("install", "update", "remove"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
     try:
@@ -445,11 +558,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "The alpha launcher must not be run through a symbolic link.",
                 "Run the checked start-sos-alpha file directly from the extracted bundle.",
             )
-        run_onboarding(
-            launcher.parent,
-            arguments.project,
-            primary_authority_id=arguments.primary_authority,
-        )
+        if arguments.mode == "install":
+            run_onboarding(
+                launcher.parent,
+                arguments.project,
+                primary_authority_id=arguments.primary_authority,
+            )
+        elif arguments.mode == "update":
+            run_update(launcher.parent, arguments.project)
+        else:
+            run_remove(launcher.parent, arguments.project)
     except StartError as error:
         print("\nSOS alpha setup stopped.", file=sys.stderr)
         print(f"Code: {error.code}", file=sys.stderr)

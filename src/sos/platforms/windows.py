@@ -1,9 +1,7 @@
-"""Windows 11/local-NTFS mechanisms behind the frozen PlatformServices boundary.
+"""Windows 11/local-NTFS mechanisms behind the PlatformServices boundary.
 
-The adapter intentionally is not selected by :mod:`sos.platforms` yet.  CPX103
-qualifies the mechanism in isolation before a later integration slice enables
-selection.  Tests on non-Windows hosts use an injected native boundary and
-therefore make no claim about native execution.
+Tests on non-Windows hosts use an injected native boundary and therefore make
+no claim about native execution.
 """
 
 from __future__ import annotations

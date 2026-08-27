@@ -1,4 +1,4 @@
-"""Read-only host and filesystem admission for the Linux execution substrate."""
+"""Read-only host and filesystem admission for supported control planes."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from pathlib import Path, PurePosixPath
 
 from .platforms import process_platform_name
-from .platform_services import current_platform_services
+from .platform_services import PlatformServiceError, PlatformServices, current_platform_services
 from .result import Status, TerminalResult
 
 
@@ -46,27 +46,28 @@ def admit_host(*, platform_name: str | None = None) -> TerminalResult:
             ("SOS_LINUX_SUBSTRATE_ADMITTED",),
             _details(host_platform="linux"),
         )
-    host = "windows" if observed.startswith("win") else "macos" if observed == "darwin" else "other"
-    if host == "windows":
-        reason = "SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT"
-        support_status = "under_development"
-        next_action = "Use a qualified native Linux x86_64 runner for this alpha."
-    elif host == "macos":
-        reason = "SOS_MACOS_DEMAND_GATED"
-        support_status = "demand_gated"
-        next_action = "Use a qualified native Linux x86_64 runner for this alpha."
-    else:
-        reason = "SOS_LINUX_SUBSTRATE_REQUIRED"
-        support_status = "unsupported"
-        next_action = "Use a qualified native Linux x86_64 runner."
+    if observed == "win32":
+        return TerminalResult(
+            "sos_host_admission_v2",
+            Status.SUCCESS,
+            ("SOS_WINDOWS_CONTROL_PLANE_ADMITTED",),
+            _details(host_platform="windows", execution_substrate="windows"),
+        )
+    if observed == "darwin":
+        return TerminalResult(
+            "sos_host_admission_v2",
+            Status.SUCCESS,
+            ("SOS_MACOS_CONTROL_PLANE_ADMITTED",),
+            _details(host_platform="macos", execution_substrate="macos"),
+        )
     return TerminalResult(
         "sos_host_admission_v2",
         Status.UNSUPPORTED,
-        (reason,),
+        ("SOS_PLATFORM_UNSUPPORTED",),
         _details(
-            host_platform=host,
-            native_support_status=support_status,
-            next_action=next_action,
+            host_platform="other",
+            native_support_status="unsupported",
+            next_action="Use Linux, Windows 11 x86_64, or macOS 14+ Apple Silicon.",
         ),
     )
 
@@ -76,20 +77,40 @@ def admit_project_filesystem(
     *,
     platform_name: str | None = None,
     mountinfo_text: str | None = None,
+    service: PlatformServices | None = None,
 ) -> TerminalResult:
     host = admit_host(platform_name=platform_name)
     if host.status != Status.SUCCESS:
         return TerminalResult(
             "sos_filesystem_admission_v1", host.status, host.reasons, host.details
         )
+    observed_platform = process_platform_name(platform_name)
     try:
         if mountinfo_text is None:
-            report = current_platform_services().inspect_host(Path(path))
+            selected = current_platform_services() if service is None else service
+            report = selected.inspect_host(Path(path))
             filesystem_type = str(report.get("filesystem_type", "unknown"))
             if report.get("filesystem_observation_status") != "observed":
-                raise ValueError("filesystem observation unavailable")
+                if observed_platform == "win32" and filesystem_type == "ntfs":
+                    pass
+                else:
+                    raise ValueError("filesystem observation unavailable")
         else:
+            if observed_platform != "linux":
+                raise ValueError("mountinfo is Linux-only")
             filesystem_type = _filesystem_for_path(PurePosixPath(path), mountinfo_text)
+    except PlatformServiceError as error:
+        reason = (
+            "SOS_FILESYSTEM_PROFILE_UNSUPPORTED"
+            if error.kind in {"filesystem_unsupported", "platform_unsupported"}
+            else "SOS_FILESYSTEM_PROFILE_NOT_VERIFIED"
+        )
+        return TerminalResult(
+            "sos_filesystem_admission_v1",
+            Status.UNSUPPORTED if reason.endswith("UNSUPPORTED") else Status.NOT_VERIFIED,
+            (reason,),
+            _details(filesystem_profile="unsupported_or_unknown"),
+        )
     except (OSError, UnicodeError, ValueError):
         return TerminalResult(
             "sos_filesystem_admission_v1",
@@ -97,7 +118,8 @@ def admit_project_filesystem(
             ("SOS_FILESYSTEM_PROFILE_NOT_VERIFIED",),
             _details(filesystem_profile="unknown"),
         )
-    if filesystem_type in _ADMITTED_FILESYSTEMS:
+    filesystem_type = filesystem_type.lower()
+    if observed_platform == "linux" and filesystem_type in _ADMITTED_FILESYSTEMS:
         return TerminalResult(
             "sos_filesystem_admission_v1",
             Status.SUCCESS,
@@ -105,6 +127,30 @@ def admit_project_filesystem(
             _details(
                 filesystem_profile="native_linux",
                 filesystem_type=filesystem_type,
+            ),
+        )
+    if observed_platform == "win32" and filesystem_type == "ntfs":
+        return TerminalResult(
+            "sos_filesystem_admission_v1",
+            Status.SUCCESS,
+            ("SOS_FILESYSTEM_PROFILE_ADMITTED",),
+            _details(
+                execution_substrate="windows",
+                canonical_state_location="native_windows_filesystem_required",
+                filesystem_profile="windows_local_ntfs",
+                filesystem_type="ntfs",
+            ),
+        )
+    if observed_platform == "darwin" and filesystem_type == "apfs":
+        return TerminalResult(
+            "sos_filesystem_admission_v1",
+            Status.SUCCESS,
+            ("SOS_FILESYSTEM_PROFILE_ADMITTED",),
+            _details(
+                execution_substrate="macos",
+                canonical_state_location="native_macos_filesystem_required",
+                filesystem_profile="macos_local_apfs",
+                filesystem_type="apfs",
             ),
         )
     reason = (

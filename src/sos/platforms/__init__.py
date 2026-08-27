@@ -26,4 +26,12 @@ def _select_platform_services(platform_name: str) -> PlatformServices:
         from .linux import LinuxPlatformServices
 
         return LinuxPlatformServices()
+    if platform_name == "win32":
+        from .windows import WindowsPlatformServices
+
+        return WindowsPlatformServices()
+    if platform_name == "darwin":
+        from .macos import MacOSPlatformServices
+
+        return MacOSPlatformServices()
     raise RuntimeError("SOS_PLATFORM_ADAPTER_UNAVAILABLE")
