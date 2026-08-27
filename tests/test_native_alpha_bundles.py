@@ -30,6 +30,83 @@ smoke = _load("sos_native_alpha_smoke", ROOT / "tools/native_alpha_smoke.py")
 
 
 class NativeAlphaBundleTests(unittest.TestCase):
+    def test_windows_installer_builder_rejects_dirty_or_mismatched_source(self) -> None:
+        builder = ROOT / "tools/build_windows_installer.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            source = repository / "installers/windows-installer"
+            source.mkdir(parents=True)
+            (source / "go.mod").write_text("module example.invalid/sos\n", encoding="utf-8")
+            (source / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", os.fspath(repository)], check=True)
+            subprocess.run(["git", "-C", os.fspath(repository), "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", os.fspath(repository),
+                    "-c", "user.name=SOS Test", "-c", "user.email=sos@example.invalid",
+                    "commit", "-qm", "fixture",
+                ],
+                check=True,
+            )
+            candidate = subprocess.run(
+                ["git", "-C", os.fspath(repository), "rev-parse", "HEAD"],
+                check=True, stdout=subprocess.PIPE, text=True,
+            ).stdout.strip()
+            fake_go = root / "go"
+            fake_go.write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib,sys\n"
+                "if sys.argv[1:] == ['version']:\n"
+                " print('go version go1.27.0 linux/amd64')\n"
+                "else:\n"
+                " out=pathlib.Path(sys.argv[sys.argv.index('-o')+1])\n"
+                " out.write_bytes(b'MZ'+pathlib.Path('main.go').read_bytes())\n",
+                encoding="utf-8",
+            )
+            fake_go.chmod(0o700)
+
+            def build(ref: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [
+                        sys.executable, os.fspath(builder),
+                        "--repository", os.fspath(repository),
+                        "--candidate", ref,
+                        "--go", os.fspath(fake_go),
+                        "--output", os.fspath(root / "SOS-Installer.exe"),
+                    ],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+
+            clean = build(candidate)
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            report = json.loads(clean.stdout)
+            expected_tree = subprocess.run(
+                ["git", "-C", os.fspath(repository), "rev-parse", "HEAD^{tree}"],
+                check=True, stdout=subprocess.PIPE, text=True,
+            ).stdout.strip()
+            self.assertEqual(report["source_tree"], expected_tree)
+
+            (source / "main.go").write_text("package main\n// dirty\nfunc main() {}\n", encoding="utf-8")
+            dirty = build(candidate)
+            self.assertNotEqual(dirty.returncode, 0)
+            self.assertIn("worktree is not clean", dirty.stderr)
+
+            subprocess.run(["git", "-C", os.fspath(repository), "restore", "."], check=True)
+            (repository / "second.txt").write_text("second\n", encoding="utf-8")
+            subprocess.run(["git", "-C", os.fspath(repository), "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", os.fspath(repository),
+                    "-c", "user.name=SOS Test", "-c", "user.email=sos@example.invalid",
+                    "commit", "-qm", "second",
+                ],
+                check=True,
+            )
+            mismatch = build(candidate)
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn("candidate does not match repository HEAD", mismatch.stderr)
+
     def test_native_windows_entrypoint_does_not_depend_on_powershell_policy(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(encoding="utf-8")
         builder = (ROOT / "tools/build_windows_installer.py").read_text(encoding="utf-8")
