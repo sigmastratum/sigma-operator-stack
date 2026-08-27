@@ -129,6 +129,8 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "SOS_ALPHA_RUNTIME_REMOVE_REFUSED",
             "SOS_ALPHA_PYTHON_ACQUISITION_FAILED",
             "SOS_ALPHA_SUBPROCESS_START_FAILED",
+            "SOS_ALPHA_UV_CACHE_UNAVAILABLE",
+            '"UV_CACHE_DIR="+filepath.Join(runtimeRoot, "cache")',
             '[]string{"--native-tls", "python", "install"',
             "--no-python-downloads",
             "hasReparsePoint",
@@ -154,6 +156,23 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "runas",
         ):
             self.assertNotIn(forbidden.lower(), source.lower())
+
+    def test_windows_uv_cache_is_sos_owned_and_fail_closed(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('cacheRoot := filepath.Join(runtimeRoot, "cache")', source)
+        self.assertIn('"UV_CACHE_DIR="+filepath.Join(runtimeRoot, "cache")', source)
+        self.assertIn('"SOS_ALPHA_UV_CACHE_UNAVAILABLE"', source)
+        self.assertIn("requireDirectoryNoReparse(cacheRoot)", source)
+        self.assertIn("ensureDirectoryNoReparse(cacheRoot)", source)
+        for forbidden in (
+            'filepath.join(localappdata, "uv")',
+            '"uv_cache_dir="+localappdata',
+            "--no-cache",
+            "runas",
+        ):
+            self.assertNotIn(forbidden, source.lower())
 
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
