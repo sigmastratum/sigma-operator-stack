@@ -35,6 +35,31 @@ class PlatformAdmissionTests(unittest.TestCase):
         self.assertEqual(result.details["host_platform"], "macos")
         self.assertEqual(result.details["execution_substrate"], "macos")
 
+    def test_actual_windows_and_macos_version_boundaries_fail_closed(self) -> None:
+        with (
+            mock.patch("sos.platform_admission.process_platform_name", return_value="win32"),
+            mock.patch("sos.platform_admission.host_platform.machine", return_value="AMD64"),
+            mock.patch(
+                "sos.platform_admission.host_platform.version",
+                return_value="10.0.19045",
+            ),
+        ):
+            result = admit_host()
+        self.assertEqual(result.status, Status.UNSUPPORTED)
+        self.assertEqual(result.reasons, ("SOS_PLATFORM_UNSUPPORTED",))
+
+        with (
+            mock.patch("sos.platform_admission.process_platform_name", return_value="darwin"),
+            mock.patch("sos.platform_admission.host_platform.machine", return_value="arm64"),
+            mock.patch(
+                "sos.platform_admission.host_platform.mac_ver",
+                return_value=("13.7.1", ("", "", ""), ""),
+            ),
+        ):
+            result = admit_host()
+        self.assertEqual(result.status, Status.UNSUPPORTED)
+        self.assertEqual(result.reasons, ("SOS_PLATFORM_UNSUPPORTED",))
+
     def test_admitted_entrypoint_routes_to_shared_cli(self) -> None:
         admitted = admit_host(platform_name="win32")
         with (

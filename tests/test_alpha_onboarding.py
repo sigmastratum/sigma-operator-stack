@@ -82,18 +82,20 @@ class AlphaOnboardingTests(unittest.TestCase):
         return bundle
 
     def test_platform_boundary_is_explicit_and_fail_closed(self) -> None:
-        alpha.validate_platform("Linux", "x86_64", (3, 11))
-        alpha.validate_platform("Linux", "x86_64", (3, 12))
-        alpha.validate_platform("Windows", "AMD64", (3, 12))
-        alpha.validate_platform("Darwin", "arm64", (3, 11))
+        alpha.validate_platform("Linux", "x86_64", (3, 11), "6.8.0")
+        alpha.validate_platform("Linux", "x86_64", (3, 12), "6.8.0")
+        alpha.validate_platform("Windows", "AMD64", (3, 12), "10.0.22631")
+        alpha.validate_platform("Darwin", "arm64", (3, 11), "14.6.1")
         cases = (
-            ("Darwin", "x86_64", (3, 12), "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
-            ("Linux", "aarch64", (3, 12), "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
-            ("Linux", "x86_64", (3, 13), "SOS_ALPHA_PYTHON_UNSUPPORTED"),
+            ("Darwin", "x86_64", (3, 12), "14.6.1", "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
+            ("Linux", "aarch64", (3, 12), "6.8.0", "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
+            ("Windows", "AMD64", (3, 12), "10.0.19045", "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
+            ("Darwin", "arm64", (3, 12), "13.6.9", "SOS_ALPHA_PLATFORM_UNSUPPORTED"),
+            ("Linux", "x86_64", (3, 13), "6.8.0", "SOS_ALPHA_PYTHON_UNSUPPORTED"),
         )
-        for system, machine, version, code in cases:
+        for system, machine, version, system_version, code in cases:
             with self.subTest(code=code), self.assertRaises(alpha.StartError) as raised:
-                alpha.validate_platform(system, machine, version)
+                alpha.validate_platform(system, machine, version, system_version)
             self.assertEqual(raised.exception.code, code)
 
     def test_native_bundle_inventory_is_platform_exact(self) -> None:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform as host_platform
+import re
 from pathlib import Path, PurePosixPath
 
 from .platforms import process_platform_name
@@ -38,6 +40,7 @@ _KNOWN_UNSUPPORTED_FILESYSTEMS = frozenset(
 
 
 def admit_host(*, platform_name: str | None = None) -> TerminalResult:
+    actual_host = platform_name is None
     observed = process_platform_name(platform_name)
     if observed == "linux":
         return TerminalResult(
@@ -47,6 +50,14 @@ def admit_host(*, platform_name: str | None = None) -> TerminalResult:
             _details(host_platform="linux"),
         )
     if observed == "win32":
+        version = tuple(int(value) for value in re.findall(r"\d+", host_platform.version())[:3])
+        architecture = host_platform.machine().lower()
+        if actual_host and (
+            architecture not in {"amd64", "x86_64"}
+            or len(version) < 3
+            or version[2] < 22000
+        ):
+            return _unsupported_host("Use Windows 11 x86_64, Linux x86_64, or macOS 14+ Apple Silicon.")
         return TerminalResult(
             "sos_host_admission_v2",
             Status.SUCCESS,
@@ -54,12 +65,24 @@ def admit_host(*, platform_name: str | None = None) -> TerminalResult:
             _details(host_platform="windows", execution_substrate="windows"),
         )
     if observed == "darwin":
+        version = tuple(int(value) for value in re.findall(r"\d+", host_platform.mac_ver()[0])[:1])
+        architecture = host_platform.machine().lower()
+        if actual_host and (
+            architecture not in {"arm64", "aarch64"}
+            or not version
+            or version[0] < 14
+        ):
+            return _unsupported_host("Use macOS 14+ Apple Silicon, Linux x86_64, or Windows 11 x86_64.")
         return TerminalResult(
             "sos_host_admission_v2",
             Status.SUCCESS,
             ("SOS_MACOS_CONTROL_PLANE_ADMITTED",),
             _details(host_platform="macos", execution_substrate="macos"),
         )
+    return _unsupported_host("Use Linux x86_64, Windows 11 x86_64, or macOS 14+ Apple Silicon.")
+
+
+def _unsupported_host(next_action: str) -> TerminalResult:
     return TerminalResult(
         "sos_host_admission_v2",
         Status.UNSUPPORTED,
@@ -67,7 +90,7 @@ def admit_host(*, platform_name: str | None = None) -> TerminalResult:
         _details(
             host_platform="other",
             native_support_status="unsupported",
-            next_action="Use Linux, Windows 11 x86_64, or macOS 14+ Apple Silicon.",
+            next_action=next_action,
         ),
     )
 

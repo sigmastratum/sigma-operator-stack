@@ -34,6 +34,7 @@ PLATFORMS = {
         "installers/Test-SOS.command": ("Test-SOS.command", "text/x-shellscript", 0o755),
     },
 }
+DISPLAY_NAMES = {"windows": "Windows", "macos": "macOS"}
 
 
 def _run(argv: list[str], cwd: Path) -> str:
@@ -98,7 +99,8 @@ def build(repository: Path, candidate_ref: str, wheel: Path, sbom: Path, output:
     output.mkdir(parents=True, exist_ok=True)
     results: dict[str, object] = {}
     for platform_name, platform_files in PLATFORMS.items():
-        root = output / f"SOS-{platform_name.capitalize()}-{VERSION}"
+        display_name = DISPLAY_NAMES[platform_name]
+        root = output / f"SOS-{display_name}-{VERSION}"
         if root.exists():
             raise FileExistsError(f"output directory already exists: {root.name}")
         root.mkdir()
@@ -131,7 +133,7 @@ def build(repository: Path, candidate_ref: str, wheel: Path, sbom: Path, output:
         names = [*media, "release-manifest.json"]
         sums = "".join(f"{_sha256(root / name)}  {name}\n" for name in sorted(names))
         _write(root / "SHA256SUMS", sums.encode(), 0o644)
-        archive = output / f"SOS-{platform_name.capitalize()}-{VERSION}.zip"
+        archive = output / f"SOS-{display_name}-{VERSION}.zip"
         if archive.exists():
             raise FileExistsError(f"output archive already exists: {archive.name}")
         _zip_tree(root, archive, epoch)

@@ -71,10 +71,16 @@ def _fail(code: str, problem: str, correction: str) -> StartError:
 
 
 def validate_platform(
-    system: str = platform.system(),
-    machine: str = platform.machine(),
-    python_version: tuple[int, int] = sys.version_info[:2],
+    system: str | None = None,
+    machine: str | None = None,
+    python_version: tuple[int, int] | None = None,
+    system_version: str | None = None,
 ) -> None:
+    system = platform.system() if system is None else system
+    machine = platform.machine() if machine is None else machine
+    python_version = sys.version_info[:2] if python_version is None else python_version
+    if system_version is None:
+        system_version = platform.mac_ver()[0] if system == "Darwin" else platform.version()
     normalized_machine = machine.lower()
     supported = (
         (system == "Linux" and normalized_machine == "x86_64")
@@ -86,6 +92,20 @@ def validate_platform(
             "SOS_ALPHA_PLATFORM_UNSUPPORTED",
             f"This private alpha does not support {system or 'unknown'} {machine or 'unknown'}.",
             "Use Linux x86_64, Windows 11 x86_64, or macOS 14+ Apple Silicon.",
+        )
+    numeric_version = tuple(
+        int(value) for value in re.findall(r"\d+", system_version or "")[:3]
+    )
+    platform_version_supported = (
+        system == "Linux"
+        or (system == "Windows" and len(numeric_version) >= 3 and numeric_version[2] >= 22000)
+        or (system == "Darwin" and bool(numeric_version) and numeric_version[0] >= 14)
+    )
+    if not platform_version_supported:
+        raise _fail(
+            "SOS_ALPHA_PLATFORM_UNSUPPORTED",
+            "This private alpha requires Windows 11 or macOS 14 or newer.",
+            "Upgrade the operating system or use a supported Linux x86_64 host.",
         )
     if python_version not in {(3, 11), (3, 12)}:
         observed = ".".join(str(item) for item in python_version)
