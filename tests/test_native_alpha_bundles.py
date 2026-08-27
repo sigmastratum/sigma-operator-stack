@@ -129,9 +129,8 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "SOS_ALPHA_RUNTIME_REMOVE_REFUSED",
             "SOS_ALPHA_PYTHON_ACQUISITION_FAILED",
             "SOS_ALPHA_SUBPROCESS_START_FAILED",
-            "SOS_ALPHA_UV_CACHE_UNAVAILABLE",
-            '"UV_CACHE_DIR="+filepath.Join(runtimeRoot, "cache")',
-            '[]string{"--native-tls", "python", "install"',
+            '"UV_NO_CACHE=1"',
+            '[]string{"--native-tls", "--no-cache", "python", "install"',
             "--no-python-downloads",
             "hasReparsePoint",
         ):
@@ -144,7 +143,10 @@ class NativeAlphaBundleTests(unittest.TestCase):
         source = (ROOT / "installers/windows-installer/main.go").read_text(
             encoding="utf-8"
         )
-        self.assertIn('[]string{"--native-tls", "python", "install"', source)
+        self.assertIn(
+            '[]string{"--native-tls", "--no-cache", "python", "install"',
+            source,
+        )
         self.assertIn('"SOS_ALPHA_PYTHON_ACQUISITION_FAILED"', source)
         self.assertIn('"SOS_ALPHA_SUBPROCESS_START_FAILED"', source)
         for forbidden in (
@@ -157,19 +159,21 @@ class NativeAlphaBundleTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden.lower(), source.lower())
 
-    def test_windows_uv_cache_is_sos_owned_and_fail_closed(self) -> None:
+    def test_windows_uv_acquisition_is_cacheless(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(
             encoding="utf-8"
         )
-        self.assertIn('cacheRoot := filepath.Join(runtimeRoot, "cache")', source)
-        self.assertIn('"UV_CACHE_DIR="+filepath.Join(runtimeRoot, "cache")', source)
-        self.assertIn('"SOS_ALPHA_UV_CACHE_UNAVAILABLE"', source)
-        self.assertIn("requireDirectoryNoReparse(cacheRoot)", source)
-        self.assertIn("ensureDirectoryNoReparse(cacheRoot)", source)
+        self.assertIn('"UV_NO_CACHE=1"', source)
+        self.assertIn(
+            '[]string{"--native-tls", "--no-cache", "python", "install"',
+            source,
+        )
+        self.assertNotIn("UV_CACHE_DIR", source)
+        self.assertNotIn("cacheRoot", source)
+        self.assertNotIn("SOS_ALPHA_UV_CACHE_UNAVAILABLE", source)
         for forbidden in (
             'filepath.join(localappdata, "uv")',
             '"uv_cache_dir="+localappdata',
-            "--no-cache",
             "runas",
         ):
             self.assertNotIn(forbidden, source.lower())

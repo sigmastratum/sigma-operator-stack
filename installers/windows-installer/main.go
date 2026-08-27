@@ -124,8 +124,8 @@ func closedEnvironment(runtimeRoot, pythonRoot string) []string {
 	}
 	return append(
 		environment,
-		"UV_CACHE_DIR="+filepath.Join(runtimeRoot, "cache"),
 		"UV_NO_CONFIG=1",
+		"UV_NO_CACHE=1",
 		"UV_PYTHON_INSTALL_DIR="+pythonRoot,
 		"UV_TOOL_DIR="+filepath.Join(runtimeRoot, "tools"),
 		"UV_TOOL_BIN_DIR="+filepath.Join(runtimeRoot, "bin"),
@@ -225,7 +225,6 @@ func execute() (int, error) {
 	managedRoot := filepath.Join(localAppData, "SigmaOperatorStack")
 	runtimeRoot := filepath.Join(managedRoot, "runtime")
 	bootstrap := filepath.Join(runtimeRoot, "bootstrap")
-	cacheRoot := filepath.Join(runtimeRoot, "cache")
 	pythonRoot := filepath.Join(runtimeRoot, "python")
 	directories := []string{managedRoot, runtimeRoot, bootstrap, pythonRoot, filepath.Join(runtimeRoot, "tools"), filepath.Join(runtimeRoot, "bin")}
 	for _, directory := range directories {
@@ -237,14 +236,6 @@ func execute() (int, error) {
 		if errorValue != nil {
 			return 2, errorValue
 		}
-	}
-	if mode == "remove" || mode == "test" {
-		errorValue = requireDirectoryNoReparse(cacheRoot)
-	} else {
-		errorValue = ensureDirectoryNoReparse(cacheRoot)
-	}
-	if errorValue != nil {
-		return 2, fail("SOS_ALPHA_UV_CACHE_UNAVAILABLE", "SOS-owned uv cache is unavailable or unsafe")
 	}
 	uv := filepath.Join(bootstrap, "uv-"+uvVersion+".exe")
 	if mode == "remove" || mode == "test" {
@@ -269,7 +260,7 @@ func execute() (int, error) {
 		fmt.Printf("SOS acquisition: installing pinned managed Python %s.\n", pythonVersion)
 		status, _, runError := runChecked(
 			uv,
-			[]string{"--native-tls", "python", "install", "--no-config", "--no-progress", "--no-registry", "--install-dir", pythonRoot, pythonVersion},
+			[]string{"--native-tls", "--no-cache", "python", "install", "--no-config", "--no-progress", "--no-registry", "--install-dir", pythonRoot, pythonVersion},
 			environment,
 			false,
 			"SOS_ALPHA_PYTHON_ACQUISITION_FAILED",
