@@ -244,27 +244,6 @@ def _qualify_supported(
             raw_output_serialized=False,
             limits=family_execution_contract(family)["limits"],
         )
-    if (
-        admitted_source_binding is not None
-        and inspection.application_state != "clean"
-        and family.command_id != "python.unittest.v1"
-    ):
-        return QualificationObservation(
-            contract="sos_qualification_observation_v1",
-            status="blocked",
-            reasons=("SOS_QUALIFICATION_DIRTY_SOURCE",),
-            family_id=family.family_id,
-            command_id=family.command_id,
-            plan_digest=plan.plan_digest,
-            source_tree_digest=plan.source_tree_digest,
-            source_status_digest=plan.source_status_digest,
-            isolation=family.isolation,
-            exit_code=None,
-            output_digest=None,
-            output_bytes=0,
-            raw_output_serialized=False,
-            limits=family_execution_contract(family)["limits"],
-        )
     if family.command_id == "python.compile.v1":
         return _run_python_syntax(root, plan, family)
     if family.command_id == "python.unittest.v1":

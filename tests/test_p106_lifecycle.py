@@ -193,6 +193,47 @@ class P106LifecycleTests(unittest.TestCase):
         preflight = project_tool(str(root), "sos_preflight")
         self.assertEqual(preflight.status, "success", preflight.to_dict())
 
+    def test_managed_dirty_state_admits_syntax_and_unittest_with_same_binding(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        (root / "pyproject.toml").write_text(
+            "[build-system]\nrequires = []\nbuild-backend = 'synthetic.backend'\n",
+            encoding="utf-8",
+        )
+        (root / "synthetic.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (root / "tests").mkdir()
+        (root / "tests" / "test_synthetic.py").write_text(
+            "import unittest\n\n"
+            "class Synthetic(unittest.TestCase):\n"
+            "    def test_pass(self):\n"
+            "        self.assertTrue(True)\n",
+            encoding="utf-8",
+        )
+        git(root, "add", "pyproject.toml", "synthetic.py", "tests/test_synthetic.py")
+        git(root, "commit", "-qm", "add qualification fixture")
+        installed = execute_one_command_init(
+            prepare_one_command_init(str(root), launcher=self.binding()),
+            confirmed=True,
+            controlling_tty_observed=True,
+        )
+        self.assertEqual(installed.status, "success", installed.to_dict())
+
+        receipts = []
+        for family_id in ("python.syntax", "python.stdlib-unittest"):
+            _plan, _admission, receipt = qualify_once(
+                str(root),
+                family_id=family_id,
+                confirmed=True,
+                controlling_tty_observed=True,
+            )
+            self.assertEqual(receipt["status"], "passed_local", receipt)
+            receipts.append(receipt)
+        self.assertEqual(
+            receipts[0]["source_status_digest"],
+            receipts[1]["source_status_digest"],
+        )
+        self.assertEqual(receipts[1]["predecessor_receipt"], receipts[0]["receipt_digest"])
+
     def test_crash_after_targets_is_recovered_in_reverse_without_sigma(self) -> None:
         temporary, root = self.make_project()
         self.addCleanup(temporary.cleanup)

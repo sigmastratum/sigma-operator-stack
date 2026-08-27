@@ -163,12 +163,6 @@ def _validate_observation(
             "success",
             ["SOS_CODEX_SETUP_INSTALLED"],
         ),
-        "preflight": (
-            2,
-            "sos_preflight_result_v1",
-            "not_verified",
-            ["SOS_QUALIFICATION_NOT_RUN"],
-        ),
     }
     if name == "check":
         if exit_code != 0 or contract != "sos_check_plan_v1":
@@ -178,6 +172,26 @@ def _validate_observation(
             "exit_code": exit_code,
             "contract": contract,
             "families": _check_family_projection(payload),
+        }
+    if name == "preflight":
+        allowed_preflight = {
+            (2, "not_verified", ("SOS_QUALIFICATION_NOT_RUN",)),
+            (2, "owner_required", ("SOS_CURRENT_WORK_NOT_CONFIGURED",)),
+            (0, "success", ("SOS_READY_FOR_AGENT",)),
+        }
+        observed = (
+            exit_code,
+            status,
+            tuple(reasons) if isinstance(reasons, list) else (),
+        )
+        if contract != "sos_preflight_result_v1" or observed not in allowed_preflight:
+            raise RuntimeError("SOS_NATIVE_SMOKE_OBSERVATION_INVALID")
+        return {
+            "name": name,
+            "exit_code": exit_code,
+            "contract": contract,
+            "status": status,
+            "reasons": reasons,
         }
     expected_exit, expected_contract, expected_status, expected_reasons = expected[name]
     if (

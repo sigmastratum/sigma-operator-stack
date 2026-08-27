@@ -343,6 +343,29 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 ):
                     smoke.smoke(Path("/private/project"), Path("/exact/uv"))
 
+    def test_smoke_accepts_valid_post_qualification_owner_required_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            tool_bin = Path(temporary) / "uv-bin"
+            tool_bin.mkdir()
+            (tool_bin / "sos").write_text("launcher", encoding="utf-8")
+            payloads = self.smoke_payloads()
+            payloads["preflight"] = {
+                "contract": "sos_preflight_result_v1",
+                "status": "owner_required",
+                "reasons": ["SOS_CURRENT_WORK_NOT_CONFIGURED"],
+            }
+            with mock.patch.object(
+                smoke.subprocess,
+                "run",
+                side_effect=self.smoke_runner(tool_bin, payloads),
+            ):
+                report = smoke.smoke(Path("/private/project"), Path("/exact/uv"))
+        preflight = next(
+            item for item in report["observations"] if item["name"] == "preflight"
+        )
+        self.assertEqual(preflight["status"], "owner_required")
+        self.assertEqual(preflight["reasons"], ["SOS_CURRENT_WORK_NOT_CONFIGURED"])
+
 
 if __name__ == "__main__":
     unittest.main()
