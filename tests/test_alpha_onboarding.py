@@ -181,6 +181,7 @@ class AlphaOnboardingTests(unittest.TestCase):
             commands = [arguments for arguments, _ in calls]
             install = next(arguments for arguments in commands if arguments[1:3] == ["tool", "install"])
             self.assertEqual(install[-1], os.fspath(bundle / alpha.WHEEL))
+            self.assertIn("--force", install)
             self.assertIn("--offline", install)
             self.assertIn("--no-index", install)
             self.assertIn("--no-python-downloads", install)

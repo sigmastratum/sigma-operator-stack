@@ -497,7 +497,12 @@ def run_onboarding(
     print(f"Release: {manifest['version']} ({str(manifest['candidate'])[:12]})")
     print(f"Project: {root}")
     print("Installing the exact checked SOS wheel. Project files are not changed yet.")
-    installed = runner(_offline_tool_install_command(uv, bundle), check=False)
+    # A previous attempt may have installed the same public version from an
+    # older candidate before project admission stopped. Rebind the SOS-owned
+    # tool environment to the exact checked wheel on every onboarding retry.
+    installed = runner(
+        _offline_tool_install_command(uv, bundle, force=True), check=False
+    )
     if installed.returncode != 0:
         raise _fail(
             "SOS_ALPHA_INSTALL_FAILED",
