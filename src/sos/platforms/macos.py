@@ -51,6 +51,8 @@ _ATTR_VOL_CAPABILITIES = 0x00020000
 _VOL_CAPABILITIES_FORMAT = 0
 _VOL_CAP_FMT_CASE_SENSITIVE = 0x00000100
 _VOLUME_CAPABILITY_PAYLOAD_SIZE = 36
+_MAX_XATTR_LIST_BYTES = 64 * 1024
+_MAX_XATTR_VALUE_BYTES = 64 * 1024
 _STAGING_MARKER = ".sos-staging-binding-v1"
 
 
@@ -1096,24 +1098,69 @@ class MacOSPlatformServices:
         observed = os.fstat(descriptor)
         if getattr(observed, "st_flags", 0) & _UF_DATALESS:
             raise PlatformServiceError("cloud_placeholder_unsupported")
-        try:
-            names = os.listxattr(descriptor)
-        except (AttributeError, OSError) as exc:
-            # On the admitted macOS profile, inability to inspect extended
-            # attributes leaves alias/placeholder status unknown.
-            if platform.system() == "Darwin":
-                raise PlatformServiceError("object_type_not_verified") from exc
-            names = []
+        names = MacOSPlatformServices._list_xattrs_fd(descriptor)
         lowered = {name.lower() for name in names}
-        if any("fileprovider" in name or "icloud" in name for name in lowered):
+        if any(b"fileprovider" in name or b"icloud" in name for name in lowered):
             raise PlatformServiceError("cloud_placeholder_unsupported")
-        if "com.apple.finderinfo" in lowered:
-            try:
-                finder = os.getxattr(descriptor, "com.apple.FinderInfo")
-            except OSError as exc:
-                raise PlatformServiceError("object_type_not_verified") from exc
+        if b"com.apple.finderinfo" in lowered:
+            finder = MacOSPlatformServices._get_xattr_fd(
+                descriptor, b"com.apple.FinderInfo"
+            )
             if len(finder) >= 10 and int.from_bytes(finder[8:10], "big") & 0x8000:
                 raise PlatformServiceError("alias_unsupported")
+
+    @staticmethod
+    def _list_xattrs_fd(descriptor: int) -> tuple[bytes, ...]:
+        """Return bounded xattr names through Darwin's descriptor ABI."""
+        libc = ctypes.CDLL(None, use_errno=True)
+        flistxattr = getattr(libc, "flistxattr", None)
+        if flistxattr is None:
+            raise PlatformServiceError("object_type_not_verified")
+        flistxattr.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+        flistxattr.restype = ctypes.c_ssize_t
+        length = flistxattr(descriptor, None, 0, 0)
+        if length < 0 or length > _MAX_XATTR_LIST_BYTES:
+            raise PlatformServiceError("object_type_not_verified")
+        if length == 0:
+            return ()
+        output = ctypes.create_string_buffer(length)
+        observed = flistxattr(descriptor, output, length, 0)
+        if observed != length:
+            raise PlatformServiceError("object_type_not_verified")
+        payload = output.raw[:observed]
+        if not payload.endswith(b"\0"):
+            raise PlatformServiceError("object_type_not_verified")
+        names = tuple(payload[:-1].split(b"\0"))
+        if any(not name or len(name) > 255 for name in names):
+            raise PlatformServiceError("object_type_not_verified")
+        return names
+
+    @staticmethod
+    def _get_xattr_fd(descriptor: int, name: bytes) -> bytes:
+        """Read one bounded xattr through Darwin's descriptor ABI."""
+        libc = ctypes.CDLL(None, use_errno=True)
+        fgetxattr = getattr(libc, "fgetxattr", None)
+        if fgetxattr is None:
+            raise PlatformServiceError("object_type_not_verified")
+        fgetxattr.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_int,
+        ]
+        fgetxattr.restype = ctypes.c_ssize_t
+        length = fgetxattr(descriptor, name, None, 0, 0, 0)
+        if length < 0 or length > _MAX_XATTR_VALUE_BYTES:
+            raise PlatformServiceError("object_type_not_verified")
+        if length == 0:
+            return b""
+        output = ctypes.create_string_buffer(length)
+        observed = fgetxattr(descriptor, name, output, length, 0, 0)
+        if observed != length:
+            raise PlatformServiceError("object_type_not_verified")
+        return output.raw[:observed]
 
     @staticmethod
     def _parts(relative_path: str) -> tuple[str, ...]:

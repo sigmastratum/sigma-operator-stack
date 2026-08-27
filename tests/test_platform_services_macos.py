@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import struct
@@ -304,18 +305,57 @@ class MacOSPlatformServicesTests(unittest.TestCase):
             descriptor = stream.fileno()
             finder = b"\x00" * 8 + b"\x80\x00" + b"\x00" * 22
             with mock.patch(
-                "sos.platforms.macos.os.listxattr", return_value=["com.apple.FinderInfo"]
-            ), mock.patch("sos.platforms.macos.os.getxattr", return_value=finder):
+                "sos.platforms.macos.MacOSPlatformServices._list_xattrs_fd",
+                return_value=(b"com.apple.FinderInfo",),
+            ), mock.patch(
+                "sos.platforms.macos.MacOSPlatformServices._get_xattr_fd",
+                return_value=finder,
+            ):
                 with self.assertRaisesRegex(PlatformServiceError, "alias_unsupported"):
                     service._reject_unsafe_fd(descriptor)
             with mock.patch(
-                "sos.platforms.macos.os.listxattr",
-                return_value=["com.apple.fileprovider.placeholder"],
+                "sos.platforms.macos.MacOSPlatformServices._list_xattrs_fd",
+                return_value=(b"com.apple.fileprovider.placeholder",),
             ):
                 with self.assertRaisesRegex(
                     PlatformServiceError, "cloud_placeholder_unsupported"
                 ):
                     service._reject_unsafe_fd(descriptor)
+
+    def test_descriptor_xattr_abi_does_not_require_python_os_helpers(self) -> None:
+        service = _service()
+        source = (
+            Path(__file__).resolve().parents[1] / "src/sos/platforms/macos.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("os.listxattr", source)
+        self.assertNotIn("os.getxattr", source)
+        names = b"com.apple.FinderInfo\0"
+        finder = b"\x00" * 8 + b"\x80\x00" + b"\x00" * 22
+
+        def list_call(_descriptor, output, length, _options):
+            if output is None:
+                return len(names)
+            self.assertEqual(length, len(names))
+            ctypes.memmove(output, names, len(names))
+            return len(names)
+
+        def get_call(_descriptor, _name, output, length, _position, _options):
+            if output is None:
+                return len(finder)
+            self.assertEqual(length, len(finder))
+            ctypes.memmove(output, finder, len(finder))
+            return len(finder)
+
+        libc = SimpleNamespace(
+            flistxattr=mock.Mock(side_effect=list_call),
+            fgetxattr=mock.Mock(side_effect=get_call),
+        )
+        with tempfile.TemporaryFile() as stream, mock.patch(
+            "sos.platforms.macos.ctypes.CDLL", return_value=libc
+        ), mock.patch.object(os, "listxattr", create=True) as python_helper:
+            with self.assertRaisesRegex(PlatformServiceError, "alias_unsupported"):
+                service._reject_unsafe_fd(stream.fileno())
+        python_helper.assert_not_called()
 
     def test_lock_contention_and_identity_drift_fail_closed(self) -> None:
         service = _service()
