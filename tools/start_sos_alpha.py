@@ -84,7 +84,7 @@ MAX_FILE_BYTES = {
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
 UV_VERSION_OUTPUT = re.compile(
-    rf"uv {re.escape(UV_VERSION)}(?: \([A-Za-z0-9_.-]+\))?"
+    rf"uv {re.escape(UV_VERSION)}(?: \([ -~]{{1,96}}\))?"
 )
 
 

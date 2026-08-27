@@ -105,6 +105,46 @@ class NativeAlphaBundleTests(unittest.TestCase):
                     ),
                 )
 
+            for rejected in (
+                "uv 0.12.6 (aarch64-apple-darwin)\nforged\n",
+                "uv 0.12.6 (" + ("x" * 97) + ")\n",
+            ):
+                with (
+                    mock.patch.object(alpha.platform, "system", return_value="Darwin"),
+                    self.assertRaises(alpha.StartError),
+                ):
+                    alpha._admit_exact_uv(
+                        str(uv),
+                        manifest,
+                        lambda arguments, output=rejected, **_: subprocess.CompletedProcess(
+                            arguments, 0, output, ""
+                        ),
+                    )
+
+    def test_checked_uv_accepts_exact_macos_version_with_build_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            uv = Path(temporary) / "uv"
+            uv.write_bytes(b"exact-macos-uv")
+            manifest = {
+                "artifacts": [
+                    {
+                        "filename": "uv",
+                        "sha256": hashlib.sha256(b"exact-macos-uv").hexdigest(),
+                    }
+                ]
+            }
+
+            def runner(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    "uv 0.12.6 (1654a82d0 2026-08-19)\n",
+                    "",
+                )
+
+            with mock.patch.object(alpha.platform, "system", return_value="Darwin"):
+                alpha._admit_exact_uv(str(uv), manifest, runner)
+
     def test_update_rebinds_only_after_exact_wheel_install(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
