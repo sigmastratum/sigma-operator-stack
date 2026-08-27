@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -24,6 +25,8 @@ const (
 )
 
 var candidate = "unbound"
+
+const ownerMarker = ".sos-environment-owner-v1"
 
 type refusal struct{ code, problem string }
 
@@ -67,6 +70,59 @@ func ensureDirectoryNoReparse(path string) error {
 	reparse, errorValue := hasReparsePoint(path)
 	if errorValue != nil || reparse {
 		return fail("SOS_ALPHA_RUNTIME_COLLISION", "managed runtime root is a reparse point or cannot be verified")
+	}
+	return nil
+}
+
+func currentUserBinding() (string, error) {
+	token, errorValue := syscall.OpenCurrentProcessToken()
+	if errorValue != nil {
+		return "", fail("SOS_ALPHA_OWNER_IDENTITY_UNAVAILABLE", "current Windows user identity cannot be verified")
+	}
+	defer token.Close()
+	user, errorValue := token.GetTokenUser()
+	if errorValue != nil {
+		return "", fail("SOS_ALPHA_OWNER_IDENTITY_UNAVAILABLE", "current Windows user identity cannot be verified")
+	}
+	sid, errorValue := user.User.Sid.String()
+	if errorValue != nil || sid == "" {
+		return "", fail("SOS_ALPHA_OWNER_IDENTITY_UNAVAILABLE", "current Windows user identity cannot be verified")
+	}
+	sum := sha256.Sum256([]byte("sos-managed-environment-owner-v1\x00" + sid))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func ensureOwnedEnvironment(path, binding string, create bool) error {
+	info, errorValue := os.Lstat(path)
+	if errors.Is(errorValue, os.ErrNotExist) {
+		if !create {
+			return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_MISSING", "SOS-managed installation environment is unavailable")
+		}
+		temporary := fmt.Sprintf("%s.new-%d", path, os.Getpid())
+		if errorValue = os.Mkdir(temporary, 0700); errorValue != nil {
+			return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_CREATE_FAILED", "SOS-managed installation environment could not be created")
+		}
+		marker := filepath.Join(temporary, ownerMarker)
+		if errorValue = os.WriteFile(marker, []byte(binding+"\n"), 0600); errorValue != nil {
+			_ = os.RemoveAll(temporary)
+			return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_CREATE_FAILED", "SOS-managed installation environment owner binding could not be created")
+		}
+		if errorValue = os.Rename(temporary, path); errorValue == nil {
+			return nil
+		}
+		_ = os.RemoveAll(temporary)
+		info, errorValue = os.Lstat(path)
+	}
+	if errorValue != nil || !info.IsDir() {
+		return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_FOREIGN", "SOS-managed installation environment is unavailable or foreign")
+	}
+	reparse, errorValue := hasReparsePoint(path)
+	if errorValue != nil || reparse {
+		return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_FOREIGN", "SOS-managed installation environment is a reparse point or cannot be verified")
+	}
+	payload, errorValue := os.ReadFile(filepath.Join(path, ownerMarker))
+	if errorValue != nil || string(payload) != binding+"\n" {
+		return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_FOREIGN", "SOS-managed installation environment owner binding does not match the current user")
 	}
 	return nil
 }
@@ -222,8 +278,15 @@ func execute() (int, error) {
 	if localAppData == "" || !filepath.IsAbs(localAppData) {
 		return 2, fail("SOS_ALPHA_LOCALAPPDATA_INVALID", "LOCALAPPDATA is unavailable")
 	}
-	managedRoot := filepath.Join(localAppData, "SigmaOperatorStack")
-	runtimeRoot := filepath.Join(managedRoot, "runtime")
+	ownerBinding, errorValue := currentUserBinding()
+	if errorValue != nil {
+		return 2, errorValue
+	}
+	managedRoot := filepath.Join(localAppData, "SigmaOperatorStackEnvironment-"+ownerBinding[:16])
+	if errorValue = ensureOwnedEnvironment(managedRoot, ownerBinding, mode == "install" || mode == "update"); errorValue != nil {
+		return 2, errorValue
+	}
+	runtimeRoot := filepath.Join(managedRoot, "environment")
 	bootstrap := filepath.Join(runtimeRoot, "bootstrap")
 	pythonRoot := filepath.Join(runtimeRoot, "python")
 	directories := []string{managedRoot, runtimeRoot, bootstrap, pythonRoot, filepath.Join(runtimeRoot, "tools"), filepath.Join(runtimeRoot, "bin")}
@@ -283,7 +346,7 @@ func execute() (int, error) {
 		return status, errorValue
 	}
 	if mode == "remove" {
-		expected := filepath.Join(localAppData, "SigmaOperatorStack", "runtime")
+		expected := filepath.Join(localAppData, "SigmaOperatorStackEnvironment-"+ownerBinding[:16], "environment")
 		if runtimeRoot != expected {
 			return 2, fail("SOS_ALPHA_RUNTIME_REMOVE_REFUSED", "managed runtime root is not exact")
 		}

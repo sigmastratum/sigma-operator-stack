@@ -178,6 +178,29 @@ class NativeAlphaBundleTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, source.lower())
 
+    def test_windows_environment_is_current_user_bound_and_foreign_state_is_not_reused(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "syscall.OpenCurrentProcessToken()",
+            "token.GetTokenUser()",
+            '"sos-managed-environment-owner-v1\\x00" + sid',
+            'ownerMarker = ".sos-environment-owner-v1"',
+            '"SOS_ALPHA_MANAGED_ENVIRONMENT_FOREIGN"',
+            '"SOS_ALPHA_MANAGED_ENVIRONMENT_CREATE_FAILED"',
+            '"SOS_ALPHA_MANAGED_ENVIRONMENT_MISSING"',
+            '"SigmaOperatorStackEnvironment-"+ownerBinding[:16]',
+            'filepath.Join(managedRoot, "environment")',
+            'mode == "install" || mode == "update"',
+            'os.Rename(temporary, path)',
+        ):
+            self.assertIn(required, source)
+        self.assertNotIn('filepath.Join(managedRoot, "runtime")', source)
+        self.assertNotIn('filepath.Join(localAppData, "SigmaOperatorStack", "runtime")', source)
+        self.assertNotIn("SetNamedSecurityInfo", source)
+        self.assertNotIn("runas", source.lower())
+
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
             (ROOT / path).read_text(encoding="utf-8")
