@@ -26,12 +26,22 @@ PowerShell policy, Gatekeeper, TLS verification or endpoint security to run it.
 
 ## Windows
 
-Open PowerShell in the extracted bundle and run:
+Open Command Prompt or Windows Terminal in the extracted bundle and run the
+native user-scope executable. It does not invoke a `.ps1` file and does not
+require an Execution Policy change, `Bypass`, Administrator or UAC:
 
-```powershell
-.\Install-SOS.ps1 -Mode install -Project C:\path\to\project
-.\Test-SOS.ps1 -Project C:\path\to\project
+```bat
+SOS-Installer.exe install C:\path\to\project
+SOS-Installer.exe test C:\path\to\project
+SOS-Installer.exe update C:\path\to\project
+SOS-Installer.exe remove C:\path\to\project
 ```
+
+`Install-SOS.ps1` remains a developer/debug surface and is not the supported
+private-alpha entrypoint. Do not alter Execution Policy to run it. The current
+private build is unsigned and is suitable only for an invited tester who
+verifies the published SHA-256; Authenticode signing is required before public
+distribution.
 
 Update with `-Mode update`. Remove the managed Codex integration and package
 with `-Mode remove`; repository-owned `.sigma` records are preserved.

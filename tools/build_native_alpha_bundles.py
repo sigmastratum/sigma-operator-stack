@@ -32,6 +32,7 @@ PLATFORMS = {
         "installers/Test-SOS.command": ("Test-SOS.command", "text/x-shellscript", 0o755),
     },
     "windows": {
+        "@windows-installer": ("SOS-Installer.exe", "application/vnd.microsoft.portable-executable", 0o755),
         "installers/Install-SOS.ps1": ("Install-SOS.ps1", "text/x-powershell", 0o644),
         "installers/Test-SOS.ps1": ("Test-SOS.ps1", "text/x-powershell", 0o644),
     },
@@ -119,6 +120,7 @@ def build(
     *,
     uv_binaries: dict[str, Path],
     wheelhouses: dict[str, Path],
+    windows_installer: Path,
 ) -> dict[str, object]:
     repository = repository.resolve(strict=True)
     output = output.resolve()
@@ -131,6 +133,15 @@ def build(
     epoch = int(_git(repository, "show", "-s", "--format=%ct", candidate))
     if wheel.name != WHEEL or not wheel.is_file() or not sbom.is_file():
         raise ValueError("wheel or SBOM does not match the frozen private alpha")
+    if windows_installer.is_symlink() or not windows_installer.is_file():
+        raise ValueError("Windows installer must be one regular PE file")
+    installer_payload = windows_installer.read_bytes()
+    if (
+        not installer_payload.startswith(b"MZ")
+        or len(installer_payload) > 8 * 1024 * 1024
+        or candidate.encode("ascii") not in installer_payload
+    ):
+        raise ValueError("Windows installer is not bound to the exact candidate")
     if set(uv_binaries) != set(PLATFORMS) or set(wheelhouses) != set(PLATFORMS):
         raise ValueError("exact uv and wheelhouse inputs are required for every platform")
     output.mkdir(parents=True, exist_ok=True)
@@ -143,7 +154,12 @@ def build(
         root.mkdir()
         media: dict[str, str] = {}
         for source, (name, media_type, mode) in {**COMMON, **platform_files}.items():
-            _write(root / name, _git_bytes(repository, candidate, source), mode)
+            payload = (
+                installer_payload
+                if source == "@windows-installer"
+                else _git_bytes(repository, candidate, source)
+            )
+            _write(root / name, payload, mode)
             media[name] = media_type
         shutil.copyfile(wheel, root / WHEEL)
         shutil.copyfile(sbom, root / SBOM)
@@ -227,6 +243,7 @@ def main() -> int:
     parser.add_argument("--wheelhouse-windows", required=True, type=Path)
     parser.add_argument("--wheelhouse-macos", required=True, type=Path)
     parser.add_argument("--wheelhouse-linux", required=True, type=Path)
+    parser.add_argument("--windows-installer", required=True, type=Path)
     args = parser.parse_args()
     try:
         result = build(
@@ -245,6 +262,7 @@ def main() -> int:
                 "windows": args.wheelhouse_windows,
                 "macos": args.wheelhouse_macos,
             },
+            windows_installer=args.windows_installer.resolve(strict=True),
         )
     except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         print(json.dumps({"contract": "sos_native_private_alpha_build_v2", "status": "failed", "reason": str(error)}, sort_keys=True, separators=(",", ":")))

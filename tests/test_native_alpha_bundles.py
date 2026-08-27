@@ -30,6 +30,34 @@ smoke = _load("sos_native_alpha_smoke", ROOT / "tools/native_alpha_smoke.py")
 
 
 class NativeAlphaBundleTests(unittest.TestCase):
+    def test_native_windows_entrypoint_does_not_depend_on_powershell_policy(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(encoding="utf-8")
+        builder = (ROOT / "tools/build_windows_installer.py").read_text(encoding="utf-8")
+        bundle_builder = (ROOT / "tools/build_native_alpha_bundles.py").read_text(
+            encoding="utf-8"
+        )
+        lowered = source.lower()
+        for forbidden in (
+            "powershell",
+            "pwsh",
+            "executionpolicy",
+            "bypass",
+            "cmd /c",
+            "shell=true",
+        ):
+            self.assertNotIn(forbidden, lowered)
+        for required in (
+            "install|update|remove|test",
+            "SOS_ALPHA_UV_CHECKSUM_MISMATCH",
+            "SOS_ALPHA_RUNTIME_REMOVE_REFUSED",
+            "--no-python-downloads",
+            "hasReparsePoint",
+        ):
+            self.assertIn(required, source)
+        self.assertIn('GO_VERSION = "go1.27.0"', builder)
+        self.assertIn('"SOS-Installer.exe"', bundle_builder)
+        self.assertIn("candidate.encode", bundle_builder)
+
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
             (ROOT / path).read_text(encoding="utf-8")
