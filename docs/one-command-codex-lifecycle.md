@@ -45,9 +45,12 @@ version and launcher digest without changing accepted records. Setup removal
 must succeed before package uninstall and never removes `.sigma`.
 
 The convenience installer claim is version-pinned, not a signed or
-high-assurance installer claim. `uv` and package acquisition are prerequisites
-outside the SOS entrypoint. SOS itself has no network, telemetry or automatic
-update phase.
+high-assurance installer claim. The released platform launcher verifies its
+exact manifest and owns bounded acquisition of pinned managed Python, `uv` and
+package dependencies. The developer does not install those dependencies or
+repair `PATH` manually. Acquisition is the only declared network phase; after
+the verified launcher handoff, the SOS entrypoint has no network, telemetry or
+automatic update phase.
 
 The transferable wheel is built from an exact committed tree with one
 repository-owned offline entrypoint:

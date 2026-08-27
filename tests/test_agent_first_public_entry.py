@@ -34,6 +34,16 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         for forbidden in ("```bash", "uv tool install", "start-sos-alpha --"):
             self.assertNotIn(forbidden, historical)
 
+    def test_public_lifecycle_has_no_manual_dependency_prerequisite(self) -> None:
+        lifecycle = (ROOT / "docs/one-command-codex-lifecycle.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("platform launcher", lifecycle)
+        self.assertIn("owns bounded acquisition", lifecycle)
+        self.assertIn("does not install those dependencies", lifecycle)
+        self.assertIn("does not install those dependencies or\nrepair `PATH` manually", lifecycle)
+        self.assertNotIn("`uv` and package acquisition are prerequisites", lifecycle)
+
     def test_release_pointer_and_index_are_schema_valid_and_bound(self) -> None:
         pointer_schema = json.loads(
             (SCHEMAS / "sos-public-release-pointer-v1.schema.json").read_text()
