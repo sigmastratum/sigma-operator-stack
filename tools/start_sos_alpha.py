@@ -83,6 +83,9 @@ MAX_FILE_BYTES = {
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
+UV_VERSION_OUTPUT = re.compile(
+    rf"uv {re.escape(UV_VERSION)}(?: \([A-Za-z0-9_.-]+\))?"
+)
 
 
 @dataclass(frozen=True)
@@ -241,7 +244,11 @@ def _admit_exact_uv(
         stderr=subprocess.PIPE,
         text=True,
     )
-    if observed != expected or version.returncode != 0 or version.stdout.strip() != f"uv {UV_VERSION}":
+    if (
+        observed != expected
+        or version.returncode != 0
+        or UV_VERSION_OUTPUT.fullmatch(version.stdout.strip()) is None
+    ):
         raise _fail(
             "SOS_ALPHA_UV_BINDING_INVALID",
             "The managed uv executable does not match the checked bundle.",

@@ -81,7 +81,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
             }
 
             def runner(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-                return subprocess.CompletedProcess(arguments, 0, "uv 0.12.6\n", "")
+                return subprocess.CompletedProcess(
+                    arguments, 0, "uv 0.12.6 (x86_64-unknown-linux-gnu)\n", ""
+                )
 
             with mock.patch.object(alpha.platform, "system", return_value="Linux"):
                 alpha._admit_exact_uv(str(uv), manifest, runner)
@@ -89,6 +91,19 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 with self.assertRaises(alpha.StartError) as raised:
                     alpha._admit_exact_uv(str(uv), manifest, runner)
             self.assertEqual(raised.exception.code, "SOS_ALPHA_UV_BINDING_INVALID")
+
+            uv.write_bytes(b"exact-uv")
+            with (
+                mock.patch.object(alpha.platform, "system", return_value="Linux"),
+                self.assertRaises(alpha.StartError),
+            ):
+                alpha._admit_exact_uv(
+                    str(uv),
+                    manifest,
+                    lambda arguments, **_: subprocess.CompletedProcess(
+                        arguments, 0, "uv 0.12.60 (x86_64-unknown-linux-gnu)\n", ""
+                    ),
+                )
 
     def test_update_rebinds_only_after_exact_wheel_install(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
