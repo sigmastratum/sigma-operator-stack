@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-public-release-pointer-v1.schema.json",
+  "title": "SOS public release pointer v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidate", "claim_state", "contract", "index_path", "index_sha256", "maturity", "release_tag", "tree", "version"],
+  "properties": {
+    "candidate": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "claim_state": {"enum": ["engineering_alpha", "agent_first_qualified"]},
+    "contract": {"const": "sos_public_release_pointer_v1"},
+    "index_path": {"type": "string", "pattern": "^releases/download/v[0-9A-Za-z._-]+/sos-release-index-v1\\.json$", "maxLength": 240},
+    "index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "maturity": {"const": "community_alpha"},
+    "release_tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 40},
+    "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 32}
+  }
+}

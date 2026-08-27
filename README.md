@@ -1,22 +1,32 @@
-# Sigma Operator Stack
+# SOS
 
-Sigma Operator Stack (`sos`) lets a fresh coding-agent session enter an
-existing Git repository, recover the accepted project state, detect stale or
+**Project state for coding agents.**
+
+Give this repository to Codex and say:
+
+> **Install SOS in my current project. Show me the preview before changing it.**
+
+Codex follows the [canonical installation route](docs/install-with-codex.md),
+verifies one exact platform release, and prepares the setup. You review the
+single SOS preview and remain the only person who can approve repository
+mutation or choose project authority.
+
+SOS is a local-first Community alpha with no telemetry. It helps a genuinely
+fresh coding-agent session recover accepted project state, detect stale or
 unverified work, and receive one safe next action without relying on the
-previous chat.
+previous chat. Unsupported, ambiguous, `not_configured` and `not_verified`
+states are never presented as green.
 
-It is a local-first continuity and qualification layer for AI-native software
-development. SOS does not replace your repository, issue tracker, existing
-`AGENTS.md`, or governance framework. It discovers them, previews the exact
-managed change, and fails closed when authority is ambiguous.
+> **Release gate:** no public release pointer is published yet. The URL-only
+> installation claim is therefore not active. Until `release/current.json`
+> exists in a tagged public release and passes the exact-candidate drill, do
+> not install from a branch tip, source archive, issue command or private test
+> bundle. Current platform evidence is summarized in the support matrix below.
 
-> **Community alpha:** the control plane is useful today on supported native
-> Linux. Executable qualification has a deliberately narrow kernel boundary.
-> Direct Windows remains unsupported in `0.1.0a1`; the next platform increment
-> is a native, non-admin Windows control plane rather than a required
-> WSL/Docker setup. The source has passed the local alpha update contract, but
-> public release readiness is not claimed until candidate-bound artifacts,
-> demonstration, independent cohort evidence, and public CI all pass.
+Sigma Operator Stack is the formal project name. SOS does not replace your
+repository, issue tracker, existing `AGENTS.md`, or governance framework. It
+discovers them, previews the exact managed change, and fails closed when
+authority is ambiguous.
 
 ## See the recovery loop
 
@@ -37,38 +47,20 @@ combines the offline local lifecycle with one explicitly approved,
 receipt-verified ephemeral Codex recovery. No raw task, response, tool result,
 session identifier, account data or host path is retained.
 
-## Quickstart
+## Install with Codex
 
-Prerequisites: Linux x86_64, Python 3.11 or 3.12, Git, a preinstalled `uv`,
-and a conventional Git repository.
+There is one public installation route:
+[`docs/install-with-codex.md`](docs/install-with-codex.md). The released
+platform launcher owns its declared Python, `uv`, and package dependencies;
+the developer does not repair PATH or install them manually.
 
-The public package is not available until the `v0.1.0a1` GitHub Release and
-PyPI project exist. Before that coordinated publication, invited testers must
-use the digest-verified alpha bundle described in
-[`docs/alpha-quickstart.md`](docs/alpha-quickstart.md); a source checkout is
-not an installation artifact.
+Installation and qualification are deliberately different operations. Setup
+may finish with `not_configured` or `not_verified`. Project checks run only
+after a separate human-reviewed qualification proposal.
 
-After the release is visible, the exact public path is:
-
-```bash
-uv tool install --no-config --no-sources --no-build --no-python-downloads \
-  'sigma-operator-stack==0.1.0a1'
-sos capabilities --json
-sos compatibility PATH
-sos init --with-codex PATH
-sos qualify PATH
-```
-
-`sos init --with-codex` displays one aggregate preview and asks once before it
-writes. It never runs project tests. Package acquisition ends before SOS
-starts; SOS itself performs no network request, telemetry, or update check.
-
-Before publication, the same path is qualified from an exact local wheel. If
-you received a checked alpha bundle, verify it and run its `start-sos-alpha`
-launcher as described in [`docs/alpha-quickstart.md`](docs/alpha-quickstart.md).
-The explicit pinned update and downgrade contract is documented in
-[`docs/version-update.md`](docs/version-update.md); SOS performs no automatic
-update check or migration.
+Invited private-alpha testing is not public installation authority. The
+historical tester note at [`docs/alpha-quickstart.md`](docs/alpha-quickstart.md)
+contains no alternative public command sequence.
 
 ## Three failures SOS prevents
 

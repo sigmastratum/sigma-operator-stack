@@ -71,7 +71,9 @@ class PublicReleaseContractTests(unittest.TestCase):
         )
         self.assertNotIn("has not been qualified on an external or second server", public_text)
         self.assertIn("Cross-server qualification is specific to the exact release artifact", public_text)
-        self.assertIn("sigma-operator-stack==0.1.0a1", public_text)
+        self.assertNotIn("sigma-operator-stack==0.1.0a1", public_text)
+        self.assertIn("docs/install-with-codex.md", public_text)
+        self.assertIn("no public release pointer is published yet", public_text)
 
 
 if __name__ == "__main__":
