@@ -310,21 +310,23 @@ class AlphaOnboardingTests(unittest.TestCase):
     def test_readme_front_loads_first_run_and_keeps_qualification_separate(self) -> None:
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertLess(readme.index("## Quickstart"), readme.index("## Three failures SOS prevents"))
-        self.assertIn("start-sos-alpha", readme)
-        self.assertIn("sos qualify PATH", readme)
+        self.assertLess(
+            readme.index("## Install with Codex"),
+            readme.index("## Three failures SOS prevents"),
+        )
+        self.assertIn("docs/install-with-codex.md", readme)
+        self.assertIn("Installation and qualification are deliberately different operations", readme)
         launcher = (root / "tools" / "start_sos_alpha.py").read_text(encoding="utf-8")
         self.assertNotIn('"qualify"', launcher)
         self.assertNotIn("curl | sh", launcher)
 
-    def test_alpha_quickstart_explains_unpack_before_launcher(self) -> None:
+    def test_historical_alpha_quickstart_cannot_compete_with_agent_route(self) -> None:
         quickstart = (ROOT / "docs" / "alpha-quickstart.md").read_text(encoding="utf-8")
-        unpack = "tar -xzf sigma-operator-stack-0.1.0a1-linux-x86_64-alpha.tar.gz"
-        launcher = "/path/to/sigma-operator-stack-0.1.0a1-alpha/start-sos-alpha"
-        self.assertIn("its SHA-256 value with the checksum supplied by your inviter", quickstart)
-        self.assertIn(unpack, quickstart)
-        self.assertIn(launcher, quickstart)
-        self.assertLess(quickstart.index(unpack), quickstart.index(launcher))
+        self.assertIn("not** public installation authority", quickstart)
+        self.assertIn("install-with-codex.md", quickstart)
+        self.assertIn("release/current.json", quickstart)
+        self.assertNotIn("```bash", quickstart)
+        self.assertNotIn("start-sos-alpha", quickstart)
 
 
 if __name__ == "__main__":

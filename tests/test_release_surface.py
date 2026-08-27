@@ -92,7 +92,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         readme = (root / "README.md").read_text(encoding="utf-8")
         headings = [
             "## See the recovery loop",
-            "## Quickstart",
+            "## Install with Codex",
             "## Three failures SOS prevents",
             "## Support matrix",
             "## Coexistence with an existing project",
