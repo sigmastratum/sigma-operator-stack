@@ -148,6 +148,17 @@ func run(executable string, arguments, environment []string, capture bool) (int,
 	}
 	return 2, "", errorValue
 }
+
+func runChecked(executable string, arguments, environment []string, capture bool, exitCode, exitProblem string) (int, string, error) {
+	status, output, errorValue := run(executable, arguments, environment, capture)
+	if errorValue != nil {
+		return 2, "", fail("SOS_ALPHA_SUBPROCESS_START_FAILED", "a fixed native bootstrap subprocess could not be started")
+	}
+	if status != 0 {
+		return status, output, fail(exitCode, exitProblem)
+	}
+	return status, output, nil
+}
 func findPython(uv string, environment []string) (string, bool, error) {
 	status, output, errorValue := run(uv, []string{"python", "find", "--no-config", "--managed-python", "--no-python-downloads", pythonVersion}, environment, true)
 	if errorValue != nil || status != 0 || output == "" {
@@ -240,8 +251,15 @@ func execute() (int, error) {
 			return 2, fail("SOS_ALPHA_MANAGED_PYTHON_MISSING", "this operation cannot acquire a runtime")
 		}
 		fmt.Printf("SOS acquisition: installing pinned managed Python %s.\n", pythonVersion)
-		status, _, runError := run(uv, []string{"python", "install", "--no-config", "--no-progress", "--no-registry", "--install-dir", pythonRoot, pythonVersion}, environment, false)
-		if runError != nil || status != 0 {
+		status, _, runError := runChecked(
+			uv,
+			[]string{"--native-tls", "python", "install", "--no-config", "--no-progress", "--no-registry", "--install-dir", pythonRoot, pythonVersion},
+			environment,
+			false,
+			"SOS_ALPHA_PYTHON_ACQUISITION_FAILED",
+			"verified managed Python acquisition failed",
+		)
+		if runError != nil {
 			return status, runError
 		}
 		python, found, errorValue = findPython(uv, environment)

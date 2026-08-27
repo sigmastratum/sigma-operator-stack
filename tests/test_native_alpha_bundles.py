@@ -127,6 +127,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "install|update|remove|test",
             "SOS_ALPHA_UV_CHECKSUM_MISMATCH",
             "SOS_ALPHA_RUNTIME_REMOVE_REFUSED",
+            "SOS_ALPHA_PYTHON_ACQUISITION_FAILED",
+            "SOS_ALPHA_SUBPROCESS_START_FAILED",
+            '[]string{"--native-tls", "python", "install"',
             "--no-python-downloads",
             "hasReparsePoint",
         ):
@@ -134,6 +137,23 @@ class NativeAlphaBundleTests(unittest.TestCase):
         self.assertIn('GO_VERSION = "go1.27.0"', builder)
         self.assertIn('"SOS-Installer.exe"', bundle_builder)
         self.assertIn("candidate.encode", bundle_builder)
+
+    def test_windows_acquisition_keeps_tls_verification_and_typed_failures(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('[]string{"--native-tls", "python", "install"', source)
+        self.assertIn('"SOS_ALPHA_PYTHON_ACQUISITION_FAILED"', source)
+        self.assertIn('"SOS_ALPHA_SUBPROCESS_START_FAILED"', source)
+        for forbidden in (
+            "--allow-insecure-host",
+            "--insecure",
+            "SSL_CERT_FILE=",
+            "NODE_TLS_REJECT_UNAUTHORIZED",
+            "Set-ExecutionPolicy",
+            "runas",
+        ):
+            self.assertNotIn(forbidden.lower(), source.lower())
 
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
