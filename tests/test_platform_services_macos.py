@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import sos.platforms.macos as macos
+import sos.compatibility as compatibility
 from sos.platform_services import (
     FilePublicationOperation,
     PlatformServiceError,
@@ -120,6 +121,42 @@ def _service(*, case_sensitive: bool = True) -> MacOSPlatformServices:
 
 
 class MacOSPlatformServicesTests(unittest.TestCase):
+    def test_enumeration_classifies_symlink_without_opening_target(self) -> None:
+        service = _service()
+        with tempfile.TemporaryDirectory() as temporary:
+            root_path = Path(temporary)
+            (root_path / "dangling").symlink_to("missing-target")
+            with service.open_repository(root_path) as root:
+                listing = service.enumerate_directory_bounded(root, ".", 4)
+
+        self.assertEqual(listing.entry_count, 1)
+        self.assertEqual(listing.entries[0].name, "dangling")
+        self.assertEqual(listing.entries[0].kind, "symlink")
+
+    def test_shared_compatibility_skips_unrelated_symlink_and_blocks_nested_authority(self) -> None:
+        service = _service()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "target").write_text("synthetic", encoding="utf-8")
+            (root / "unrelated").symlink_to("target")
+            with mock.patch.object(
+                compatibility, "current_platform_services", return_value=service
+            ):
+                observations, blocked = compatibility._discover_nested_agents(root)
+            self.assertEqual(observations, [])
+            self.assertEqual(blocked, [])
+
+            (root / "service").mkdir()
+            (root / "service" / "AGENTS.md").symlink_to("../target")
+            with mock.patch.object(
+                compatibility, "current_platform_services", return_value=service
+            ):
+                observations, blocked = compatibility._discover_nested_agents(root)
+
+        self.assertEqual(blocked, ["SOS_COMPATIBILITY_SYMLINK_BLOCKED"])
+        self.assertEqual(observations[0]["path"], "service/AGENTS.md")
+        self.assertEqual(observations[0]["action"], "block")
+
     def test_filesystem_inventory_uses_statfs_mount_point_not_repository_path(self) -> None:
         repository = Path("/synthetic/mount/project/nested")
 

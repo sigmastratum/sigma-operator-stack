@@ -422,19 +422,27 @@ class MacOSPlatformServices:
             entries: list[EphemeralDirectoryEntry] = []
             for name in names:
                 observed = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-                if stat.S_ISLNK(observed.st_mode):
-                    raise PlatformServiceError("symlink_unsupported")
-                child = os.open(
-                    name,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW,
-                    dir_fd=descriptor,
-                )
-                try:
-                    self._reject_unsafe_fd(child)
-                finally:
-                    os.close(child)
+                kind = self._kind(observed.st_mode)
+                # Enumeration classifies a symlink without following or
+                # opening it. The shared compatibility policy can then skip
+                # an unrelated link or block an authority-bearing link.
+                # Descriptor-bound alias/cloud checks remain mandatory for
+                # objects that SOS may traverse or read.
+                if kind in {"regular", "directory"}:
+                    flags = (
+                        os.O_RDONLY
+                        | getattr(os, "O_CLOEXEC", 0)
+                        | os.O_NOFOLLOW
+                    )
+                    if kind == "directory":
+                        flags |= os.O_DIRECTORY
+                    child = os.open(name, flags, dir_fd=descriptor)
+                    try:
+                        self._reject_unsafe_fd(child)
+                    finally:
+                        os.close(child)
                 entries.append(
-                    EphemeralDirectoryEntry(name, self._kind(observed.st_mode), self._identity(observed))
+                    EphemeralDirectoryEntry(name, kind, self._identity(observed))
                 )
         except PlatformServiceError:
             raise
