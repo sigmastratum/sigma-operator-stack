@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import subprocess
@@ -49,6 +50,45 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "wget ",
         ):
             self.assertNotIn(forbidden, joined)
+        self.assertIn("3.12.14", joined)
+        self.assertIn("uv_python_install_dir", joined)
+        self.assertNotIn("install Python", joined)
+
+    def test_bootstrap_is_digest_bound_and_remove_cannot_acquire(self) -> None:
+        shell = (ROOT / "installers/Install-SOS.command").read_text(encoding="utf-8")
+        powershell = (ROOT / "installers/Install-SOS.ps1").read_text(encoding="utf-8")
+        for digest in (
+            "d381f11517c66523211b0876552ff7dea5c1b4b0f13800571b35225761302fba",
+            "e8929237934c8679686428f5a7736c7ae7a5fe7a33b0504d1b03446cdbc43c94",
+            "965816e654d8fac650b282345c89c1daff16a0cfe45e9d2d2a8f5af3fed466a4",
+        ):
+            self.assertIn(digest, shell + powershell)
+        for launcher in (shell, powershell):
+            self.assertIn("removal cannot acquire a runtime from the network", launcher)
+            self.assertIn("--no-python-downloads", launcher)
+
+    def test_checked_uv_must_match_manifest_digest_and_exact_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            uv = Path(temporary) / "uv"
+            uv.write_bytes(b"exact-uv")
+            manifest = {
+                "artifacts": [
+                    {
+                        "filename": "uv",
+                        "sha256": hashlib.sha256(b"exact-uv").hexdigest(),
+                    }
+                ]
+            }
+
+            def runner(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                return subprocess.CompletedProcess(arguments, 0, "uv 0.12.6\n", "")
+
+            with mock.patch.object(alpha.platform, "system", return_value="Linux"):
+                alpha._admit_exact_uv(str(uv), manifest, runner)
+                uv.write_bytes(b"drift")
+                with self.assertRaises(alpha.StartError) as raised:
+                    alpha._admit_exact_uv(str(uv), manifest, runner)
+            self.assertEqual(raised.exception.code, "SOS_ALPHA_UV_BINDING_INVALID")
 
     def test_update_rebinds_only_after_exact_wheel_install(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -85,6 +125,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
             setup_index = next(index for index, call in enumerate(calls) if "update" in call and "codex" in call)
             self.assertLess(install_index, setup_index)
             self.assertIn("--force", calls[install_index])
+            self.assertIn("--offline", calls[install_index])
+            self.assertIn("--no-index", calls[install_index])
+            self.assertIn("--no-python-downloads", calls[install_index])
 
     def test_remove_never_uninstalls_package_when_setup_remove_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

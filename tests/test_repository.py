@@ -6,8 +6,10 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sos.cli import main
+from sos.platform_services import PlatformServiceError
 from sos.repository import RepositoryError, inspect_repository
 from sos.transaction import BootstrapPlan, TransactionError, execute_disposable_bootstrap
 from sos.validation import validate_repository
@@ -87,6 +89,25 @@ class RepositoryTests(unittest.TestCase):
             missing = Path(directory) / "missing"
             with self.assertRaisesRegex(RepositoryError, "SOS_REPOSITORY_ROOT_NOT_FOUND"):
                 inspect_repository(missing)
+
+    def test_platform_root_admission_reason_is_not_collapsed(self) -> None:
+        cases = (
+            ("platform_unsupported", "SOS_PLATFORM_UNSUPPORTED"),
+            ("filesystem_unsupported", "SOS_FILESYSTEM_PROFILE_UNSUPPORTED"),
+            ("filesystem_not_verified", "SOS_FILESYSTEM_PROFILE_NOT_VERIFIED"),
+            ("object_type_not_verified", "SOS_FILESYSTEM_OBJECT_TYPE_NOT_VERIFIED"),
+            ("cloud_placeholder_unsupported", "SOS_FILESYSTEM_CLOUD_PLACEHOLDER_UNSUPPORTED"),
+            ("unexpected_private_kind", "SOS_REPOSITORY_ROOT_NOT_VERIFIED"),
+        )
+        for kind, reason in cases:
+            service = mock.Mock()
+            service.open_repository.side_effect = PlatformServiceError(kind)
+            with (
+                self.subTest(kind=kind),
+                mock.patch("sos.repository.current_platform_services", return_value=service),
+                self.assertRaisesRegex(RepositoryError, reason),
+            ):
+                inspect_repository(Path("."))
 
     def test_unborn_repository_is_not_verified_not_non_repository(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

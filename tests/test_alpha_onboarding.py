@@ -23,7 +23,7 @@ SPEC.loader.exec_module(alpha)
 class AlphaOnboardingTests(unittest.TestCase):
     def make_bundle(self, root: Path, *, system: str = "Linux") -> Path:
         bundle = root / "bundle"
-        bundle.mkdir()
+        bundle.mkdir(parents=True)
         payloads = {
             "START-HERE.md": b"# Start here\n",
             "alpha-feedback.md": b"# Alpha feedback\n",
@@ -36,31 +36,49 @@ class AlphaOnboardingTests(unittest.TestCase):
         for name in alpha.NATIVE_FILES.get(system, frozenset()):
             payloads[name] = b"native-private-alpha\n"
             (bundle / name).write_bytes(payloads[name])
+        media_types = {
+            "START-HERE.md": "text/markdown",
+            "alpha-feedback.md": "text/markdown",
+            alpha.SBOM: "application/vnd.cyclonedx+json",
+            "start-sos-alpha": "text/x-python",
+            alpha.WHEEL: "application/zip",
+            "Install-SOS.ps1": "text/x-powershell",
+            "Test-SOS.ps1": "text/x-powershell",
+            "Install-SOS.command": "text/x-shellscript",
+            "Test-SOS.command": "text/x-shellscript",
+            "native-smoke": "text/x-python",
+            "uv": "application/octet-stream",
+            "uv.exe": "application/vnd.microsoft.portable-executable",
+            **{name: "application/zip" for name in alpha.UNIVERSAL_WHEELS},
+            **{
+                name: "application/zip"
+                for wheels in alpha.PLATFORM_WHEELS.values()
+                for name in wheels
+            },
+        }
         artifacts = [
             {
                 "filename": name,
-                "media_type": {
-                    "START-HERE.md": "text/markdown",
-                    "alpha-feedback.md": "text/markdown",
-                    alpha.SBOM: "application/vnd.cyclonedx+json",
-                    "start-sos-alpha": "text/x-python",
-                    alpha.WHEEL: "application/zip",
-                    "Install-SOS.ps1": "text/x-powershell",
-                    "Test-SOS.ps1": "text/x-powershell",
-                    "Install-SOS.command": "text/x-shellscript",
-                    "Test-SOS.command": "text/x-shellscript",
-                    "native-smoke": "text/x-python",
-                }[name],
+                "media_type": media_types[name],
                 "sha256": hashlib.sha256(data).hexdigest(),
             }
             for name, data in sorted(payloads.items())
         ]
         manifest = {
             "artifacts": artifacts,
-            "build": {"network_allowed": False},
+            "build": (
+                {
+                    "acquisition_network_allowed": True,
+                    "managed_python": alpha.PYTHON_VERSION,
+                    "network_allowed_after_verified_handoff": False,
+                    "uv": alpha.UV_VERSION,
+                }
+                if system in alpha.NATIVE_FILES
+                else {"network_allowed": False}
+            ),
             "candidate": "a" * 40,
             "contract": (
-                "sos_native_private_alpha_bundle_v1"
+                "sos_native_private_alpha_bundle_v2"
                 if system in alpha.NATIVE_FILES
                 else "sos_public_release_manifest_v1"
             ),
@@ -101,10 +119,15 @@ class AlphaOnboardingTests(unittest.TestCase):
     def test_native_bundle_inventory_is_platform_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            windows = self.make_bundle(root, system="Windows")
+            linux = self.make_bundle(root / "linux", system="Linux")
+            self.assertEqual(
+                alpha.verify_bundle(linux, system="Linux")["contract"],
+                "sos_native_private_alpha_bundle_v2",
+            )
+            windows = self.make_bundle(root / "windows", system="Windows")
             self.assertEqual(
                 alpha.verify_bundle(windows, system="Windows")["contract"],
-                "sos_native_private_alpha_bundle_v1",
+                "sos_native_private_alpha_bundle_v2",
             )
             with self.assertRaises(alpha.StartError) as raised:
                 alpha.verify_bundle(windows, system="Darwin")
@@ -158,6 +181,11 @@ class AlphaOnboardingTests(unittest.TestCase):
             commands = [arguments for arguments, _ in calls]
             install = next(arguments for arguments in commands if arguments[1:3] == ["tool", "install"])
             self.assertEqual(install[-1], os.fspath(bundle / alpha.WHEEL))
+            self.assertIn("--offline", install)
+            self.assertIn("--no-index", install)
+            self.assertIn("--no-python-downloads", install)
+            self.assertEqual(install[install.index("--find-links") + 1], os.fspath(bundle))
+            self.assertEqual(install[install.index("--python") + 1], sys.executable)
             self.assertEqual(
                 commands[-2],
                 [

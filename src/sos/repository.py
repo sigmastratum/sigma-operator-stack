@@ -19,6 +19,16 @@ _COMMAND_TIMEOUT_SECONDS = 5
 _MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024
 _SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 
+_ROOT_ADMISSION_REASONS = {
+    "alias_unsupported": "SOS_FILESYSTEM_ALIAS_UNSUPPORTED",
+    "cloud_placeholder_unsupported": "SOS_FILESYSTEM_CLOUD_PLACEHOLDER_UNSUPPORTED",
+    "filesystem_not_verified": "SOS_FILESYSTEM_PROFILE_NOT_VERIFIED",
+    "filesystem_unsupported": "SOS_FILESYSTEM_PROFILE_UNSUPPORTED",
+    "invalid_root": "SOS_REPOSITORY_ROOT_NOT_FOUND",
+    "object_type_not_verified": "SOS_FILESYSTEM_OBJECT_TYPE_NOT_VERIFIED",
+    "platform_unsupported": "SOS_PLATFORM_UNSUPPORTED",
+}
+
 
 def _git_executable() -> Path:
     try:
@@ -33,6 +43,17 @@ class RepositoryError(RuntimeError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+def _root_admission_reason(error: PlatformServiceError, *, discovered: bool = False) -> str:
+    reason = _ROOT_ADMISSION_REASONS.get(error.kind)
+    if reason is not None:
+        return reason
+    return (
+        "SOS_REPOSITORY_ROOT_INVALID"
+        if discovered
+        else "SOS_REPOSITORY_ROOT_NOT_VERIFIED"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +199,7 @@ def _discover_root(candidate: Path) -> Path:
         with service.open_repository(candidate):
             pass
     except PlatformServiceError as exc:
-        raise RepositoryError("SOS_REPOSITORY_ROOT_NOT_FOUND") from exc
+        raise RepositoryError(_root_admission_reason(exc)) from exc
     raw = _bounded_git(candidate, "rev-parse", "--show-toplevel")
     try:
         discovered = Path(os.fsdecode(raw.rstrip(b"\n")))
@@ -187,8 +208,8 @@ def _discover_root(candidate: Path) -> Path:
     try:
         with service.open_repository(discovered):
             pass
-    except PlatformServiceError:
-        raise RepositoryError("SOS_REPOSITORY_ROOT_INVALID")
+    except PlatformServiceError as exc:
+        raise RepositoryError(_root_admission_reason(exc, discovered=True)) from exc
     return discovered
 
 

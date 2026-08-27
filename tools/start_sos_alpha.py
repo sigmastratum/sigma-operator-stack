@@ -18,8 +18,27 @@ from pathlib import Path
 
 
 VERSION = "0.1.0a2"
+UV_VERSION = "0.12.6"
+PYTHON_VERSION = "3.12.14"
 WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"
 SBOM = f"sigma-operator-stack-{VERSION}.cdx.json"
+UNIVERSAL_WHEELS = frozenset(
+    {
+        "attrs-26.1.0-py3-none-any.whl",
+        "jsonschema-4.26.0-py3-none-any.whl",
+        "jsonschema_specifications-2025.9.1-py3-none-any.whl",
+        "referencing-0.37.0-py3-none-any.whl",
+        "typing_extensions-4.16.0-py3-none-any.whl",
+    }
+)
+PLATFORM_WHEELS = {
+    "Linux": frozenset(
+        {"rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"}
+    ),
+    "Windows": frozenset({"rpds_py-2026.6.3-cp312-cp312-win_amd64.whl"}),
+    "Darwin": frozenset({"rpds_py-2026.6.3-cp312-cp312-macosx_11_0_arm64.whl"}),
+}
+BOOTSTRAP_UV = {"Linux": "uv", "Windows": "uv.exe", "Darwin": "uv"}
 EXPECTED_FILES = frozenset(
     {
         "START-HERE.md",
@@ -31,8 +50,15 @@ EXPECTED_FILES = frozenset(
     }
 )
 NATIVE_FILES = {
-    "Windows": frozenset({"Install-SOS.ps1", "Test-SOS.ps1", "native-smoke"}),
-    "Darwin": frozenset({"Install-SOS.command", "Test-SOS.command", "native-smoke"}),
+    "Linux": frozenset({"Install-SOS.command", "Test-SOS.command", "native-smoke", "uv"})
+    | UNIVERSAL_WHEELS
+    | PLATFORM_WHEELS["Linux"],
+    "Windows": frozenset({"Install-SOS.ps1", "Test-SOS.ps1", "native-smoke", "uv.exe"})
+    | UNIVERSAL_WHEELS
+    | PLATFORM_WHEELS["Windows"],
+    "Darwin": frozenset({"Install-SOS.command", "Test-SOS.command", "native-smoke", "uv"})
+    | UNIVERSAL_WHEELS
+    | PLATFORM_WHEELS["Darwin"],
 }
 MAX_FILE_BYTES = {
     "START-HERE.md": 256 * 1024,
@@ -46,6 +72,14 @@ MAX_FILE_BYTES = {
     "Install-SOS.command": 256 * 1024,
     "Test-SOS.command": 256 * 1024,
     "native-smoke": 1024 * 1024,
+    "uv": 64 * 1024 * 1024,
+    "uv.exe": 64 * 1024 * 1024,
+    **{name: 64 * 1024 * 1024 for name in UNIVERSAL_WHEELS},
+    **{
+        name: 64 * 1024 * 1024
+        for wheels in PLATFORM_WHEELS.values()
+        for name in wheels
+    },
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
@@ -180,6 +214,63 @@ def _installed_sos(
     return _tool_command(Path(tool_bin.stdout.strip()))
 
 
+def _admit_exact_uv(
+    uv: str,
+    manifest: dict[str, object],
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    try:
+        artifacts = {
+            item["filename"]: item
+            for item in manifest["artifacts"]  # type: ignore[index]
+            if isinstance(item, dict) and isinstance(item.get("filename"), str)
+        }
+        bootstrap_name = BOOTSTRAP_UV[platform.system()]
+        expected = artifacts[bootstrap_name]["sha256"]
+        observed = _sha256(Path(uv))
+    except (KeyError, OSError, TypeError) as error:
+        raise _fail(
+            "SOS_ALPHA_UV_BINDING_INVALID",
+            "The managed uv bootstrap is not bound to this checked bundle.",
+            "Do not continue; use the complete replacement bundle.",
+        ) from error
+    version = runner(
+        [uv, "--version"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if observed != expected or version.returncode != 0 or version.stdout.strip() != f"uv {UV_VERSION}":
+        raise _fail(
+            "SOS_ALPHA_UV_BINDING_INVALID",
+            "The managed uv executable does not match the checked bundle.",
+            "Do not continue; use the complete replacement bundle.",
+        )
+
+
+def _offline_tool_install_command(uv: str, bundle: Path, *, force: bool = False) -> list[str]:
+    command = [uv, "tool", "install"]
+    if force:
+        command.append("--force")
+    command.extend(
+        [
+            "--offline",
+            "--no-index",
+            "--find-links",
+            os.fspath(bundle),
+            "--no-config",
+            "--no-sources",
+            "--no-build",
+            "--no-python-downloads",
+            "--python",
+            sys.executable,
+            os.fspath(bundle / WHEEL),
+        ]
+    )
+    return command
+
+
 def _expected_files(system: str) -> frozenset[str]:
     return EXPECTED_FILES | NATIVE_FILES.get(system, frozenset())
 
@@ -288,18 +379,35 @@ def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str,
         "Install-SOS.command": "text/x-shellscript",
         "Test-SOS.command": "text/x-shellscript",
         "native-smoke": "text/x-python",
+        "uv": "application/octet-stream",
+        "uv.exe": "application/vnd.microsoft.portable-executable",
+        **{name: "application/zip" for name in UNIVERSAL_WHEELS},
+        **{
+            name: "application/zip"
+            for wheels in PLATFORM_WHEELS.values()
+            for name in wheels
+        },
     }
     expected_contract = (
-        "sos_native_private_alpha_bundle_v1"
+        "sos_native_private_alpha_bundle_v2"
         if system in NATIVE_FILES
         else "sos_public_release_manifest_v1"
+    )
+    build = manifest.get("build", {})
+    build_valid = (
+        build.get("acquisition_network_allowed") is True
+        and build.get("network_allowed_after_verified_handoff") is False
+        and build.get("managed_python") == PYTHON_VERSION
+        and build.get("uv") == UV_VERSION
+        if system in NATIVE_FILES
+        else build.get("network_allowed") is False
     )
     if (
         manifest.get("contract") != expected_contract
         or manifest.get("version") != VERSION
         or not GIT_OBJECT.fullmatch(str(manifest.get("candidate", "")))
         or not GIT_OBJECT.fullmatch(str(manifest.get("tree", "")))
-        or manifest.get("build", {}).get("network_allowed") is not False
+        or not build_valid
         or len(artifact_items) != len(expected_artifacts)
         or set(artifacts) != expected_artifacts
         or any(
@@ -366,32 +474,23 @@ def run_onboarding(
     project: Path,
     *,
     primary_authority_id: str | None = None,
+    uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
     validate_platform()
     git = _required_command("git", which)
-    uv = _required_command("uv", which)
+    uv = uv_path or _required_command("uv", which)
     find_codex(which=which)
     manifest = verify_bundle(bundle)
+    if uv_path is not None:
+        _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
     print("SOS alpha checks passed.")
     print(f"Release: {manifest['version']} ({str(manifest['candidate'])[:12]})")
     print(f"Project: {root}")
     print("Installing the exact checked SOS wheel. Project files are not changed yet.")
-    installed = runner(
-        [
-            uv,
-            "tool",
-            "install",
-            "--no-config",
-            "--no-sources",
-            "--no-build",
-            "--no-python-downloads",
-            os.fspath(bundle / WHEEL),
-        ],
-        check=False,
-    )
+    installed = runner(_offline_tool_install_command(uv, bundle), check=False)
     if installed.returncode != 0:
         raise _fail(
             "SOS_ALPHA_INSTALL_FAILED",
@@ -491,29 +590,19 @@ def run_update(
     bundle: Path,
     project: Path,
     *,
+    uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
     validate_platform()
     git = _required_command("git", which)
-    uv = _required_command("uv", which)
+    uv = uv_path or _required_command("uv", which)
     find_codex(which=which)
-    verify_bundle(bundle)
+    manifest = verify_bundle(bundle)
+    if uv_path is not None:
+        _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
-    updated = runner(
-        [
-            uv,
-            "tool",
-            "install",
-            "--force",
-            "--no-config",
-            "--no-sources",
-            "--no-build",
-            "--no-python-downloads",
-            os.fspath(bundle / WHEEL),
-        ],
-        check=False,
-    )
+    updated = runner(_offline_tool_install_command(uv, bundle, force=True), check=False)
     if updated.returncode != 0:
         raise _fail(
             "SOS_ALPHA_UPDATE_FAILED",
@@ -535,13 +624,16 @@ def run_remove(
     bundle: Path,
     project: Path,
     *,
+    uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
     validate_platform()
     git = _required_command("git", which)
-    uv = _required_command("uv", which)
-    verify_bundle(bundle)
+    uv = uv_path or _required_command("uv", which)
+    manifest = verify_bundle(bundle)
+    if uv_path is not None:
+        _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
     sos = _installed_sos(uv, runner)
     removed = runner([os.fspath(sos), "setup", "remove", "codex", os.fspath(root)], check=False)
@@ -568,6 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
     parser.add_argument("--primary-authority")
+    parser.add_argument("--uv")
     parser.add_argument("--mode", choices=("install", "update", "remove"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
@@ -583,11 +676,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 launcher.parent,
                 arguments.project,
                 primary_authority_id=arguments.primary_authority,
+                uv_path=arguments.uv,
             )
         elif arguments.mode == "update":
-            run_update(launcher.parent, arguments.project)
+            run_update(launcher.parent, arguments.project, uv_path=arguments.uv)
         else:
-            run_remove(launcher.parent, arguments.project)
+            run_remove(launcher.parent, arguments.project, uv_path=arguments.uv)
     except StartError as error:
         print("\nSOS alpha setup stopped.", file=sys.stderr)
         print(f"Code: {error.code}", file=sys.stderr)
