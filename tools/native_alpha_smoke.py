@@ -20,13 +20,24 @@ _EXPECTED_STATUS_REASONS = [
 ]
 
 
-def _closed_environment() -> dict[str, str]:
-    return {
+def _closed_environment(uv: Path | None = None) -> dict[str, str]:
+    environment = {
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PATH": os.environ.get("PATH", ""),
         "PYTHONHASHSEED": "0",
     }
+    if uv is not None:
+        runtime_root = uv.absolute().parent.parent
+        environment.update(
+            {
+                "UV_NO_CONFIG": "1",
+                "UV_PYTHON_INSTALL_DIR": os.fspath(runtime_root / "python"),
+                "UV_TOOL_BIN_DIR": os.fspath(runtime_root / "bin"),
+                "UV_TOOL_DIR": os.fspath(runtime_root / "tools"),
+            }
+        )
+    return environment
 
 
 def _exact_sos(uv: Path) -> str:
@@ -38,7 +49,7 @@ def _exact_sos(uv: Path) -> str:
         stderr=subprocess.PIPE,
         text=True,
         timeout=30,
-        env=_closed_environment(),
+        env=_closed_environment(uv),
     )
     if completed.returncode != 0 or not completed.stdout.strip():
         raise RuntimeError("SOS_NATIVE_SMOKE_TOOL_BINDING_MISSING")
@@ -109,6 +120,15 @@ def _check_family_projection(payload: dict[str, object]) -> list[dict[str, objec
                 ("unsupported", None, "unavailable", ("SOS_CAPABILITY_PLATFORM_UNSUPPORTED",)),
                 ("not_configured", None, "not_applicable", ("SOS_CHECK_NOT_CONFIGURED",)),
             }
+            if platform.system() == "Linux":
+                allowed.add(
+                    (
+                        "configured",
+                        "python.unittest.v1",
+                        "linux-landlock-seccomp-snapshot-v1",
+                        ("SOS_CHECK_CONFIGURED",),
+                    )
+                )
         observed = (
             status,
             command_id,

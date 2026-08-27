@@ -266,6 +266,10 @@ class NativeAlphaBundleTests(unittest.TestCase):
             self.assertFalse(report["network_performed"])
             self.assertEqual(calls[0], ["/exact/uv", "tool", "dir", "--bin"])
             self.assertTrue(all(call[0] in {"/exact/uv", str(exact_sos)} for call in calls))
+            bound_environment = smoke._closed_environment(Path("/managed/bootstrap/uv"))
+            self.assertEqual(bound_environment["UV_TOOL_DIR"], "/managed/tools")
+            self.assertEqual(bound_environment["UV_TOOL_BIN_DIR"], "/managed/bin")
+            self.assertNotIn("HOME", bound_environment)
 
             invalid_cases = []
             stale = self.smoke_payloads()
