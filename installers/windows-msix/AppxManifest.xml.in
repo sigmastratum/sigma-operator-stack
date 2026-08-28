@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 uap10 desktop rescap">
+  <Identity Name="SigmaStratum.SigmaOperatorStack" Publisher="SOS_PUBLISHER_PLACEHOLDER" Version="0.1.0.2" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Sigma Operator Stack</DisplayName>
+    <PublisherDisplayName>SigmaStratum</PublisherDisplayName>
+    <Description>Local-first continuity and qualification for coding-agent work in Git repositories.</Description>
+    <Logo>Assets\Square150x150Logo.png</Logo>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on" />
+    </uap10:PackageIntegrity>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Applications>
+    <Application Id="SOS" Executable="sos.exe" EntryPoint="Windows.FullTrustApplication" uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+      <uap:VisualElements DisplayName="Sigma Operator Stack" Description="Sigma Operator Stack" BackgroundColor="transparent" Square44x44Logo="Assets\Square44x44Logo.png" Square150x150Logo="Assets\Square150x150Logo.png" />
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="sos.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="sos.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
