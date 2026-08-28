@@ -14,6 +14,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WindowsMSIXTests(unittest.TestCase):
+    def test_store_identity_is_exact_and_public(self) -> None:
+        identity = json.loads(
+            (ROOT / "installers/windows-msix/store-identity.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(identity["contract"], "sos_windows_store_identity_v1")
+        self.assertEqual(identity["package_identity_name"], "SSRG.SigmaOperatorStack")
+        self.assertEqual(
+            identity["package_identity_publisher"],
+            "CN=D713C275-467D-4A03-9D24-0DC02F1C3031",
+        )
+        self.assertEqual(identity["publisher_display_name"], "SSRG")
+        self.assertEqual(
+            identity["package_family_name"],
+            "SSRG.SigmaOperatorStack_2358e20nvr064",
+        )
+        self.assertEqual(identity["store_id"], "9NNZT70C613H")
+        self.assertEqual(
+            identity["store_url"],
+            "https://apps.microsoft.com/detail/9NNZT70C613H",
+        )
+
     def test_manifest_is_per_user_medium_integrity_and_alias_only(self) -> None:
         manifest = (ROOT / "installers/windows-msix/AppxManifest.xml.in").read_text(
             encoding="utf-8"
@@ -25,6 +48,9 @@ class WindowsMSIXTests(unittest.TestCase):
             'uap10:RuntimeBehavior="packagedClassicApp"',
             'Category="windows.appExecutionAlias"',
             'Alias="sos.exe"',
+            'Name="SSRG.SigmaOperatorStack"',
+            'Publisher="CN=D713C275-467D-4A03-9D24-0DC02F1C3031"',
+            '<PublisherDisplayName>SSRG</PublisherDisplayName>',
             '<uap10:Content Enforcement="on" />',
             '<rescap:Capability Name="runFullTrust" />',
         ):
@@ -53,6 +79,7 @@ class WindowsMSIXTests(unittest.TestCase):
             (repository / "installers/windows-msix").mkdir(parents=True)
             for relative in (
                 "installers/windows-msix/AppxManifest.xml.in",
+                "installers/windows-msix/store-identity.json",
             ):
                 destination = repository / relative
                 destination.write_bytes((ROOT / relative).read_bytes())
@@ -95,7 +122,7 @@ class WindowsMSIXTests(unittest.TestCase):
             command = [
                 sys.executable, os.fspath(ROOT / "tools/build_windows_msix.py"),
                 "--repository", os.fspath(repository), "--candidate", candidate,
-                "--payload-root", os.fspath(payload), "--publisher", "CN=SigmaStratum Test",
+                "--payload-root", os.fspath(payload),
                 "--makeappx", os.fspath(makeappx), "--makeappx-sha256", makeappx_digest,
                 "--output", os.fspath(output),
             ]
@@ -103,6 +130,12 @@ class WindowsMSIXTests(unittest.TestCase):
             report = json.loads(completed.stdout)
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["candidate"], candidate)
+            self.assertEqual(report["store_id"], "9NNZT70C613H")
+            self.assertEqual(report["package_identity_name"], "SSRG.SigmaOperatorStack")
+            self.assertEqual(
+                report["package_family_name"],
+                "SSRG.SigmaOperatorStack_2358e20nvr064",
+            )
             self.assertTrue(output.is_file())
             wrong_digest = subprocess.run(
                 [*command[:-3], "0" * 64, *command[-2:-1], os.fspath(root / "bad.msix")],
@@ -110,6 +143,48 @@ class WindowsMSIXTests(unittest.TestCase):
             )
             self.assertNotEqual(wrong_digest.returncode, 0)
             self.assertIn("MakeAppx digest mismatch", wrong_digest.stderr)
+
+            identity_path = repository / "installers/windows-msix/store-identity.json"
+            drifted_identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            drifted_identity["package_identity_publisher"] = "CN=ForeignPublisher"
+            identity_path.write_text(
+                json.dumps(drifted_identity, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "-C", os.fspath(repository), "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    os.fspath(repository),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "drift identity",
+                ],
+                check=True,
+            )
+            drifted_candidate = subprocess.run(
+                ["git", "-C", os.fspath(repository), "rev-parse", "HEAD"],
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+            drifted_command = list(command)
+            drifted_command[drifted_command.index("--candidate") + 1] = drifted_candidate
+            drifted_command[drifted_command.index("--output") + 1] = os.fspath(
+                root / "drifted.msix"
+            )
+            drifted = subprocess.run(
+                drifted_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertNotEqual(drifted.returncode, 0)
+            self.assertIn("MSIX Store identity binding failed", drifted.stderr)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ import subprocess
 import tempfile
 import zlib
 import zipfile
-from html import escape
 from pathlib import Path, PurePosixPath
 
 VERSION = "0.1.0a2"
@@ -26,6 +25,16 @@ REQUIRED = {
     "runtime/Lib/site-packages/sos/__init__.py",
     "bootstrap/uv.exe",
     "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl",
+}
+STORE_IDENTITY_KEYS = {
+    "contract",
+    "package_family_name",
+    "package_identity_name",
+    "package_identity_publisher",
+    "product_name",
+    "publisher_display_name",
+    "store_id",
+    "store_url",
 }
 
 
@@ -66,12 +75,44 @@ def payload_inventory(root: Path) -> list[dict[str, str]]:
     return found
 
 
+def store_identity(repository: Path, candidate: str, manifest: str) -> dict[str, str]:
+    raw = subprocess.run(
+        [
+            "git",
+            "-C",
+            os.fspath(repository),
+            "show",
+            f"{candidate}:installers/windows-msix/store-identity.json",
+        ],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+    ).stdout
+    identity = json.loads(raw.decode("utf-8"))
+    if not isinstance(identity, dict) or set(identity) != STORE_IDENTITY_KEYS:
+        raise SystemExit("Store identity contract is invalid")
+    if not all(isinstance(value, str) and value for value in identity.values()):
+        raise SystemExit("Store identity values are invalid")
+    expected = (
+        f'Name="{identity["package_identity_name"]}"',
+        f'Publisher="{identity["package_identity_publisher"]}"',
+        f'<PublisherDisplayName>{identity["publisher_display_name"]}</PublisherDisplayName>',
+        f'<DisplayName>{identity["product_name"]}</DisplayName>',
+    )
+    if any(manifest.count(value) != 1 for value in expected):
+        raise SystemExit("MSIX Store identity binding failed")
+    if identity["contract"] != "sos_windows_store_identity_v1":
+        raise SystemExit("Store identity contract is unsupported")
+    if identity["store_url"] != f'https://apps.microsoft.com/detail/{identity["store_id"]}':
+        raise SystemExit("Store identity URL binding failed")
+    return identity
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--payload-root", type=Path, required=True)
-    parser.add_argument("--publisher", required=True)
     parser.add_argument("--makeappx", type=Path, required=True)
     parser.add_argument("--makeappx-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -91,8 +132,6 @@ def main() -> int:
         raise SystemExit("candidate does not match repository HEAD")
     tree = git(repository, "show", "-s", "--format=%T", candidate)
     epoch = int(git(repository, "show", "-s", "--format=%ct", candidate))
-    if not re.fullmatch(r"CN=[A-Za-z0-9 .,_=-]{1,240}", args.publisher):
-        raise SystemExit("publisher subject is not admitted")
     if not re.fullmatch(r"[0-9a-f]{64}", args.makeappx_sha256) or sha256(makeappx) != args.makeappx_sha256:
         raise SystemExit("MakeAppx digest mismatch")
     inventory = payload_inventory(payload_root)
@@ -100,9 +139,8 @@ def main() -> int:
         ["git", "-C", os.fspath(repository), "show", f"{candidate}:installers/windows-msix/AppxManifest.xml.in"],
         check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
     ).stdout.decode("utf-8")
-    manifest = template.replace("SOS_PUBLISHER_PLACEHOLDER", escape(args.publisher, quote=True))
-    if manifest.count(args.publisher) != 1 or "SOS_PUBLISHER_PLACEHOLDER" in manifest:
-        raise SystemExit("MSIX publisher binding failed")
+    manifest = template
+    identity = store_identity(repository, candidate, manifest)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sos-msix-stage-") as temporary:
         stage = Path(temporary)
@@ -144,7 +182,9 @@ def main() -> int:
         "candidate": candidate, "contract": "sos_windows_unsigned_msix_build_v1",
         "makeappx_sha256": args.makeappx_sha256, "msix_sha256": sha256(output),
         "msix_version": MSIX_VERSION, "payload_file_count": len(inventory),
-        "status": "passed", "tree": tree,
+        "package_family_name": identity["package_family_name"],
+        "package_identity_name": identity["package_identity_name"],
+        "store_id": identity["store_id"], "status": "passed", "tree": tree,
     }, sort_keys=True, separators=(",", ":")))
     return 0
 

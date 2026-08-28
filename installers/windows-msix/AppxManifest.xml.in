@@ -7,10 +7,10 @@
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap3 uap10 desktop rescap">
-  <Identity Name="SigmaStratum.SigmaOperatorStack" Publisher="SOS_PUBLISHER_PLACEHOLDER" Version="0.1.0.2" ProcessorArchitecture="x64" />
+  <Identity Name="SSRG.SigmaOperatorStack" Publisher="CN=D713C275-467D-4A03-9D24-0DC02F1C3031" Version="0.1.0.2" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Sigma Operator Stack</DisplayName>
-    <PublisherDisplayName>SigmaStratum</PublisherDisplayName>
+    <PublisherDisplayName>SSRG</PublisherDisplayName>
     <Description>Local-first continuity and qualification for coding-agent work in Git repositories.</Description>
     <Logo>Assets\Square150x150Logo.png</Logo>
     <uap10:PackageIntegrity>
