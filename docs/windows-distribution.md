@@ -35,4 +35,3 @@ and SmartScreen enabled, and an ordinary Medium Integrity interactive user.
 Machine-wide installation, admin helpers, hidden custom actions, enterprise
 deployment, direct Windows qualification execution, and security bypasses are
 outside this boundary.
-

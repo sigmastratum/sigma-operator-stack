@@ -40,4 +40,3 @@ $record = [ordered]@{
 $json = $record | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText($Output, $json + "`n", [System.Text.UTF8Encoding]::new($false))
 Write-Output $json
-
