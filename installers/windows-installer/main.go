@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -123,6 +124,52 @@ func ensureOwnedEnvironment(path, binding string, create bool) error {
 	payload, errorValue := os.ReadFile(filepath.Join(path, ownerMarker))
 	if errorValue != nil || string(payload) != binding+"\n" {
 		return fail("SOS_ALPHA_MANAGED_ENVIRONMENT_FOREIGN", "SOS-managed installation environment owner binding does not match the current user")
+	}
+	return nil
+}
+
+func userStorageFailure(errorValue error) error {
+	if errors.Is(errorValue, os.ErrPermission) || errors.Is(errorValue, syscall.ERROR_ACCESS_DENIED) {
+		return fail("SOS_ALPHA_USER_STORAGE_ACCESS_DENIED", "current Windows user cannot write the canonical Local AppData directory")
+	}
+	return fail("SOS_ALPHA_USER_STORAGE_UNAVAILABLE", "canonical Local AppData admission failed")
+}
+
+func admitUserStorage(path string) error {
+	nonce := make([]byte, 16)
+	if _, errorValue := rand.Read(nonce); errorValue != nil {
+		return fail("SOS_ALPHA_USER_STORAGE_UNAVAILABLE", "user-storage admission nonce could not be generated")
+	}
+	probe := filepath.Join(path, ".sos-storage-probe-"+hex.EncodeToString(nonce))
+	marker := filepath.Join(probe, "marker")
+	payload := []byte("sos-user-storage-admission-v1\n")
+	if errorValue := os.Mkdir(probe, 0700); errorValue != nil {
+		return userStorageFailure(errorValue)
+	}
+	cleanup := func() error {
+		if errorValue := os.Remove(marker); errorValue != nil && !errors.Is(errorValue, os.ErrNotExist) {
+			return errorValue
+		}
+		return os.Remove(probe)
+	}
+	if errorValue := os.WriteFile(marker, payload, 0600); errorValue != nil {
+		if cleanupError := cleanup(); cleanupError != nil {
+			return fail("SOS_ALPHA_USER_STORAGE_CLEANUP_FAILED", "user-storage admission marker could not be removed")
+		}
+		return userStorageFailure(errorValue)
+	}
+	observed, errorValue := os.ReadFile(marker)
+	if errorValue != nil || !bytes.Equal(observed, payload) {
+		if cleanupError := cleanup(); cleanupError != nil {
+			return fail("SOS_ALPHA_USER_STORAGE_CLEANUP_FAILED", "user-storage admission marker could not be removed")
+		}
+		if errorValue != nil {
+			return userStorageFailure(errorValue)
+		}
+		return fail("SOS_ALPHA_USER_STORAGE_UNAVAILABLE", "user-storage admission marker did not round-trip")
+	}
+	if errorValue = cleanup(); errorValue != nil {
+		return fail("SOS_ALPHA_USER_STORAGE_CLEANUP_FAILED", "user-storage admission marker could not be removed")
 	}
 	return nil
 }
@@ -274,9 +321,22 @@ func execute() (int, error) {
 	if observed, digestError := digest(uvSource); digestError != nil || observed != uvDigest {
 		return 2, fail("SOS_ALPHA_UV_CHECKSUM_MISMATCH", "checked uv bootstrap digest does not match")
 	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" || !filepath.IsAbs(localAppData) {
+	environmentLocalAppData := os.Getenv("LOCALAPPDATA")
+	if environmentLocalAppData == "" || !filepath.IsAbs(environmentLocalAppData) {
 		return 2, fail("SOS_ALPHA_LOCALAPPDATA_INVALID", "LOCALAPPDATA is unavailable")
+	}
+	localAppData, knownFolderHRESULT := localAppDataKnownFolder()
+	if knownFolderHRESULT != 0 || localAppData == "" || !filepath.IsAbs(localAppData) {
+		return 2, fail("SOS_ALPHA_LOCALAPPDATA_KNOWN_FOLDER_UNAVAILABLE", "Windows Known Folder Local AppData is unavailable")
+	}
+	if !strings.EqualFold(filepath.Clean(environmentLocalAppData), filepath.Clean(localAppData)) {
+		return 2, fail("SOS_ALPHA_LOCALAPPDATA_MISMATCH", "LOCALAPPDATA does not match the Windows Known Folder binding")
+	}
+	if reparse, reparseError := hasReparsePoint(localAppData); reparseError != nil || reparse {
+		return 2, fail("SOS_ALPHA_USER_STORAGE_UNAVAILABLE", "canonical Local AppData is a reparse point or cannot be verified")
+	}
+	if errorValue = admitUserStorage(localAppData); errorValue != nil {
+		return 2, errorValue
 	}
 	ownerBinding, errorValue := currentUserBinding()
 	if errorValue != nil {

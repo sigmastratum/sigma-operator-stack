@@ -201,6 +201,41 @@ class NativeAlphaBundleTests(unittest.TestCase):
         self.assertNotIn("SetNamedSecurityInfo", source)
         self.assertNotIn("runas", source.lower())
 
+    def test_windows_known_folder_and_reversible_user_storage_admission_fail_closed(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(
+            encoding="utf-8"
+        )
+        native = (ROOT / "installers/windows-installer/reparse_windows.go").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "localAppDataKnownFolder()",
+            "knownFolderHRESULT != 0",
+            "strings.EqualFold",
+            '"SOS_ALPHA_LOCALAPPDATA_KNOWN_FOLDER_UNAVAILABLE"',
+            '"SOS_ALPHA_LOCALAPPDATA_MISMATCH"',
+            '"SOS_ALPHA_USER_STORAGE_ACCESS_DENIED"',
+            '"SOS_ALPHA_USER_STORAGE_UNAVAILABLE"',
+            '"SOS_ALPHA_USER_STORAGE_CLEANUP_FAILED"',
+            '".sos-storage-probe-"+hex.EncodeToString(nonce)',
+            "os.Mkdir(probe, 0700)",
+            "os.WriteFile(marker, payload, 0600)",
+            "os.ReadFile(marker)",
+            "os.Remove(marker)",
+            "os.Remove(probe)",
+        ):
+            self.assertIn(required, source)
+        for required in (
+            'syscall.NewLazyDLL("shell32.dll")',
+            'NewProc("SHGetKnownFolderPath")',
+            'NewProc("CoTaskMemFree")',
+            "folderIDLocalAppData",
+        ):
+            self.assertIn(required, native)
+        lowered = source.lower()
+        for forbidden in ("setnamedsecurityinfo", "runas", "takeown", "icacls", "tempdir"):
+            self.assertNotIn(forbidden, lowered)
+
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
             (ROOT / path).read_text(encoding="utf-8")
