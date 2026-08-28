@@ -44,6 +44,30 @@ func localAppDataKnownFolder() (string, uint32) {
 	return "", 0x8007007a
 }
 
+func currentProcessElevated() (bool, error) {
+	token, errorValue := syscall.OpenCurrentProcessToken()
+	if errorValue != nil {
+		return false, errorValue
+	}
+	defer token.Close()
+	var elevated uint32
+	var returned uint32
+	errorValue = syscall.GetTokenInformation(
+		token,
+		syscall.TokenElevation,
+		(*byte)(unsafe.Pointer(&elevated)),
+		uint32(unsafe.Sizeof(elevated)),
+		&returned,
+	)
+	if errorValue != nil {
+		return false, errorValue
+	}
+	if returned != uint32(unsafe.Sizeof(elevated)) {
+		return false, syscall.EINVAL
+	}
+	return elevated != 0, nil
+}
+
 func hasReparsePoint(path string) (bool, error) {
 	pointer, errorValue := syscall.UTF16PtrFromString(path)
 	if errorValue != nil {

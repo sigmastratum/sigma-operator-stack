@@ -301,11 +301,18 @@ func execute() (int, error) {
 	if mode != "install" && mode != "update" && mode != "remove" && mode != "test" {
 		return 2, usage()
 	}
+	elevated, errorValue := currentProcessElevated()
+	if errorValue != nil {
+		return 2, fail("SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE", "Windows process elevation state cannot be verified")
+	}
+	if elevated {
+		return 2, fail("SOS_ALPHA_ELEVATION_FORBIDDEN", "run SOS as the ordinary signed-in Windows user, not as Administrator")
+	}
 	project := "."
 	if len(os.Args) == 3 {
 		project = os.Args[2]
 	}
-	project, errorValue := filepath.Abs(project)
+	project, errorValue = filepath.Abs(project)
 	if errorValue != nil {
 		return 2, fail("SOS_ALPHA_PROJECT_INVALID", "project path cannot be normalized")
 	}

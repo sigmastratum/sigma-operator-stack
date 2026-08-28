@@ -238,6 +238,32 @@ class NativeAlphaBundleTests(unittest.TestCase):
         for forbidden in ("setnamedsecurityinfo", "runas", "takeown", "icacls", "tempdir"):
             self.assertNotIn(forbidden, lowered)
 
+    def test_windows_elevated_process_is_rejected_before_storage_or_project_observation(self) -> None:
+        source = (ROOT / "installers/windows-installer/main.go").read_text(
+            encoding="utf-8"
+        )
+        native = (ROOT / "installers/windows-installer/reparse_windows.go").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "currentProcessElevated()",
+            '"SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE"',
+            '"SOS_ALPHA_ELEVATION_FORBIDDEN"',
+        ):
+            self.assertIn(required, source)
+        for required in (
+            "syscall.OpenCurrentProcessToken()",
+            "syscall.GetTokenInformation(",
+            "syscall.TokenElevation",
+            "elevated != 0",
+        ):
+            self.assertIn(required, native)
+        elevation_index = source.index("currentProcessElevated()")
+        self.assertLess(elevation_index, source.index("filepath.Abs(project)"))
+        self.assertLess(elevation_index, source.index("os.Executable()"))
+        self.assertLess(elevation_index, source.index("localAppDataKnownFolder()"))
+        self.assertLess(elevation_index, source.index("admitUserStorage(localAppData)"))
+
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(
             (ROOT / path).read_text(encoding="utf-8")
