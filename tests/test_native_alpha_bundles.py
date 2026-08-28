@@ -211,6 +211,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         for required in (
             "localAppDataKnownFolder()",
             "knownFolderHRESULT != 0",
+            'environmentLocalAppData == "" || !filepath.IsAbs(environmentLocalAppData)',
             "strings.EqualFold",
             '"SOS_ALPHA_LOCALAPPDATA_KNOWN_FOLDER_UNAVAILABLE"',
             '"SOS_ALPHA_LOCALAPPDATA_MISMATCH"',
@@ -225,6 +226,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "os.Remove(probe)",
         ):
             self.assertIn(required, source)
+        self.assertNotIn('"SOS_ALPHA_LOCALAPPDATA_INVALID"', source)
         for required in (
             'syscall.NewLazyDLL("shell32.dll")',
             'NewProc("SHGetKnownFolderPath")',

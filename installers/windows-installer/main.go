@@ -322,14 +322,12 @@ func execute() (int, error) {
 		return 2, fail("SOS_ALPHA_UV_CHECKSUM_MISMATCH", "checked uv bootstrap digest does not match")
 	}
 	environmentLocalAppData := os.Getenv("LOCALAPPDATA")
-	if environmentLocalAppData == "" || !filepath.IsAbs(environmentLocalAppData) {
-		return 2, fail("SOS_ALPHA_LOCALAPPDATA_INVALID", "LOCALAPPDATA is unavailable")
-	}
 	localAppData, knownFolderHRESULT := localAppDataKnownFolder()
 	if knownFolderHRESULT != 0 || localAppData == "" || !filepath.IsAbs(localAppData) {
 		return 2, fail("SOS_ALPHA_LOCALAPPDATA_KNOWN_FOLDER_UNAVAILABLE", "Windows Known Folder Local AppData is unavailable")
 	}
-	if !strings.EqualFold(filepath.Clean(environmentLocalAppData), filepath.Clean(localAppData)) {
+	if environmentLocalAppData == "" || !filepath.IsAbs(environmentLocalAppData) ||
+		!strings.EqualFold(filepath.Clean(environmentLocalAppData), filepath.Clean(localAppData)) {
 		return 2, fail("SOS_ALPHA_LOCALAPPDATA_MISMATCH", "LOCALAPPDATA does not match the Windows Known Folder binding")
 	}
 	if reparse, reparseError := hasReparsePoint(localAppData); reparseError != nil || reparse {
