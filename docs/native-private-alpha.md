@@ -28,14 +28,20 @@ PowerShell policy, Gatekeeper, TLS verification or endpoint security to run it.
 
 Open Command Prompt or Windows Terminal in the extracted bundle and run the
 native user-scope executable. It does not invoke a `.ps1` file and does not
-require an Execution Policy change, `Bypass`, Administrator or UAC:
+require an Execution Policy change, `Bypass`, Administrator access or UAC
+elevation. Windows UAC must remain enabled:
 
 ```bat
-SOS-Installer.exe install C:\path\to\project
-SOS-Installer.exe test C:\path\to\project
-SOS-Installer.exe update C:\path\to\project
-SOS-Installer.exe remove C:\path\to\project
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a2\SOS-Installer.exe" install "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a2\SOS-Installer.exe" test "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a2\SOS-Installer.exe" update "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a2\SOS-Installer.exe" remove "C:\Users\Example\source\example-project"
 ```
+
+Replace the quoted example project path with the real path. Do not type angle
+brackets such as `<PROJECT>`, and do not copy the `C:\...>` command prompt or
+program output back into Command Prompt. Run one command at a time from an
+ordinary, non-Administrator session with Windows UAC enabled.
 
 `Install-SOS.ps1` remains a developer/debug surface and is not the supported
 private-alpha entrypoint. Do not alter Execution Policy to run it. The current
@@ -43,8 +49,9 @@ private build is unsigned and is suitable only for an invited tester who
 verifies the published SHA-256; Authenticode signing is required before public
 distribution.
 
-Update with `-Mode update`. Remove the managed Codex integration and package
-with `-Mode remove`; repository-owned `.sigma` records are preserved.
+Update with the `update` command. Remove the managed Codex integration and
+package with the `remove` command; repository-owned `.sigma` records are
+preserved.
 
 ## macOS
 

@@ -29,10 +29,13 @@ var candidate = "unbound"
 
 const ownerMarker = ".sos-environment-owner-v1"
 
-type refusal struct{ code, problem string }
+type refusal struct{ code, problem, fix string }
 
 func (value refusal) Error() string   { return value.code + ": " + value.problem }
 func fail(code, problem string) error { return refusal{code: code, problem: problem} }
+func failWithFix(code, problem, fix string) error {
+	return refusal{code: code, problem: problem, fix: fix}
+}
 
 func digest(path string) (string, error) {
 	handle, errorValue := os.Open(path)
@@ -303,10 +306,17 @@ func execute() (int, error) {
 	}
 	elevated, errorValue := currentProcessElevated()
 	if errorValue != nil {
-		return 2, fail("SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE", "Windows process elevation state cannot be verified")
+		return 2, failWithFix("SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE", "Windows process elevation state cannot be verified", "Use a supported ordinary Windows user session; do not weaken this check.")
+	}
+	uacEnabled, errorValue := userAccountControlEnabled()
+	if errorValue != nil {
+		return 2, failWithFix("SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE", "Windows UAC state cannot be verified", "Use a supported ordinary Windows user session; do not weaken this check.")
+	}
+	if !uacEnabled {
+		return 2, failWithFix("SOS_ALPHA_UAC_DISABLED_UNSUPPORTED", "Windows User Account Control is disabled", "Enable UAC and restart Windows, or use a supported Windows host.")
 	}
 	if elevated {
-		return 2, fail("SOS_ALPHA_ELEVATION_FORBIDDEN", "run SOS as the ordinary signed-in Windows user, not as Administrator")
+		return 2, failWithFix("SOS_ALPHA_ELEVATION_FORBIDDEN", "SOS is running with an elevated Windows token", "Close this window and start SOS by ordinary double-click or from a non-Administrator terminal.")
 	}
 	project := "."
 	if len(os.Args) == 3 {
@@ -429,6 +439,9 @@ func main() {
 	if errorValue != nil {
 		if typed, ok := errorValue.(refusal); ok {
 			fmt.Fprintf(os.Stderr, "SOS alpha setup stopped.\nCode: %s\nProblem: %s\n", typed.code, typed.problem)
+			if typed.fix != "" {
+				fmt.Fprintf(os.Stderr, "Fix: %s\n", typed.fix)
+			}
 		} else {
 			fmt.Fprintln(os.Stderr, "SOS alpha setup stopped.\nCode: SOS_ALPHA_INSTALLER_FAILED\nProblem: bounded native installer operation failed.")
 		}

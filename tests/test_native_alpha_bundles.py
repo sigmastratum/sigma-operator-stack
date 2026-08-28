@@ -4,6 +4,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,65 @@ def _load(name: str, path: Path):
 
 alpha = _load("sos_native_alpha_launcher", ROOT / "tools/start_sos_alpha.py")
 smoke = _load("sos_native_alpha_smoke", ROOT / "tools/native_alpha_smoke.py")
+pe_manifest = _load("sos_windows_pe_manifest", ROOT / "tools/windows_pe_manifest.py")
+
+
+def _synthetic_pe(manifests: list[bytes]) -> bytes:
+    """Build a bounded parser fixture; it is not an executable product."""
+    resource_rva = 0x1000
+    count = len(manifests)
+    type_directory = 24
+    id_directories = type_directory + 16 + count * 8
+    data_entries = id_directories + count * 24
+    payload_offset = data_entries + count * 16
+    resource = bytearray()
+    resource.extend(struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1))
+    resource.extend(struct.pack("<II", 24, 0x80000000 | type_directory))
+    resource.extend(struct.pack("<IIHHHH", 0, 0, 0, 0, 0, count))
+    for index in range(count):
+        resource.extend(
+            struct.pack("<II", index + 1, 0x80000000 | (id_directories + index * 24))
+        )
+    for index in range(count):
+        resource.extend(struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1))
+        resource.extend(struct.pack("<II", 0x0409, data_entries + index * 16))
+    next_payload = payload_offset
+    for manifest in manifests:
+        resource.extend(
+            struct.pack("<IIII", resource_rva + next_payload, len(manifest), 0, 0)
+        )
+        next_payload += len(manifest)
+    for manifest in manifests:
+        resource.extend(manifest)
+
+    optional = bytearray(240)
+    struct.pack_into("<H", optional, 0, 0x20B)
+    struct.pack_into("<II", optional, 32, 0x1000, 0x200)
+    struct.pack_into("<II", optional, 56, 0x2000, 0x200)
+    struct.pack_into("<H", optional, 68, 3)
+    struct.pack_into("<I", optional, 108, 16)
+    struct.pack_into("<II", optional, 128, resource_rva, len(resource))
+    dos = bytearray(0x80)
+    dos[:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x80)
+    file_header = struct.pack("<HHIIIHH", 0x8664, 1, 0, 0, 0, 240, 0x0022)
+    raw_size = (len(resource) + 0x1FF) & ~0x1FF
+    section = struct.pack(
+        "<8sIIIIIIHHI",
+        b".rsrc\0\0\0",
+        len(resource),
+        resource_rva,
+        raw_size,
+        0x200,
+        0,
+        0,
+        0,
+        0,
+        0x40000040,
+    )
+    headers = bytes(dos) + b"PE\0\0" + file_header + bytes(optional) + section
+    headers += b"\0" * (0x200 - len(headers))
+    return headers + bytes(resource) + b"\0" * (raw_size - len(resource))
 
 
 class NativeAlphaBundleTests(unittest.TestCase):
@@ -37,8 +97,17 @@ class NativeAlphaBundleTests(unittest.TestCase):
             repository = root / "repository"
             source = repository / "installers/windows-installer"
             source.mkdir(parents=True)
+            tools = repository / "tools"
+            tools.mkdir()
             (source / "go.mod").write_text("module example.invalid/sos\n", encoding="utf-8")
             (source / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+            manifest = (ROOT / "installers/windows-installer/application.manifest").read_bytes()
+            (source / "application.manifest").write_bytes(manifest)
+            (tools / "windows_pe_manifest.py").write_bytes(
+                (ROOT / "tools/windows_pe_manifest.py").read_bytes()
+            )
+            fixture_pe = root / "fixture.exe"
+            fixture_pe.write_bytes(_synthetic_pe([manifest]))
             subprocess.run(["git", "init", "-q", os.fspath(repository)], check=True)
             subprocess.run(["git", "-C", os.fspath(repository), "add", "."], check=True)
             subprocess.run(
@@ -56,12 +125,12 @@ class NativeAlphaBundleTests(unittest.TestCase):
             fake_go = root / "go"
             fake_go.write_text(
                 "#!/usr/bin/env python3\n"
-                "import pathlib,sys\n"
+                "import pathlib,shutil,sys\n"
                 "if sys.argv[1:] == ['version']:\n"
                 " print('go version go1.27.0 linux/amd64')\n"
                 "else:\n"
                 " out=pathlib.Path(sys.argv[sys.argv.index('-o')+1])\n"
-                " out.write_bytes(b'MZ'+pathlib.Path('main.go').read_bytes())\n",
+                f" shutil.copyfile({os.fspath(fixture_pe)!r}, out)\n",
                 encoding="utf-8",
             )
             fake_go.chmod(0o700)
@@ -86,6 +155,8 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 check=True, stdout=subprocess.PIPE, text=True,
             ).stdout.strip()
             self.assertEqual(report["source_tree"], expected_tree)
+            self.assertEqual(report["requested_execution_level"], "asInvoker")
+            self.assertFalse(report["ui_access"])
 
             (source / "main.go").write_text("package main\n// dirty\nfunc main() {}\n", encoding="utf-8")
             dirty = build(candidate)
@@ -106,6 +177,25 @@ class NativeAlphaBundleTests(unittest.TestCase):
             mismatch = build(candidate)
             self.assertNotEqual(mismatch.returncode, 0)
             self.assertIn("candidate does not match repository HEAD", mismatch.stderr)
+
+    def test_windows_manifest_resource_is_exact_deterministic_and_fail_closed(self) -> None:
+        manifest = (ROOT / "installers/windows-installer/application.manifest").read_bytes()
+        first = pe_manifest.build_manifest_coff(manifest)
+        second = pe_manifest.build_manifest_coff(manifest)
+        self.assertEqual(first, second)
+        self.assertIn(b'level="asInvoker"', first)
+        report = pe_manifest.verify_pe_manifest(_synthetic_pe([manifest]), manifest)
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["manifest_count"], 1)
+        with self.assertRaises(pe_manifest.ManifestResourceError):
+            pe_manifest.verify_pe_manifest(_synthetic_pe([]), manifest)
+        with self.assertRaises(pe_manifest.ManifestResourceError):
+            pe_manifest.verify_pe_manifest(_synthetic_pe([manifest, manifest]), manifest)
+        with self.assertRaises(pe_manifest.ManifestResourceError):
+            pe_manifest.verify_pe_manifest(
+                _synthetic_pe([manifest.replace(b"asInvoker", b"highestAvailable")]),
+                manifest,
+            )
 
     def test_native_windows_entrypoint_does_not_depend_on_powershell_policy(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(encoding="utf-8")
@@ -247,8 +337,11 @@ class NativeAlphaBundleTests(unittest.TestCase):
         )
         for required in (
             "currentProcessElevated()",
+            "userAccountControlEnabled()",
             '"SOS_ALPHA_ELEVATION_STATE_UNAVAILABLE"',
+            '"SOS_ALPHA_UAC_DISABLED_UNSUPPORTED"',
             '"SOS_ALPHA_ELEVATION_FORBIDDEN"',
+            'Fix: %s',
         ):
             self.assertIn(required, source)
         for required in (
@@ -256,13 +349,51 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "syscall.GetTokenInformation(",
             "syscall.TokenElevation",
             "elevated != 0",
+            'NewProc("RegOpenKeyExW")',
+            'NewProc("RegQueryValueExW")',
+            'UTF16PtrFromString("EnableLUA")',
         ):
             self.assertIn(required, native)
         elevation_index = source.index("currentProcessElevated()")
+        uac_index = source.index("userAccountControlEnabled()")
+        disabled_index = source.index('"SOS_ALPHA_UAC_DISABLED_UNSUPPORTED"')
+        forbidden_index = source.index('"SOS_ALPHA_ELEVATION_FORBIDDEN"')
+        self.assertLess(elevation_index, uac_index)
+        self.assertLess(uac_index, disabled_index)
+        self.assertLess(disabled_index, forbidden_index)
         self.assertLess(elevation_index, source.index("filepath.Abs(project)"))
+        self.assertLess(uac_index, source.index("filepath.Abs(project)"))
         self.assertLess(elevation_index, source.index("os.Executable()"))
         self.assertLess(elevation_index, source.index("localAppDataKnownFolder()"))
         self.assertLess(elevation_index, source.index("admitUserStorage(localAppData)"))
+
+    def test_windows_builder_requires_exact_embedded_as_invoker_manifest(self) -> None:
+        manifest = (ROOT / "installers/windows-installer/application.manifest").read_text(
+            encoding="utf-8"
+        )
+        builder = (ROOT / "tools/build_windows_installer.py").read_text(encoding="utf-8")
+        tool = (ROOT / "tools/windows_pe_manifest.py").read_text(encoding="utf-8")
+        self.assertEqual(manifest.count("requestedExecutionLevel"), 1)
+        self.assertIn('level="asInvoker"', manifest)
+        self.assertIn('uiAccess="false"', manifest)
+        self.assertIn('"build-resource"', builder)
+        self.assertIn('"verify-pe"', builder)
+        self.assertIn('"requested_execution_level"', builder)
+        self.assertIn("PE must contain exactly one manifest resource", tool)
+        self.assertNotIn("requireAdministrator", manifest)
+        self.assertNotIn("highestAvailable", manifest)
+
+    def test_windows_onboarding_uses_literal_safe_commands(self) -> None:
+        documentation = (ROOT / "docs/native-private-alpha.md").read_text(
+            encoding="utf-8"
+        )
+        command_blocks = documentation.split("```bat", 1)[1].split("```", 1)[0]
+        self.assertNotIn("<PROJECT>", command_blocks)
+        self.assertNotIn("-Mode update", documentation)
+        self.assertNotIn("-Mode remove", documentation)
+        self.assertIn('install "C:\\Users\\Example\\source\\example-project"', documentation)
+        self.assertIn("Do not type angle", documentation)
+        self.assertIn("Windows UAC must remain enabled", documentation)
 
     def test_launchers_do_not_bypass_platform_security(self) -> None:
         joined = "\n".join(

@@ -10,8 +10,18 @@ import (
 var (
 	shell32              = syscall.NewLazyDLL("shell32.dll")
 	ole32                = syscall.NewLazyDLL("ole32.dll")
+	advapi32             = syscall.NewLazyDLL("advapi32.dll")
 	shGetKnownFolderPath = shell32.NewProc("SHGetKnownFolderPath")
 	coTaskMemFree        = ole32.NewProc("CoTaskMemFree")
+	regOpenKeyExW        = advapi32.NewProc("RegOpenKeyExW")
+	regQueryValueExW     = advapi32.NewProc("RegQueryValueExW")
+	regCloseKey          = advapi32.NewProc("RegCloseKey")
+)
+
+const (
+	hkeyLocalMachine = 0x80000002
+	keyQueryValue    = 0x0001
+	regDword         = 4
 )
 
 var folderIDLocalAppData = syscall.GUID{
@@ -66,6 +76,47 @@ func currentProcessElevated() (bool, error) {
 		return false, syscall.EINVAL
 	}
 	return elevated != 0, nil
+}
+
+func userAccountControlEnabled() (bool, error) {
+	subkey, errorValue := syscall.UTF16PtrFromString(`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`)
+	if errorValue != nil {
+		return false, errorValue
+	}
+	var key syscall.Handle
+	result, _, _ := regOpenKeyExW.Call(
+		hkeyLocalMachine,
+		uintptr(unsafe.Pointer(subkey)),
+		0,
+		keyQueryValue,
+		uintptr(unsafe.Pointer(&key)),
+	)
+	if result != 0 {
+		return false, syscall.Errno(result)
+	}
+	defer regCloseKey.Call(uintptr(key))
+	name, errorValue := syscall.UTF16PtrFromString("EnableLUA")
+	if errorValue != nil {
+		return false, errorValue
+	}
+	var valueType uint32
+	var value uint32
+	size := uint32(unsafe.Sizeof(value))
+	result, _, _ = regQueryValueExW.Call(
+		uintptr(key),
+		uintptr(unsafe.Pointer(name)),
+		0,
+		uintptr(unsafe.Pointer(&valueType)),
+		uintptr(unsafe.Pointer(&value)),
+		uintptr(unsafe.Pointer(&size)),
+	)
+	if result != 0 {
+		return false, syscall.Errno(result)
+	}
+	if valueType != regDword || size != uint32(unsafe.Sizeof(value)) {
+		return false, syscall.EINVAL
+	}
+	return value != 0, nil
 }
 
 func hasReparsePoint(path string) (bool, error) {
