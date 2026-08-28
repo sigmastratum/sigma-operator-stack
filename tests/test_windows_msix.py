@@ -109,7 +109,7 @@ class WindowsMSIXTests(unittest.TestCase):
             makeappx.write_text(
                 "#!/usr/bin/env python3\n"
                 "import pathlib,sys,zipfile\n"
-                "args=sys.argv[1:]; source=pathlib.Path(args[args.index('/d')+1]); output=pathlib.Path(args[args.index('/p')+1])\n"
+                "args=sys.argv[1:]; assert args[0]=='pack'; source=pathlib.Path(args[args.index('/d')+1]); output=pathlib.Path(args[args.index('/p')+1])\n"
                 "with zipfile.ZipFile(output,'w') as archive:\n"
                 "  [archive.write(path,path.relative_to(source).as_posix()) for path in sorted(source.rglob('*')) if path.is_file()]\n"
                 "  archive.writestr('AppxBlockMap.xml','<BlockMap/>')\n"

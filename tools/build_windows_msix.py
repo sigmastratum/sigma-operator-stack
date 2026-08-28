@@ -168,7 +168,7 @@ def main() -> int:
             if path.is_file():
                 os.utime(path, (epoch, epoch))
         subprocess.run(
-            [os.fspath(makeappx), "/pack", "/o", "/d", os.fspath(stage), "/p", os.fspath(output)],
+            [os.fspath(makeappx), "pack", "/o", "/d", os.fspath(stage), "/p", os.fspath(output)],
             check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
     with zipfile.ZipFile(output) as package:
