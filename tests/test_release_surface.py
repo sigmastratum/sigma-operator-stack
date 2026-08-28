@@ -54,6 +54,29 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_workflows.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_windows_signing_is_oidc_only_and_digest_bound(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github" / "workflows" / "windows-sign.yml").read_text(
+            encoding="utf-8"
+        )
+        verifier = (root / "tools" / "verify_windows_signature.ps1").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "SOS_WINDOWS_APPROVED_CANDIDATE",
+            "SOS_WINDOWS_APPROVED_UNSIGNED_SHA256",
+            "id-token: write",
+            "file-digest: SHA256",
+            "timestamp-digest: SHA256",
+            "Get-AuthenticodeSignature",
+            "TimeStamperCertificate",
+            "signed_sha256",
+            "unsigned_sha256",
+        ):
+            self.assertIn(required, workflow + verifier)
+        for forbidden in ("client-secret", "AZURE_CREDENTIALS", "-ExecutionPolicy Bypass"):
+            self.assertNotIn(forbidden, workflow + verifier)
+
     def test_release_bundle_retains_checked_first_run_assets(self) -> None:
         root = Path(__file__).resolve().parents[1]
         finalizer = (root / "tools" / "finalize_release_bundle.py").read_text(encoding="utf-8")

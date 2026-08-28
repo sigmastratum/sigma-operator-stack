@@ -37,8 +37,9 @@ def _action_uses(value: object) -> list[str]:
 def inspect(root: Path) -> dict[str, object]:
     ci = _load(root / ".github/workflows/ci.yml")
     release = _load(root / ".github/workflows/release.yml")
+    windows_sign = _load(root / ".github/workflows/windows-sign.yml")
     failures: list[str] = []
-    for workflow in (ci, release):
+    for workflow in (ci, release, windows_sign):
         for action in _action_uses(workflow):
             if not PINNED_ACTION.fullmatch(action):
                 failures.append(f"SOS_WORKFLOW_ACTION_NOT_IMMUTABLE:{action}")
@@ -68,6 +69,40 @@ def inspect(root: Path) -> dict[str, object]:
     serialized = json.dumps(release, sort_keys=True)
     if "password:" in serialized or "token:" in serialized or "PYPI_API_TOKEN" in serialized:
         failures.append("SOS_RELEASE_LONG_LIVED_TOKEN_SURFACE")
+    sign_triggers = windows_sign.get("on", {})
+    if set(sign_triggers) != {"workflow_dispatch"}:
+        failures.append("SOS_WINDOWS_SIGNING_TRIGGER_NOT_MANUAL")
+    sign = windows_sign.get("jobs", {}).get("sign", {})
+    if sign.get("environment") != "windows-signing" or sign.get("runs-on") != "windows-2025":
+        failures.append("SOS_WINDOWS_SIGNING_ENVIRONMENT_INVALID")
+    sign_permissions = sign.get("permissions", {})
+    if sign_permissions != {"contents": "read", "id-token": "write"}:
+        failures.append("SOS_WINDOWS_SIGNING_PERMISSIONS_INVALID")
+    sign_condition = str(sign.get("if", ""))
+    for required in (
+        "SOS_WINDOWS_APPROVED_CANDIDATE",
+        "SOS_WINDOWS_APPROVED_UNSIGNED_SHA256",
+        "inputs.candidate",
+        "inputs.unsigned_sha256",
+    ):
+        if required not in sign_condition:
+            failures.append("SOS_WINDOWS_SIGNING_GATE_INCOMPLETE")
+            break
+    sign_serialized = json.dumps(windows_sign, sort_keys=True)
+    sign_source = (root / ".github/workflows/windows-sign.yml").read_text(encoding="utf-8")
+    for required in (
+        "azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba",
+        "azure/login@93381592711f247e165c389ebb30b596c84cdc48",
+        "file-digest: SHA256",
+        "timestamp-rfc3161: http://timestamp.acs.microsoft.com",
+        "timestamp-digest: SHA256",
+        "verify_windows_signature.ps1",
+    ):
+        if required not in sign_source:
+            failures.append("SOS_WINDOWS_SIGNING_CONTRACT_INCOMPLETE")
+            break
+    if any(token in sign_serialized for token in ("client-secret", "pfx", "password", "AZURE_CREDENTIALS")):
+        failures.append("SOS_WINDOWS_SIGNING_LONG_LIVED_CREDENTIAL_SURFACE")
     audit_command = "python -m pip_audit --strict --progress-spinner off"
     all_workflows = json.dumps((ci, release), sort_keys=True)
     for required in (

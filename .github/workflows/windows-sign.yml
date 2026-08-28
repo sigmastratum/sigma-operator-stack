@@ -1,0 +1,84 @@
+name: Sign Windows alpha artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact independently qualified 40-character candidate SHA
+        required: true
+        type: string
+      unsigned_sha256:
+        description: Exact approved unsigned SOS-Installer.exe SHA-256
+        required: true
+        type: string
+
+jobs:
+  sign:
+    if: >-
+      github.sha == inputs.candidate &&
+      vars.SOS_WINDOWS_APPROVED_CANDIDATE == inputs.candidate &&
+      vars.SOS_WINDOWS_APPROVED_UNSIGNED_SHA256 == inputs.unsigned_sha256
+    runs-on: windows-2025
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SOS_SIGN_CANDIDATE: ${{ inputs.candidate }}
+      SOS_SIGN_UNSIGNED_SHA256: ${{ inputs.unsigned_sha256 }}
+      SOS_SIGN_EXPECTED_PUBLISHER: ${{ vars.SOS_ARTIFACT_SIGNING_PUBLISHER }}
+      SOS_SIGN_ACCOUNT: ${{ vars.SOS_ARTIFACT_SIGNING_ACCOUNT }}
+      SOS_SIGN_PROFILE: ${{ vars.SOS_ARTIFACT_SIGNING_PROFILE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version: "1.27.0"
+          cache: false
+      - name: Rebuild and verify exact unsigned PE twice
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:SOS_SIGN_CANDIDATE) { throw 'candidate mismatch' }
+          if (git status --porcelain) { throw 'source is dirty' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\unsigned-a", "$env:RUNNER_TEMP\unsigned-b", "$env:RUNNER_TEMP\signed" | Out-Null
+          python tools/build_windows_installer.py --repository . --candidate $env:SOS_SIGN_CANDIDATE --go (Get-Command go).Source --output "$env:RUNNER_TEMP\unsigned-a\SOS-Installer.exe"
+          python tools/build_windows_installer.py --repository . --candidate $env:SOS_SIGN_CANDIDATE --go (Get-Command go).Source --output "$env:RUNNER_TEMP\unsigned-b\SOS-Installer.exe"
+          $first = (Get-FileHash -Algorithm SHA256 "$env:RUNNER_TEMP\unsigned-a\SOS-Installer.exe").Hash.ToLowerInvariant()
+          $second = (Get-FileHash -Algorithm SHA256 "$env:RUNNER_TEMP\unsigned-b\SOS-Installer.exe").Hash.ToLowerInvariant()
+          if ($first -ne $second -or $first -ne $env:SOS_SIGN_UNSIGNED_SHA256) { throw 'unsigned artifact digest mismatch' }
+          Copy-Item "$env:RUNNER_TEMP\unsigned-a\SOS-Installer.exe" "$env:RUNNER_TEMP\signed\SOS-Installer.exe"
+      - name: Authenticate to Azure with GitHub OIDC
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48
+        with:
+          client-id: ${{ vars.SOS_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.SOS_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.SOS_AZURE_SUBSCRIPTION_ID }}
+      - name: Sign exact PE with Azure Artifact Signing
+        uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba
+        with:
+          endpoint: ${{ vars.SOS_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.SOS_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.SOS_ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ runner.temp }}\signed\SOS-Installer.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
+      - name: Verify Windows trust and freeze signing evidence
+        shell: pwsh
+        run: |
+          $tree = git show -s --format=%T $env:SOS_SIGN_CANDIDATE
+          tools/verify_windows_signature.ps1 -File "$env:RUNNER_TEMP\signed\SOS-Installer.exe" -Candidate $env:SOS_SIGN_CANDIDATE -Tree $tree -UnsignedSha256 $env:SOS_SIGN_UNSIGNED_SHA256 -ExpectedPublisher $env:SOS_SIGN_EXPECTED_PUBLISHER -SigningAccount $env:SOS_SIGN_ACCOUNT -CertificateProfile $env:SOS_SIGN_PROFILE -Output "$env:RUNNER_TEMP\signed\windows-signing-evidence.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sos-windows-signed-${{ inputs.candidate }}
+          path: ${{ runner.temp }}\signed
+          if-no-files-found: error
+          retention-days: 7
