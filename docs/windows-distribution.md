@@ -10,7 +10,11 @@ not public distribution surfaces.
 ## Store signing lineage
 
 The release process builds an exact unsigned MSIX from a clean reviewed Git
-candidate and immutable payload. Two independent builds must be byte-identical.
+candidate and immutable payload. Two independent MakeAppx builds must have the
+same entry inventory, exact entry bytes, block map, content types, compression
+properties and non-time metadata. MakeAppx container timestamp drift is
+recorded but does not weaken this content-reproducibility gate. One admitted
+unsigned MSIX is then frozen by its complete-file SHA-256 for upload.
 The package uploaded to Partner Center must match the reviewed digest and the
 following Store-owned identity:
 
@@ -60,6 +64,7 @@ version performs the previewed cleanup.
 
 The checked-in MSIX builder is preparation, not a distributable package. It
 requires an exact externally assembled payload, an exact MakeAppx digest, Store
-identity validation, two byte-identical package builds, Partner Center
+identity validation, two content-identical package builds with only bounded
+container timestamp drift, Partner Center
 certification, Store signing, and clean-host replay before the Windows alpha
 gate can pass.
