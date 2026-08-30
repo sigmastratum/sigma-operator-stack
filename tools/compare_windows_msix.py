@@ -1,399 +1,416 @@
 #!/usr/bin/env python3
-"""Compare two unsigned MSIX packages without trusting container timestamps."""
+"""Verify two default-MakeAppx-unpacked MSIX trees exactly.
+
+This verifier intentionally does not parse ZIP/MSIX container structures.  The
+same digest-bound MakeAppx binary that packed each candidate must first unpack
+it with default semantic validation.  This program then proves that both
+unpacked trees contain exactly the reviewed payload and have identical bytes.
+"""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
-import struct
+import os
+import re
+import stat
 import sys
-import zipfile
+import urllib.parse
+import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
 
-REQUIRED_PACKAGE_ENTRIES = {
-    "AppxManifest.xml",
+CONTRACT = "sos_windows_msix_semantic_comparison_v2"
+PAYLOAD_CONTRACT = "sos_windows_msix_payload_v1"
+PAYLOAD_KEYS = {
+    "artifacts",
+    "candidate",
+    "contract",
+    "executable_acquisition_after_install",
+    "msix_version",
+    "network_after_package_download",
+    "platform",
+    "sos_version",
+    "tree",
+}
+GENERATED_ENTRIES = {
     "AppxBlockMap.xml",
+    "AppxManifest.xml",
+    "Assets/Square150x150Logo.png",
+    "Assets/Square44x44Logo.png",
     "[Content_Types].xml",
     "payload-manifest.json",
-    "sos.exe",
-    "runtime/python.exe",
 }
-TIMESTAMP_EXTRA_FIELD_IDS = {0x000A, 0x5455}
-LOCAL_HEADER = b"PK\x03\x04"
-CENTRAL_HEADER = b"PK\x01\x02"
-END_OF_CENTRAL_DIRECTORY = b"PK\x05\x06"
-ZIP64_END_OF_CENTRAL_DIRECTORY = b"PK\x06\x06"
-ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR = b"PK\x06\x07"
-ZIP16_SENTINEL = 0xFFFF
-ZIP32_SENTINEL = 0xFFFFFFFF
+MAX_FILES = 50_000
+MAX_FILE_SIZE = 512 * 1024 * 1024
+MAX_TOTAL_SIZE = 2 * 1024 * 1024 * 1024
+MAX_MANIFEST_SIZE = 16 * 1024 * 1024
+WINDOWS_RESERVED = {
+    "CON",
+    "CONIN$",
+    "CONOUT$",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+BLOCKMAP_NAMESPACE = "http://schemas.microsoft.com/appx/2010/blockmap"
+BLOCKMAP_HASH_METHOD = "http://www.w3.org/2001/04/xmlenc#sha256"
 
 
 class ComparisonError(ValueError):
-    """An MSIX pair cannot be admitted as content-equivalent."""
+    """The semantic MSIX comparison cannot be admitted."""
 
 
-def sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
-def sha256(path: Path) -> str:
-    return sha256_bytes(path.read_bytes())
+def is_reparse(stat_result: os.stat_result) -> bool:
+    attributes = getattr(stat_result, "st_file_attributes", 0)
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(attributes & reparse)
 
 
-def normalize_timestamp_payload(field_id: int, payload: bytes) -> bytes:
-    normalized = bytearray(payload)
-    if field_id == 0x5455:
-        if not payload or payload[0] & ~0x07:
-            raise ComparisonError("malformed extended timestamp extra field")
-        expected = 1 + 4 * sum(bool(payload[0] & bit) for bit in (0x01, 0x02, 0x04))
-        if len(payload) != expected:
-            raise ComparisonError("malformed extended timestamp extra field")
-        normalized[1:] = b"\0" * (len(payload) - 1)
-    elif field_id == 0x000A:
-        if len(payload) < 4 or payload[:4] != b"\0\0\0\0":
-            raise ComparisonError("malformed NTFS timestamp extra field")
-        position = 4
-        while position < len(payload):
-            if len(payload) - position < 4:
-                raise ComparisonError("malformed NTFS timestamp extra field")
-            tag, length = struct.unpack_from("<HH", payload, position)
-            end = position + 4 + length
-            if end > len(payload) or (tag == 0x0001 and length != 24):
-                raise ComparisonError("malformed NTFS timestamp extra field")
-            if tag == 0x0001:
-                normalized[position + 4 : end] = b"\0" * length
-            position = end
-    return bytes(normalized)
-
-
-def normalized_extra(value: bytes) -> bytes:
-    """Zero only timestamp values while preserving all flags and tag structure."""
-    position = 0
-    retained = bytearray()
-    while position < len(value):
-        if len(value) - position < 4:
-            raise ComparisonError("malformed ZIP extra field")
-        field_id, length = struct.unpack_from("<HH", value, position)
-        end = position + 4 + length
-        if end > len(value):
-            raise ComparisonError("malformed ZIP extra field")
-        retained.extend(value[position : position + 4])
-        retained.extend(
-            normalize_timestamp_payload(field_id, value[position + 4 : end])
-            if field_id in TIMESTAMP_EXTRA_FIELD_IDS
-            else value[position + 4 : end]
-        )
-        position = end
-    return bytes(retained)
-
-
-def normalize_extra_in_place(buffer: bytearray, start: int, length: int) -> None:
-    end = start + length
-    position = start
-    while position < end:
-        if end - position < 4:
-            raise ComparisonError("malformed ZIP extra field")
-        field_id, field_length = struct.unpack_from("<HH", buffer, position)
-        field_end = position + 4 + field_length
-        if field_end > end:
-            raise ComparisonError("malformed ZIP extra field")
-        if field_id in TIMESTAMP_EXTRA_FIELD_IDS:
-            buffer[position + 4 : field_end] = normalize_timestamp_payload(
-                field_id, bytes(buffer[position + 4 : field_end])
-            )
-        position = field_end
-
-
-def validate_entry_boundaries(
-    buffer: bytearray, infos: tuple[zipfile.ZipInfo, ...], central_offset: int
-) -> None:
-    ordered = sorted(infos, key=lambda info: info.header_offset)
-    for index, info in enumerate(ordered):
-        offset = info.header_offset
-        name_length, extra_length = struct.unpack_from("<HH", buffer, offset + 26)
-        data_start = offset + 30 + name_length + extra_length
-        data_end = data_start + info.compress_size
-        boundary = ordered[index + 1].header_offset if index + 1 < len(ordered) else central_offset
-        if data_end > boundary:
-            raise ComparisonError("ZIP entry overlaps the next package structure")
-        descriptor = bytes(buffer[data_end:boundary])
-        if info.flag_bits & 0x08:
-            if len(descriptor) == 16 and descriptor[:4] == b"PK\x07\x08":
-                descriptor = descriptor[4:]
-            if len(descriptor) != 12:
-                raise ComparisonError("invalid ZIP data descriptor shape")
-            crc, compressed_size, file_size = struct.unpack("<LLL", descriptor)
-            if (crc, compressed_size, file_size) != (
-                info.CRC,
-                info.compress_size,
-                info.file_size,
-            ):
-                raise ComparisonError("ZIP data descriptor binding failed")
-        elif descriptor:
-            raise ComparisonError("unexpected bytes between ZIP entries")
-
-
-def resolve_central_directory(
-    buffer: bytearray, eocd: int, expected_entries: int | None
-) -> tuple[int, int]:
-    """Resolve a bounded single-disk classic or ZIP64 central directory."""
-    (
-        signature,
-        disk,
-        central_disk,
-        disk_entries,
-        total_entries,
-        central_size,
-        central_offset,
-        comment_length,
-    ) = struct.unpack_from("<4s4H2LH", buffer, eocd)
-    if signature != END_OF_CENTRAL_DIRECTORY or comment_length != 0:
-        raise ComparisonError("ZIP trailer or comment is forbidden")
-    locator = eocd - 20
-    has_zip64_locator = (
-        locator >= 0
-        and bytes(buffer[locator : locator + 4])
-        == ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR
-    )
-    classic_uses_zip64 = (
-        disk == ZIP16_SENTINEL
-        or central_disk == ZIP16_SENTINEL
-        or disk_entries == ZIP16_SENTINEL
-        or total_entries == ZIP16_SENTINEL
-        or central_size == ZIP32_SENTINEL
-        or central_offset == ZIP32_SENTINEL
-    )
-    if not has_zip64_locator:
-        if classic_uses_zip64:
-            raise ComparisonError("ZIP64 locator is missing")
-        if disk != 0 or central_disk != 0:
-            raise ComparisonError("multi-disk ZIP package is forbidden")
-        if disk_entries != total_entries or (
-            expected_entries is not None and total_entries != expected_entries
-        ):
-            raise ComparisonError("ZIP central entry count is inconsistent")
-        if central_offset + central_size != eocd:
-            raise ComparisonError("ZIP central directory bounds are inconsistent")
-        return central_offset, central_size
-
-    locator_signature, locator_disk, zip64_offset, total_disks = struct.unpack_from(
-        "<4sLQL", buffer, locator
-    )
-    if locator_signature != ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR:
-        raise ComparisonError("malformed ZIP64 locator")
-    if locator_disk != 0 or total_disks != 1:
-        raise ComparisonError("multi-disk ZIP64 package is forbidden")
-    if zip64_offset + 56 > locator:
-        raise ComparisonError("malformed ZIP64 end record bounds")
-    if bytes(buffer[zip64_offset : zip64_offset + 4]) != ZIP64_END_OF_CENTRAL_DIRECTORY:
-        raise ComparisonError("ZIP64 end record is missing")
-    zip64_size = struct.unpack_from("<Q", buffer, zip64_offset + 4)[0]
-    if zip64_size != 44 or zip64_offset + 12 + zip64_size != locator:
-        raise ComparisonError("unsupported ZIP64 end record shape")
-    (
-        zip64_signature,
-        resolved_size,
-        _version_made_by,
-        _version_needed,
-        zip64_disk,
-        zip64_central_disk,
-        zip64_disk_entries,
-        zip64_total_entries,
-        zip64_central_size,
-        zip64_central_offset,
-    ) = struct.unpack_from("<4sQ2H2L4Q", buffer, zip64_offset)
-    if zip64_signature != ZIP64_END_OF_CENTRAL_DIRECTORY or resolved_size != 44:
-        raise ComparisonError("malformed ZIP64 end record")
-    if zip64_disk != 0 or zip64_central_disk != 0:
-        raise ComparisonError("multi-disk ZIP64 package is forbidden")
-    if zip64_disk_entries != zip64_total_entries or (
-        expected_entries is not None and zip64_total_entries != expected_entries
+def safe_relative(value: str) -> str:
+    if (
+        not value
+        or "\\" in value
+        or "\0" in value
+        or any(ord(character) < 32 or character in '<>"|?*' for character in value)
     ):
-        raise ComparisonError("ZIP64 central entry count is inconsistent")
-    if zip64_central_offset + zip64_central_size != zip64_offset:
-        raise ComparisonError("ZIP64 central directory bounds are inconsistent")
-
-    for observed, resolved, sentinel, label in (
-        (disk, zip64_disk, ZIP16_SENTINEL, "disk number"),
-        (central_disk, zip64_central_disk, ZIP16_SENTINEL, "central disk number"),
-        (disk_entries, zip64_disk_entries, ZIP16_SENTINEL, "disk entry count"),
-        (total_entries, zip64_total_entries, ZIP16_SENTINEL, "entry count"),
-        (central_size, zip64_central_size, ZIP32_SENTINEL, "central size"),
-        (central_offset, zip64_central_offset, ZIP32_SENTINEL, "central offset"),
-    ):
-        if observed not in (resolved, sentinel):
-            raise ComparisonError(f"classic and ZIP64 {label} differ")
-    return zip64_central_offset, zip64_central_size
+        raise ComparisonError("unsafe package path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+        raise ComparisonError("unsafe package path")
+    for part in path.parts:
+        if part.endswith((" ", ".")) or ":" in part:
+            raise ComparisonError("Windows-unsafe package path")
+        if part.split(".", 1)[0].upper() in WINDOWS_RESERVED:
+            raise ComparisonError("Windows-reserved package path")
+    return path.as_posix()
 
 
-def normalized_container(path: Path, infos: tuple[zipfile.ZipInfo, ...]) -> bytes:
-    """Return raw package bytes with only admitted timestamp fields neutralized."""
-    buffer = bytearray(path.read_bytes())
-    eocd = bytes(buffer).rfind(END_OF_CENTRAL_DIRECTORY)
-    if eocd < 0 or eocd + 22 != len(buffer):
-        raise ComparisonError("ZIP trailer or comment is forbidden")
-    central_offset, central_size = resolve_central_directory(buffer, eocd, len(infos))
-    central_end = central_offset + central_size
+def inventory(root: Path) -> dict[str, tuple[int, str]]:
+    resolved = root.resolve(strict=True)
+    root_stat = resolved.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode) or is_reparse(root_stat):
+        raise ComparisonError("unpack root is not a plain directory")
+    found: dict[str, tuple[int, str]] = {}
+    folded: dict[str, str] = {}
+    total_size = 0
+    for directory, names, files in os.walk(resolved, topdown=True, followlinks=False):
+        names.sort()
+        files.sort()
+        directory_path = Path(directory)
+        admitted_directories: list[str] = []
+        for name in names:
+            child = directory_path / name
+            observed = child.lstat()
+            if not stat.S_ISDIR(observed.st_mode) or is_reparse(observed):
+                raise ComparisonError("unpack tree contains a link or reparse object")
+            safe_relative(child.relative_to(resolved).as_posix())
+            admitted_directories.append(name)
+        names[:] = admitted_directories
+        for name in files:
+            child = directory_path / name
+            observed = child.lstat()
+            if not stat.S_ISREG(observed.st_mode) or is_reparse(observed):
+                raise ComparisonError("unpack tree contains a non-regular object")
+            relative = safe_relative(child.relative_to(resolved).as_posix())
+            folded_name = relative.casefold()
+            if folded_name in folded and folded[folded_name] != relative:
+                raise ComparisonError("unpack tree contains a case-fold collision")
+            folded[folded_name] = relative
+            if observed.st_size > MAX_FILE_SIZE:
+                raise ComparisonError("unpack tree file exceeds the size limit")
+            total_size += observed.st_size
+            if total_size > MAX_TOTAL_SIZE:
+                raise ComparisonError("unpack tree exceeds the total size limit")
+            found[relative] = (observed.st_size, sha256_file(child))
+            if len(found) > MAX_FILES:
+                raise ComparisonError("unpack tree exceeds the file-count limit")
+    return found
 
-    for info in infos:
-        offset = info.header_offset
-        if bytes(buffer[offset : offset + 4]) != LOCAL_HEADER or offset + 30 > len(buffer):
-            raise ComparisonError("invalid ZIP local header")
-        flags = struct.unpack_from("<H", buffer, offset + 6)[0]
-        if flags != info.flag_bits:
-            raise ComparisonError("local and central ZIP flags differ")
-        if flags & 0x1:
-            raise ComparisonError("encrypted package entry is forbidden")
-        name_length, extra_length = struct.unpack_from("<HH", buffer, offset + 26)
-        extra_start = offset + 30 + name_length
-        if extra_start + extra_length > len(buffer):
-            raise ComparisonError("invalid ZIP local extra field")
-        buffer[offset + 10 : offset + 14] = b"\0" * 4
-        normalize_extra_in_place(buffer, extra_start, extra_length)
 
-    position = central_offset
-    central_names: list[str] = []
-    while position < central_end:
-        if (
-            bytes(buffer[position : position + 4]) != CENTRAL_HEADER
-            or position + 46 > central_end
-        ):
-            raise ComparisonError("invalid ZIP central header")
-        name_length, extra_length, entry_comment_length = struct.unpack_from(
-            "<HHH", buffer, position + 28
+def read_payload_manifest(
+    root: Path,
+    observed: dict[str, tuple[int, str]],
+    candidate: str,
+    tree: str,
+) -> tuple[dict[str, object], dict[str, str]]:
+    item = observed.get("payload-manifest.json")
+    if item is None or item[0] > MAX_MANIFEST_SIZE:
+        raise ComparisonError("payload manifest is missing or oversized")
+    try:
+        record = json.loads(
+            read_bound_bytes(
+                root, observed, "payload-manifest.json", MAX_MANIFEST_SIZE
+            ).decode("utf-8")
         )
-        end = position + 46 + name_length + extra_length + entry_comment_length
-        if end > central_end:
-            raise ComparisonError("invalid ZIP central entry")
-        name = bytes(buffer[position + 46 : position + 46 + name_length]).decode("utf-8")
-        central_names.append(safe_name(name))
-        central_flags = struct.unpack_from("<H", buffer, position + 8)[0]
-        if central_flags != infos[len(central_names) - 1].flag_bits:
-            raise ComparisonError("central ZIP flags are inconsistent")
-        if central_flags & 0x1:
-            raise ComparisonError("encrypted package entry is forbidden")
-        buffer[position + 12 : position + 16] = b"\0" * 4
-        normalize_extra_in_place(buffer, position + 46 + name_length, extra_length)
-        position = end
-    if position != central_end or central_names != [info.filename for info in infos]:
-        raise ComparisonError("ZIP central inventory is inconsistent")
-    validate_entry_boundaries(buffer, infos, central_offset)
-    return bytes(buffer)
+    except (UnicodeError, json.JSONDecodeError, OSError) as error:
+        raise ComparisonError("payload manifest is unreadable") from error
+    if not isinstance(record, dict) or set(record) != PAYLOAD_KEYS:
+        raise ComparisonError("payload manifest contract is invalid")
+    if (
+        record["contract"] != PAYLOAD_CONTRACT
+        or record["candidate"] != candidate
+        or record["tree"] != tree
+        or record["sos_version"] != "0.1.0a2"
+        or record["msix_version"] != "0.1.0.2"
+        or record["platform"] != "windows-x86_64"
+        or record["network_after_package_download"] is not False
+        or record["executable_acquisition_after_install"] is not False
+    ):
+        raise ComparisonError("payload manifest binding is invalid")
+    artifacts = record["artifacts"]
+    if not isinstance(artifacts, list):
+        raise ComparisonError("payload artifact inventory is invalid")
+    bound: dict[str, str] = {}
+    previous = ""
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or set(artifact) != {"path", "sha256"}:
+            raise ComparisonError("payload artifact record is invalid")
+        path = artifact["path"]
+        digest = artifact["sha256"]
+        if not isinstance(path, str) or not isinstance(digest, str):
+            raise ComparisonError("payload artifact record is invalid")
+        path = safe_relative(path)
+        if path <= previous or path in bound:
+            raise ComparisonError("payload artifact inventory is not strictly ordered")
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ComparisonError("payload artifact digest is invalid")
+        if path.lower().endswith((".pyc", ".pyo")) or "__pycache__" in PurePosixPath(path).parts:
+            raise ComparisonError("Python bytecode is forbidden in the MSIX payload")
+        bound[path] = digest
+        previous = path
+    if set(bound) & GENERATED_ENTRIES:
+        raise ComparisonError("payload artifact collides with a generated entry")
+    expected = set(bound) | GENERATED_ENTRIES
+    if set(observed) != expected:
+        raise ComparisonError("unpacked package inventory differs from the exact payload")
+    for path, digest in bound.items():
+        if observed[path][1] != digest:
+            raise ComparisonError("unpacked payload digest differs from its manifest")
+    if "AppxSignature.p7x" in observed:
+        raise ComparisonError("unsigned package unexpectedly contains a signature")
+    return record, bound
 
 
-def validate_container_directory(path: Path) -> None:
-    """Reject malformed directory framing before a generic ZIP reader handles it."""
-    buffer = bytearray(path.read_bytes())
-    eocd = bytes(buffer).rfind(END_OF_CENTRAL_DIRECTORY)
-    if eocd < 0 or eocd + 22 != len(buffer):
-        raise ComparisonError("ZIP trailer or comment is forbidden")
-    resolve_central_directory(buffer, eocd, None)
-
-
-def safe_name(value: str) -> str:
-    if "\\" in value or value.startswith("/"):
-        raise ComparisonError("unsafe package entry name")
-    name = PurePosixPath(value)
-    if name.is_absolute() or ".." in name.parts or value in {"", "."}:
-        raise ComparisonError("unsafe package entry name")
+def read_bound_bytes(
+    root: Path,
+    observed: dict[str, tuple[int, str]],
+    relative: str,
+    limit: int,
+) -> bytes:
+    expected = observed.get(relative)
+    if expected is None or expected[0] > limit:
+        raise ComparisonError("bound package file is missing or oversized")
+    value = (root / relative).read_bytes()
+    if len(value) != expected[0] or hashlib.sha256(value).hexdigest() != expected[1]:
+        raise ComparisonError("package file changed after inventory")
     return value
 
 
-def read_package(
-    path: Path,
-) -> tuple[dict[str, tuple[zipfile.ZipInfo, bytes]], bytes, bytes]:
-    entries: dict[str, tuple[zipfile.ZipInfo, bytes]] = {}
-    validate_container_directory(path)
-    with zipfile.ZipFile(path) as package:
-        if package.comment:
-            raise ComparisonError("package comment is forbidden")
-        infos = tuple(package.infolist())
-        for info in infos:
-            name = safe_name(info.filename)
-            if name in entries:
-                raise ComparisonError("duplicate package entry")
-            if info.is_dir() or info.flag_bits & 0x1:
-                raise ComparisonError("directory or encrypted package entry is forbidden")
-            entries[name] = (info, package.read(info))
-    if not REQUIRED_PACKAGE_ENTRIES.issubset(entries):
-        raise ComparisonError("required package entry is missing")
-    inventory = [
-        {"path": name, "sha256": sha256_bytes(content), "size": len(content)}
-        for name, (_, content) in sorted(entries.items())
+def validate_file_blocks(
+    root: Path,
+    relative: str,
+    expected: tuple[int, str],
+    blocks: list[ET.Element],
+) -> None:
+    whole = hashlib.sha256()
+    index = 0
+    with (root / relative).open("rb") as source:
+        while True:
+            chunk = source.read(64 * 1024)
+            if not chunk:
+                break
+            if index >= len(blocks):
+                raise ComparisonError("block map omits package content")
+            block = blocks[index]
+            if block.tag != f"{{{BLOCKMAP_NAMESPACE}}}Block" or set(
+                block.attrib
+            ) not in ({"Hash"}, {"Hash", "Size"}):
+                raise ComparisonError("block map block record is invalid")
+            try:
+                decoded = base64.b64decode(block.attrib["Hash"], validate=True)
+            except (KeyError, ValueError) as error:
+                raise ComparisonError("block map block hash is invalid") from error
+            if len(decoded) != 32 or decoded != hashlib.sha256(chunk).digest():
+                raise ComparisonError("block map block hash differs from package content")
+            compressed_size = block.attrib.get("Size")
+            if compressed_size is not None:
+                try:
+                    parsed_size = int(compressed_size, 10)
+                except ValueError as error:
+                    raise ComparisonError("block map compressed size is invalid") from error
+                if parsed_size < 0 or parsed_size > MAX_FILE_SIZE:
+                    raise ComparisonError("block map compressed size is invalid")
+            whole.update(chunk)
+            index += 1
+    if index != len(blocks):
+        raise ComparisonError("block map contains extra blocks")
+    if expected[0] == 0 and blocks:
+        raise ComparisonError("block map gives blocks to an empty file")
+    if whole.hexdigest() != expected[1]:
+        raise ComparisonError("package file changed during block validation")
+
+
+def validate_block_map(
+    root: Path, observed: dict[str, tuple[int, str]]
+) -> None:
+    value = read_bound_bytes(root, observed, "AppxBlockMap.xml", MAX_MANIFEST_SIZE)
+    upper = value.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ComparisonError("block map contains a forbidden XML declaration")
+    try:
+        document = ET.fromstring(value)
+    except ET.ParseError as error:
+        raise ComparisonError("block map XML is invalid") from error
+    if document.tag != f"{{{BLOCKMAP_NAMESPACE}}}BlockMap":
+        raise ComparisonError("block map namespace is invalid")
+    if document.attrib.get("HashMethod") != BLOCKMAP_HASH_METHOD:
+        raise ComparisonError("block map hash method is invalid")
+    expected = set(observed) - {"AppxBlockMap.xml", "[Content_Types].xml"}
+    files: dict[str, int] = {}
+    for child in document:
+        if child.tag != f"{{{BLOCKMAP_NAMESPACE}}}File" or set(
+            child.attrib
+        ) != {"Name", "Size", "LfhSize"}:
+            raise ComparisonError("block map file record is invalid")
+        encoded_name = child.attrib.get("Name")
+        encoded_size = child.attrib.get("Size")
+        if not encoded_name or encoded_size is None:
+            raise ComparisonError("block map file record is incomplete")
+        try:
+            name = safe_relative(
+                urllib.parse.unquote(encoded_name.replace("\\", "/"), errors="strict")
+            )
+            size = int(encoded_size, 10)
+            local_header_size = int(child.attrib["LfhSize"], 10)
+        except (UnicodeError, ValueError) as error:
+            raise ComparisonError("block map file record is invalid") from error
+        if name in files or size < 0 or local_header_size <= 0:
+            raise ComparisonError("block map file inventory is ambiguous")
+        files[name] = size
+        if name not in observed:
+            raise ComparisonError("block map names content outside the package")
+        validate_file_blocks(root, name, observed[name], list(child))
+    if set(files) != expected:
+        raise ComparisonError("block map inventory differs from package content")
+    for name, size in files.items():
+        if observed[name][0] != size:
+            raise ComparisonError("block map file size differs from package content")
+
+
+def validate_package_xml(
+    root: Path, observed: dict[str, tuple[int, str]]
+) -> None:
+    for relative in ("AppxManifest.xml", "[Content_Types].xml"):
+        value = read_bound_bytes(root, observed, relative, MAX_MANIFEST_SIZE)
+        upper = value.upper()
+        if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+            raise ComparisonError("package XML contains a forbidden declaration")
+        try:
+            ET.fromstring(value)
+        except ET.ParseError as error:
+            raise ComparisonError("package XML is invalid") from error
+
+
+def content_digest(observed: dict[str, tuple[int, str]]) -> str:
+    canonical = [
+        {"path": path, "sha256": digest, "size": size}
+        for path, (size, digest) in sorted(observed.items())
     ]
-    canonical = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
-    return entries, canonical, normalized_container(path, infos)
-
-
-def stable_metadata(info: zipfile.ZipInfo) -> tuple[object, ...]:
-    return (
-        info.compress_type,
-        info.CRC,
-        info.file_size,
-        info.compress_size,
-        info.flag_bits,
-        info.create_system,
-        info.create_version,
-        info.extract_version,
-        info.internal_attr,
-        info.external_attr,
-        info.volume,
-        normalized_extra(info.extra),
-        info.comment,
-    )
-
-
-def compare(first: Path, second: Path) -> dict[str, object]:
-    first_entries, first_inventory, first_container = read_package(first)
-    second_entries, second_inventory, second_container = read_package(second)
-    if set(first_entries) != set(second_entries):
-        raise ComparisonError("package entry inventory differs")
-    if first_inventory != second_inventory:
-        raise ComparisonError("package entry content differs")
-
-    timestamp_drift: list[str] = []
-    for name in sorted(first_entries):
-        first_info, first_content = first_entries[name]
-        second_info, second_content = second_entries[name]
-        if first_content != second_content:
-            raise ComparisonError("package entry content differs")
-        if stable_metadata(first_info) != stable_metadata(second_info):
-            raise ComparisonError("package entry metadata differs beyond timestamps")
-        if first_info.date_time != second_info.date_time or first_info.extra != second_info.extra:
-            timestamp_drift.append(name)
-    if first_container != second_container:
-        raise ComparisonError("package container differs beyond timestamps")
-
-    first_digest = sha256(first)
-    second_digest = sha256(second)
-    return {
-        "byte_identical": first_digest == second_digest,
-        "content_digest": f"sha256:{sha256_bytes(first_inventory)}",
-        "contract": "sos_windows_msix_content_comparison_v1",
-        "entry_count": len(first_entries),
-        "first_msix_sha256": first_digest,
-        "second_msix_sha256": second_digest,
-        "status": "passed",
-        "timestamp_drift_entry_count": len(timestamp_drift),
-        "timestamp_drift_only": first_digest != second_digest,
-    }
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("first", type=Path)
-    parser.add_argument("second", type=Path)
-    arguments = parser.parse_args()
-    try:
-        report = compare(arguments.first.resolve(strict=True), arguments.second.resolve(strict=True))
-    except (ComparisonError, OSError, zipfile.BadZipFile) as error:
-        print(f"SOS_MSIX_CONTENT_COMPARISON_FAILED: {error}", file=sys.stderr)
-        return 2
+    parser.add_argument("first_msix", type=Path)
+    parser.add_argument("second_msix", type=Path)
+    parser.add_argument("--first-unpacked", required=True, type=Path)
+    parser.add_argument("--second-unpacked", required=True, type=Path)
+    parser.add_argument("--candidate", required=True)
+    parser.add_argument("--tree", required=True)
+    parser.add_argument("--makeappx-sha256", required=True)
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9a-f]{40}", args.candidate):
+        raise ComparisonError("candidate binding is invalid")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.tree):
+        raise ComparisonError("tree binding is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.makeappx_sha256):
+        raise ComparisonError("MakeAppx binding is invalid")
+    for supplied in (
+        args.first_msix,
+        args.second_msix,
+        args.first_unpacked,
+        args.second_unpacked,
+    ):
+        supplied_stat = supplied.lstat()
+        if stat.S_ISLNK(supplied_stat.st_mode) or is_reparse(supplied_stat):
+            raise ComparisonError("input path is a link or reparse object")
+    first_msix = args.first_msix.resolve(strict=True)
+    second_msix = args.second_msix.resolve(strict=True)
+    if not stat.S_ISREG(first_msix.lstat().st_mode) or not stat.S_ISREG(
+        second_msix.lstat().st_mode
+    ):
+        raise ComparisonError("MSIX input is not a regular file")
+    first_root = args.first_unpacked.resolve(strict=True)
+    second_root = args.second_unpacked.resolve(strict=True)
+    first = inventory(first_root)
+    second = inventory(second_root)
+    first_record, first_payload = read_payload_manifest(
+        first_root, first, args.candidate, args.tree
+    )
+    second_record, second_payload = read_payload_manifest(
+        second_root, second, args.candidate, args.tree
+    )
+    if first_record != second_record or first_payload != second_payload:
+        raise ComparisonError("payload manifests differ")
+    if first != second:
+        raise ComparisonError("default-MakeAppx-unpacked package content differs")
+    validate_package_xml(first_root, first)
+    validate_package_xml(second_root, second)
+    validate_block_map(first_root, first)
+    validate_block_map(second_root, second)
+    if inventory(first_root) != first or inventory(second_root) != second:
+        raise ComparisonError("unpacked package changed during semantic validation")
+    first_sha = sha256_file(first_msix)
+    second_sha = sha256_file(second_msix)
+    digest = content_digest(first)
+    report = {
+        "byte_identical": first_sha == second_sha,
+        "candidate": args.candidate,
+        "container_equivalence_claimed": False,
+        "contract": CONTRACT,
+        "first_msix_sha256": f"sha256:{first_sha}",
+        "makeappx_sha256": f"sha256:{args.makeappx_sha256}",
+        "package_content_digest": f"sha256:{digest}",
+        "package_file_count": len(first),
+        "payload_file_count": len(first_payload),
+        "pyc_file_count": 0,
+        "raw_content_serialized": False,
+        "second_msix_sha256": f"sha256:{second_sha}",
+        "status": "passed",
+        "tree": args.tree,
+        "verification_method": "default_makeappx_unpack_exact_content_v1",
+    }
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ComparisonError, OSError) as error:
+        print(f"SOS_MSIX_SEMANTIC_COMPARISON_FAILED: {error}", file=sys.stderr)
+        raise SystemExit(2)

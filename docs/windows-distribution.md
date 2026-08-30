@@ -10,11 +10,31 @@ not public distribution surfaces.
 ## Store signing lineage
 
 The release process builds an exact unsigned MSIX from a clean reviewed Git
-candidate and immutable payload. Two independent MakeAppx builds must have the
-same entry inventory, exact entry bytes, block map, content types, compression
-properties and non-time metadata. MakeAppx container timestamp drift is
-recorded but does not weaken this content-reproducibility gate. One admitted
-unsigned MSIX is then frozen by its complete-file SHA-256 for upload.
+candidate and immutable payload. Build tooling runs from a separate checked
+runtime; no executable inside the product payload is run while packaging.
+Python bytecode and `__pycache__` are excluded because they can contain private
+build paths and can change when Python imports a codec.
+
+Two independent MakeAppx builds are unpacked by the same exact, digest-bound
+MakeAppx binary with default semantic validation. The two unpacked trees must
+have the exact expected inventory and identical bytes, including the manifest,
+block map and content types. Raw MSIX container bytes may differ, so the release
+gate claims semantic package-content reproducibility rather than byte-identical
+containers. The selected unsigned MSIX is then frozen by its complete-file
+SHA-256 for upload.
+
+The native build runner embeds the digest of one reviewed input lock. That lock
+binds the candidate, source snapshot, payload artifacts, build toolchains and
+MakeAppx identity before the runner is built. The outer build-packet SHA-256 is
+distributed over an independent authenticated channel; a packet cannot
+authenticate itself. Any package produced without both bindings is ineligible
+for Store upload.
+
+The build packet is a release-engineering tool, not an end-user installer. The
+Windows SDK and MakeAppx are required only on the controlled package-build
+host. Ordinary SOS users install the Store-delivered package and do not install
+the SDK, Python, `uv`, or a compiler.
+
 The package uploaded to Partner Center must match the reviewed digest and the
 following Store-owned identity:
 
@@ -32,6 +52,19 @@ Azure Artifact Signing is not required for the Store-first public-alpha route.
 It remains a possible future paid signing channel for direct downloads outside
 Microsoft Store. Self-signed packages are limited to private development and
 must not be presented as a frictionless public distribution path.
+
+## Release build threat boundary
+
+The unsigned package build runs as an ordinary, non-elevated user on a local
+fixed NTFS volume with UAC enabled. The native runner rejects reparse points,
+alternate data streams, mapped or substituted drives, unbound inputs and
+drift. Child build processes are bounded as one kill-on-close process tree.
+
+The alpha release-build gate assumes a controlled host without a concurrently
+malicious process running as the same Windows identity. It does not claim to
+defend an unsigned packet from an active local administrator or same-user
+attacker. Store signing, Store delivery and clean-host certification are the
+distribution trust boundary for users.
 
 ## Host and project authority
 
@@ -63,8 +96,8 @@ leave the project integration disconnected until a separately installed SOS
 version performs the previewed cleanup.
 
 The checked-in MSIX builder is preparation, not a distributable package. It
-requires an exact externally assembled payload, an exact MakeAppx digest, Store
-identity validation, two content-identical package builds with only bounded
-container timestamp drift, Partner Center
+requires an exact externally assembled payload, a separately reviewed exact
+MakeAppx version and digest, Store identity validation, two default-validated
+unpacks with exact content equality, Partner Center
 certification, Store signing, and clean-host replay before the Windows alpha
 gate can pass.

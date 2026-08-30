@@ -14,6 +14,7 @@ func closedPythonEnvironment(packageRoot string) []string {
 	blocked := map[string]bool{
 		"PYTHONHOME": true, "PYTHONPATH": true, "PYTHONSTARTUP": true,
 		"PYTHONUSERBASE": true, "PYTHONINSPECT": true,
+		"PYTHONDONTWRITEBYTECODE": true, "PYTHONPYCACHEPREFIX": true,
 	}
 	environment := make([]string, 0, len(os.Environ())+3)
 	for _, item := range os.Environ() {
@@ -23,6 +24,7 @@ func closedPythonEnvironment(packageRoot string) []string {
 		}
 	}
 	return append(environment,
+		"PYTHONDONTWRITEBYTECODE=1",
 		"PYTHONNOUSERSITE=1",
 		"PYTHONSAFEPATH=1",
 		"PYTHONPATH="+filepath.Join(packageRoot, "runtime", "Lib", "site-packages"),
@@ -37,15 +39,15 @@ func translated(arguments []string) ([]string, error) {
 		if len(arguments) != 2 {
 			return nil, fmt.Errorf("usage: sos install PROJECT")
 		}
-		return []string{"-m", "sos", "init", "--with-codex", arguments[1]}, nil
+		return []string{"-B", "-m", "sos", "init", "--with-codex", arguments[1]}, nil
 	}
 	if arguments[0] == "update" || arguments[0] == "remove" {
 		if len(arguments) != 2 {
 			return nil, fmt.Errorf("usage: sos %s PROJECT", arguments[0])
 		}
-		return []string{"-m", "sos", "setup", arguments[0], "codex", arguments[1]}, nil
+		return []string{"-B", "-m", "sos", "setup", arguments[0], "codex", arguments[1]}, nil
 	}
-	return append([]string{"-m", "sos"}, arguments...), nil
+	return append([]string{"-B", "-m", "sos"}, arguments...), nil
 }
 
 func run() int {
