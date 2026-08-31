@@ -16,12 +16,14 @@ Python bytecode and `__pycache__` are excluded because they can contain private
 build paths and can change when Python imports a codec.
 
 Two independent MakeAppx builds are unpacked by the same exact, digest-bound
-MakeAppx binary with default semantic validation. The two unpacked trees must
-have the exact expected inventory and identical bytes, including the manifest,
-block map and content types. Raw MSIX container bytes may differ, so the release
-gate claims semantic package-content reproducibility rather than byte-identical
-containers. The selected unsigned MSIX is then frozen by its complete-file
-SHA-256 for upload.
+MakeAppx binary with default semantic validation. The two materialized unpack
+trees must have the exact expected inventory and identical bytes, including the
+manifest and block map. MakeAppx keeps `[Content_Types].xml` container-only and
+does not materialize it during default unpack; SOS reserves that name against
+payload collisions but excludes it from the unpacked-inventory claim. Raw MSIX
+container bytes may differ, so the release gate claims semantic package-content
+reproducibility rather than byte-identical containers. The selected unsigned
+MSIX is then frozen by its complete-file SHA-256 for upload.
 
 The native build runner embeds the digest of one reviewed input lock. That lock
 binds the candidate, source snapshot, payload artifacts, build toolchains and
