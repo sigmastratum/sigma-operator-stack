@@ -65,7 +65,10 @@ FORBIDDEN_PATTERNS = (
     re.compile(rb"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(rb"(?i)(?:[A-Z]:[\\/](?:Users|Downloads|Documents|Desktop|Temp|tmp)[\\/])"),
     re.compile(rb"(?:/home/|/Users/|/tmp/|/private/var/|/var/folders/)"),
-    re.compile(rb"\\\\[^\\\r\n]+\\[^\\\r\n]+"),
+    re.compile(
+        rb"\\\\[A-Za-z0-9][A-Za-z0-9._-]{0,252}\\"
+        rb"[A-Za-z0-9$][A-Za-z0-9$._ -]{0,127}(?:\\[^\r\n\"']*)?"
+    ),
     re.compile(rb"(?:sigma_worktrees|codex-clipboard|<response-annotations>|GTM-REQ-[0-9]+)"),
 )
 

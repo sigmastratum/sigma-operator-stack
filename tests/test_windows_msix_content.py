@@ -124,6 +124,7 @@ class WindowsMSIXContentTests(unittest.TestCase):
         cases = {
             "credential": b"client_secret = 'abcdefghijklmnopqrstuvwxyz'\n",
             "host-path": b"value = 'C:/Users/example-user/Documents/project'\n",
+            "unc-path": b"value = r'\\\\private-host\\customer-share\\project'\n",
             "conversation": b"value = '<response-annotations>'\n",
         }
         for name, value in cases.items():
@@ -134,6 +135,16 @@ class WindowsMSIXContentTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn("SOS_MSIX_CONTENT_SAFETY_FAILED", completed.stderr)
                 self.assertNotIn(value.decode().strip(), completed.stderr)
+
+    def test_content_safety_accepts_public_path_validation_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package_fixture(
+                root,
+                b'def safe(part):\n    return "\\\\" in part or "\\x00" in part\n',
+            )
+            completed = self.run_check(root)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_content_safety_rejects_bytecode_even_when_manifest_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
