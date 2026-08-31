@@ -71,7 +71,7 @@ def main() -> int:
         )
 
         binding = LauncherBinding(
-            os.fspath(Path(sys.executable)), "0.1.0a1", "sha256:" + "d" * 64
+            os.fspath(Path(sys.executable)), "0.1.0a2", "sha256:" + "d" * 64
         )
         plan = prepare_one_command_init(
             project,

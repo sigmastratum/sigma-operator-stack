@@ -1,4 +1,8 @@
-# SOS native private alpha 0.1.0a2
+# SOS native private-alpha evidence route 0.1.0a2
+
+This is a historical invited-test route, not the public installation path.
+Public agents must follow [`install-with-codex.md`](install-with-codex.md) and
+stop while `release/current.json` is absent.
 
 This checked bundle is for an invited native-platform test. It is not a signed
 public installer.
@@ -43,11 +47,11 @@ brackets such as `<PROJECT>`, and do not copy the `C:\...>` command prompt or
 program output back into Command Prompt. Run one command at a time from an
 ordinary, non-Administrator session with Windows UAC enabled.
 
-`Install-SOS.ps1` remains a developer/debug surface and is not the supported
-private-alpha entrypoint. Do not alter Execution Policy to run it. The current
-private build is unsigned and is suitable only for an invited tester who
-verifies the published SHA-256; Authenticode signing is required before public
-distribution.
+`Install-SOS.ps1` remains a developer/debug surface and is not a supported
+entrypoint. Do not alter Execution Policy to run it. Unsigned ZIP/PE artifacts
+are private diagnostics only. The public Windows route is a Microsoft
+Store-signed per-user MSIX after certification and clean-host lifecycle
+qualification.
 
 Update with the `update` command. Remove the managed Codex integration and
 package with the `remove` command; repository-owned `.sigma` records are

@@ -6,19 +6,16 @@ activates a capability automatically.
 
 ## Alpha contract
 
-Before updating, retain the exact predecessor wheel and its SHA-256. Acquire
-the successor wheel separately and verify its published SHA-256 before changing
-the tool environment.
+Before updating, retain the exact predecessor release identity and its
+published digest. The platform launcher or package manager acquires and
+verifies the successor application payload; users do not install Python,
+`uv`, wheels, or repair `PATH` manually.
 
 For a project at `PATH`:
 
 ```text
 sos status PATH
 sos setup status codex PATH
-
-uv tool install --force --no-config --no-sources --no-build \
-  --no-python-downloads /exact/local/sigma_operator_stack-NEXT.whl
-
 sos propose-update PATH
 sos setup update codex PATH
 ```
@@ -41,13 +38,11 @@ executor binding is stale until the new package performs a new qualification.
 
 ## Downgrade
 
-If setup rebind or qualification fails, preserve the failure receipt and
-reinstall the retained exact predecessor wheel:
+If setup rebind or qualification fails, preserve the failure receipt and use
+the platform's verified rollback route to restore the retained predecessor
+application payload. Then rebind the project:
 
 ```text
-uv tool install --force --no-config --no-sources --no-build \
-  --no-python-downloads /exact/local/sigma_operator_stack-PREVIOUS.whl
-
 sos propose-update PATH
 sos setup update codex PATH
 ```
@@ -57,16 +52,33 @@ run regeneration to hide an update failure.
 
 ## Shared tool environment
 
-A user-level `uv tool` environment may serve more than one project. SOS does
-not keep a global project inventory in this alpha. Instead, qualification is
-bound to the exact executable package identity. After replacement, every
-project opened by the new package independently reports its previous
-qualification as stale and requires its own setup rebind and qualification.
-No receipt, accepted record or currentness state is shared between projects.
+One user-level SOS installation may serve more than one project. SOS does not
+keep a global project inventory in this alpha. Qualification is bound to the
+exact executable package identity. After replacement, every project opened by
+the new package independently reports its previous qualification as stale and
+requires its own setup rebind and qualification. No receipt, accepted record
+or currentness state is shared between projects.
 
 Already-running agent processes are not evidence of the new package. Update
 completion requires closing them and starting a fresh process after setup
 rebind.
+
+## Removal
+
+Remove the project integration before uninstalling the SOS application or
+managed tool environment. Use only the exact platform removal grammar from
+the verified release index; do not translate a command from another platform
+or private-alpha bundle.
+
+Removal deletes only exact SOS-managed Codex integration bytes after a
+preview and confirmation. It preserves `.sigma`, accepted records,
+qualification history, user-owned files, and unrelated agent configuration.
+If the platform package is removed first, those project records remain but
+the integration may be disconnected until SOS is reinstalled or the bounded
+cleanup is completed.
+
+Never delete `.sigma` to hide an update or removal failure. A collision,
+foreign managed bytes, or an unverifiable target stops without overwrite.
 
 ## Deferred
 

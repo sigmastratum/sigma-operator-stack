@@ -16,14 +16,20 @@ FIXTURES = ROOT / "tests/fixtures/agent-first-release"
 class AgentFirstPublicEntryTests(unittest.TestCase):
     def test_first_viewport_has_one_canonical_agent_route(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        first_viewport = "\n".join(readme.splitlines()[:45])
+        first_viewport = "\n".join(readme.splitlines()[:55])
         self.assertIn("Project state for coding agents.", first_viewport)
+        self.assertIn("Community alpha", first_viewport)
+        self.assertIn("demo/recovery-demo.mp4", first_viewport)
         self.assertIn(
             "Install SOS in my current project. Show me the preview before changing it.",
             first_viewport,
         )
         self.assertIn("docs/install-with-codex.md", first_viewport)
         self.assertIn("no public release pointer is published yet", first_viewport)
+        self.assertLess(
+            first_viewport.index("demo/recovery-demo.mp4"),
+            first_viewport.index("Install SOS in my current project"),
+        )
         self.assertGreaterEqual(readme.count("docs/install-with-codex.md"), 1)
         self.assertNotIn("uv tool install", readme)
         self.assertNotIn("preinstalled `uv`", readme)

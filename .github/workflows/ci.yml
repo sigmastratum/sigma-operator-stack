@@ -34,6 +34,7 @@ jobs:
       - name: Public boundary and workflow contracts
         run: |
           python tools/check_public_release.py --repository .
+          python tools/check_public_release_pointer.py --repository .
           python tools/check_workflows.py --repository .
       - name: Source suite with zero skips
         env:
@@ -68,20 +69,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/wheel-a" "$RUNNER_TEMP/wheel-b" "$RUNNER_TEMP/bundle"
           python tools/build_release_wheel.py --candidate "$GITHUB_SHA" --output-dir "$RUNNER_TEMP/wheel-a"
           python tools/build_release_wheel.py --candidate "$GITHUB_SHA" --output-dir "$RUNNER_TEMP/wheel-b"
-          cmp "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" "$RUNNER_TEMP/wheel-b/sigma_operator_stack-0.1.0a1-py3-none-any.whl"
+          cmp "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/wheel-b/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
       - name: Fresh non-editable installed-wheel suite
         run: |
           python -m venv "$RUNNER_TEMP/wheel-env"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --disable-pip-version-check -r requirements/release.txt
-          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a1-py3-none-any.whl"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
           cd "$RUNNER_TEMP"
           SOS_REQUIRE_INSTALLED=1 "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/tools/run_zero_skip_tests.py" --tests "$GITHUB_WORKSPACE/tests"
           "$RUNNER_TEMP/wheel-env/bin/sos" --version
       - name: Generate SBOM and canonical bundle
         run: |
-          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "$GITHUB_SHA" --wheel "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" --output "$RUNNER_TEMP/bundle/sigma-operator-stack-0.1.0a1.cdx.json"
-          python tools/finalize_release_bundle.py --candidate "$GITHUB_SHA" --wheel "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" --sbom "$RUNNER_TEMP/bundle/sigma-operator-stack-0.1.0a1.cdx.json" --output-dir "$RUNNER_TEMP/bundle"
-          cp "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a1-py3-none-any.whl" "$RUNNER_TEMP/bundle/"
+          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "$GITHUB_SHA" --wheel "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --output "$RUNNER_TEMP/bundle/sigma-operator-stack-0.1.0a2.cdx.json"
+          python tools/finalize_release_bundle.py --candidate "$GITHUB_SHA" --wheel "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --sbom "$RUNNER_TEMP/bundle/sigma-operator-stack-0.1.0a2.cdx.json" --output-dir "$RUNNER_TEMP/bundle"
+          cp "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/bundle/"
           cd "$RUNNER_TEMP/bundle"
           sha256sum -c SHA256SUMS
           PYTHONPATH="$GITHUB_WORKSPACE/tools" python -c "from pathlib import Path; from start_sos_alpha import verify_bundle; verify_bundle(Path('$RUNNER_TEMP/bundle'))"

@@ -54,6 +54,12 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_workflows.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_public_release_pointer_is_absent_and_fail_closed(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        result = self.run_tool(root, "check_public_release_pointer.py")
+        self.assertEqual(result["status"], "not_published", result)
+        self.assertFalse((root / "release" / "current.json").exists())
+
     def test_windows_signing_is_oidc_only_and_digest_bound(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github" / "workflows" / "windows-sign.yml").read_text(

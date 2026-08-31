@@ -2,14 +2,48 @@
 
 **Project state for coding agents.**
 
-Give this repository to Codex and say:
+Fresh coding-agent sessions often resume from stale chat context, an old green
+check, or the wrong local instructions. SOS records accepted project state in
+the repository, detects when it is no longer current, and returns one safe
+next action.
+
+> **Community alpha · source preview.** The source is available for audit and
+> contribution preparation. No installable public release is published yet.
+
+## See the recovery loop
+
+![Terminal view of SOS recovering project state and refusing a stale result](demo/recovery-terminal.png)
+
+The [90-second narrated demo](demo/recovery-demo.mp4) and its
+[text transcript](demo/transcript.md) show initialization, separate
+qualification, fresh-session recovery, a source change, and the stale refusal.
+This earlier Linux proof demonstrates the product loop; it is not evidence for
+the current cross-platform release candidate and will be rebuilt before
+package publication.
+
+## Install with Codex
+
+No public release pointer is published yet. When one exists, give this
+repository URL to Codex and say:
 
 > **Install SOS in my current project. Show me the preview before changing it.**
 
-Codex follows the [canonical installation route](docs/install-with-codex.md),
-verifies one exact platform release, and prepares the setup. You review the
-single SOS preview and remain the only person who can approve repository
-mutation or choose project authority.
+The [canonical installation route](docs/install-with-codex.md) makes Codex
+verify one exact platform release and prepare setup. You remain the only
+person who can approve repository mutation or choose project authority.
+
+The expected results are:
+
+- one aggregate preview before SOS writes managed files;
+- truthful `current`, `stale`, `not_configured`, or `not_verified` state;
+- a fresh Codex session recovers current work and one safe next action.
+
+Candidate scope: **Codex-first · Linux x86_64 · macOS 14+ Apple Silicon
+control plane · Windows 11 x86_64 pending Store lifecycle · local-first ·
+no telemetry**.
+
+[Limitations](#support-matrix) · [Security](SECURITY.md) ·
+[Uninstall and preservation](docs/version-update.md#removal)
 
 SOS is a local-first Community alpha with no telemetry. It helps a genuinely
 fresh coding-agent session recover accepted project state, detect stale or
@@ -17,21 +51,21 @@ unverified work, and receive one safe next action without relying on the
 previous chat. Unsupported, ambiguous, `not_configured` and `not_verified`
 states are never presented as green.
 
-> **Release gate:** no public release pointer is published yet. The URL-only
-> installation claim is therefore not active. Until `release/current.json`
-> exists in a tagged public release and passes the exact-candidate drill, do
-> not install from a branch tip, source archive, issue command or private test
-> bundle. Current platform evidence is summarized in the support matrix below.
+> **Source preview:** no public release pointer is published yet. You may read,
+> audit, and contribute to this repository, but the URL-only installation claim
+> is not active. Until `release/current.json` exists in a tagged release and
+> passes the exact-candidate drill, do not install from a branch tip, GitHub
+> source archive, issue command, or private test bundle. Current platform
+> evidence is summarized below.
 
 Sigma Operator Stack is the formal project name. SOS does not replace your
 repository, issue tracker, existing `AGENTS.md`, or governance framework. It
 discovers them, previews the exact managed change, and fails closed when
 authority is ambiguous.
 
-## See the recovery loop
-
-The reproducible demo in [`examples/fresh-agent-recovery/`](examples/fresh-agent-recovery/README.md)
-shows the whole product outcome:
+The reproducible sample in
+[`examples/fresh-agent-recovery/`](examples/fresh-agent-recovery/README.md)
+shows the product outcome:
 
 1. SOS discovers an existing project and preserves unrelated agent settings.
 2. One preview and one confirmation install the local control plane and Codex
@@ -40,19 +74,13 @@ shows the whole product outcome:
 4. A fresh session recovers accepted state and the next allowed action.
 5. A later source change is detected as stale instead of silently trusted.
 
-The exact-candidate terminal recording is available as
-[`WebM`](demo/recovery-demo.webm) or [`MP4`](demo/recovery-demo.mp4). Its
-canonical text equivalent is [`demo/transcript.md`](demo/transcript.md). It
-combines the offline local lifecycle with one explicitly approved,
-receipt-verified ephemeral Codex recovery. No raw task, response, tool result,
-session identifier, account data or host path is retained.
+The recording combines the offline local lifecycle with one explicitly
+approved, receipt-verified ephemeral Codex recovery. No raw task, response,
+tool result, session identifier, account data, or host path is retained.
 
-## Install with Codex
-
-There is one public installation route:
-[`docs/install-with-codex.md`](docs/install-with-codex.md). The released
-platform launcher owns its declared Python, `uv`, and package dependencies;
-the developer does not repair PATH or install them manually.
+There is one planned public installation route. The released platform launcher
+owns its declared Python, `uv`, and package dependencies; the developer does
+not repair PATH or install them manually.
 
 Installation and qualification are deliberately different operations. Setup
 may finish with `not_configured` or `not_verified`. Project checks run only
@@ -70,6 +98,9 @@ SOS binds accepted authority, policy, source observation, and current work to
 append-only records. The next session reads those records instead of guessing
 from chat history.
 
+Limit: SOS recovers only state that was explicitly accepted and recorded; it
+does not infer missing project truth from source code or chat history.
+
 ### Changed source is treated as already verified
 
 Every authoritative read re-observes the application fingerprint. A changed
@@ -81,6 +112,9 @@ upgrade or downgrade preserves historical receipts but makes their green state
 stale until each project is rebound, Codex is restarted, and qualification is
 run separately. See [version update and downgrade](docs/version-update.md).
 
+Limit: the alpha qualifies only registered check families and cannot certify
+model quality, production behavior, or checks outside the declared profile.
+
 ### Installation overwrites an existing stack
 
 `sos compatibility` discovers known agent and governance surfaces and marks
@@ -89,25 +123,38 @@ authority systems require an explicit primary choice. Foreign managed bytes,
 collisions, filesystem uncertainty, and changed previews stop without
 overwrite.
 
+Limit: recognized surfaces are classified; unknown frameworks are preserved
+but remain outside the compatibility claim.
+
 ## Support matrix
 
-`Observed` means an exact artifact ran in that environment. `Claimed` is the
-smaller public compatibility promise. Observation never silently expands the
-claim.
+`Observed` means an exact artifact ran in that environment. `Release claim`
+is the smaller compatibility promise that may become active only after a
+candidate-bound public release pointer exists. Observation never silently
+expands the claim.
 
-| Environment | Observed | Claimed in 0.1 alpha | Result |
+| Environment | Observed | Release claim | Current result |
 | --- | --- | --- | --- |
-| Native Linux x86_64, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Two independent positive controls | Supported | Control plane and registered Python qualification profile admitted |
+| Native Linux x86_64 on a local filesystem, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Independent native lifecycle and qualification controls passed | Control plane plus registered Python qualification | Candidate evidence exists; public artifact not released |
+| macOS 14+ Apple Silicon on local APFS | Native install, smoke, same-version update, and removal passed; `.sigma` preserved | Control plane only | Executable project qualification remains unsupported; public artifact not released |
+| Windows 11 x86_64 on local NTFS, UAC enabled, ordinary Medium Integrity user | Exact MSIX content built and accepted into Microsoft Store certification | Pending | Store-signed install/update/remove and clean-user lifecycle are not yet proven |
+| Windows with UAC disabled, elevated execution, non-owner profile storage, shared/network filesystem, or sandbox identity targeting another profile | Typed refusals observed | Unsupported | SOS stops before project mutation |
 | Docker Desktop on a WSL2 kernel exposing Landlock ABI 1 | Capability diagnostic recorded | Control plane only | Executable unittest is unsupported and fails closed |
-| Native Ubuntu WSL2 | Pending diagnostic evidence | Unverified | Not the default Windows onboarding path |
-| Direct Windows or Windows-backed mounts | Typed refusal observed | Unsupported in `0.1.0a1` | A native non-admin control-plane preview is planned; executable checks require later, separate isolation evidence |
-| Direct macOS or VM shared folders | Not qualified | Unsupported | Demand-gated; no current installer or VM compatibility promise |
+| Native Ubuntu WSL2 | No complete native evidence | Unverified | Not a release target |
 | Agents other than Codex | Not qualified | Unverified | Control plane is agent-neutral; the alpha adapter is Codex-first |
 | Languages/check families beyond registered Python syntax and unittest | Not qualified | Unsupported | Future families require an explicit registry and isolation contract |
+| Package network and telemetry | Launcher acquisition is bounded; SOS entrypoint counters remained `0/0/0` in qualified runs | No network or telemetry after verified handoff | Release evidence must bind the exact platform launcher |
+| Existing agent/governance files | Preserve/append/create/block and collision fixtures passed | No silent overwrite | Semantic ambiguity requires an owner choice |
 
-Run `sos capabilities --json` outside or inside a project for the exact local
-kernel decision. Exit `0` means the complete named profile is available; exit
-`2` gives a typed unsupported reason.
+The native private-alpha bundles pin managed Python `3.12.14` and `uv 0.12.6`.
+Exact Git and Codex versions are artifact-specific and must be frozen in the
+public release index before any broad compatibility claim. The Codex adapter
+exposes exactly eight read/proposal MCP tools.
+
+On Linux, `sos capabilities --json` reports the exact local qualification
+profile decision. Exit `0` means the complete named profile is available; exit
+`2` gives a typed unsupported reason. Windows and macOS control-plane support
+does not imply executable qualification support.
 
 ## Coexistence with an existing project
 
@@ -126,6 +173,10 @@ compatibility claim.
 
 ## Trust boundary
 
+- Reads bounded repository metadata, Git state, SOS records, and recognized
+  agent/governance surfaces; it does not serialize their raw contents.
+- Writes only previewed SOS records and exact managed integration targets after
+  the user's confirmation.
 - Local and offline after package acquisition; no telemetry.
 - Exact eight-tool MCP surface with no shell, accept, qualify, commit, push,
   deploy, or production mutation tool.
@@ -137,6 +188,9 @@ compatibility claim.
   fail-closed isolation profile.
 - User files are restored byte-for-byte on safe setup removal; `.sigma`
   project records are preserved.
+- Cannot prevent a user, another process, or an unrestricted coding agent from
+  changing files outside SOS; it detects relevant drift on the next observed
+  operation and fails closed.
 
 Read the public [architecture overview](docs/architecture.md),
 [threat model](docs/threat-model.md), and
@@ -152,6 +206,9 @@ only. It intentionally excludes private planning and commercial commitments.
 
 ## Contributing and support
 
+- Try the supported journey and tell us where it became unclear or stopped.
+  Share only typed reason codes and a synthetic reproducer—never private
+  source, prompts, raw `.sigma`, credentials, customer data, or host paths.
 - Reproducible bugs and bounded proposals: GitHub Issues.
 - Alpha feedback: [`docs/alpha-feedback.md`](docs/alpha-feedback.md).
 - Security reports: GitHub private vulnerability reporting only.

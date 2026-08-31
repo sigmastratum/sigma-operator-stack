@@ -67,6 +67,7 @@ REQUIRED_FILES = {
     "examples/fresh-agent-recovery/expected.json",
     "pyproject.toml",
     "requirements/audit.txt",
+    "tools/check_public_release_pointer.py",
 }
 REQUIRED_ISSUE_FORMS = {
     "bounded-feature-proposal.yml",

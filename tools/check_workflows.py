@@ -62,9 +62,35 @@ def inspect(root: Path) -> dict[str, object]:
     if permissions.get("id-token") != "write" or permissions.get("contents") != "write":
         failures.append("SOS_RELEASE_PERMISSIONS_INVALID")
     condition = str(publish.get("if", ""))
-    for required in ("refs/tags/", "v0.1.0a1", "SOS_RELEASE_APPROVED_CANDIDATE", "inputs.candidate"):
+    for required in (
+        "SOS_RELEASE_APPROVED_ROUTING_COMMIT",
+        "inputs.routing_commit",
+        "SOS_RELEASE_APPROVED_CANDIDATE",
+        "inputs.candidate",
+    ):
         if required not in condition:
             failures.append("SOS_RELEASE_CANDIDATE_GATE_INCOMPLETE")
+            break
+    release_source = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    for required in (
+        "test -f release/current.json",
+        "test -f release/sos-release-index-v1.json",
+        "check_public_release_pointer.py --repository . --require-public",
+        "Check out immutable release candidate",
+    ):
+        if required not in release_source:
+            failures.append("SOS_RELEASE_POINTER_GATE_INCOMPLETE")
+            break
+    pointer_checker = (root / "tools/check_public_release_pointer.py").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "sos-public-release-pointer-v1.schema.json",
+        "sos-public-release-index-v1.schema.json",
+        "SOS_PUBLIC_RELEASE_SOURCE_BINDING_MISMATCH",
+    ):
+        if required not in pointer_checker:
+            failures.append("SOS_RELEASE_POINTER_CHECKER_INCOMPLETE")
             break
     serialized = json.dumps(release, sort_keys=True)
     if "password:" in serialized or "token:" in serialized or "PYPI_API_TOKEN" in serialized:

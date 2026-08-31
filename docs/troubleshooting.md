@@ -5,15 +5,21 @@ the exact reason code and use only synthetic data when filing an issue.
 
 ## Platform refusal
 
-`SOS_WINDOWS_NATIVE_SUPPORT_UNDER_DEVELOPMENT` means the CLI was started on
-Windows. Direct Windows is not a `0.1.0a1` execution target; a native,
-non-admin control-plane increment is under development. Do not install WSL,
-Docker or grant administrator access merely to bypass this refusal. Until that
-increment is released, use a separately qualified native-Linux runner.
+`SOS_ALPHA_UAC_DISABLED_UNSUPPORTED` means Windows UAC is disabled. SOS does
+not change that system policy, de-elevate itself, or install an admin helper.
 
-`SOS_MACOS_DEMAND_GATED` means direct macOS support is not currently planned
-on the alpha critical path. It requires an independently justified platform
-increment and its own support boundary.
+`SOS_ALPHA_ELEVATION_FORBIDDEN` means the Windows launcher is running with an
+elevated token. Close that terminal and use an ordinary interactive session.
+Do not use **Run as administrator**.
+
+`SOS_ALPHA_USER_STORAGE_ACCESS_DENIED` means the signed-in Windows identity
+cannot safely create the per-user managed environment in canonical Local
+AppData. SOS does not change ACLs or owners and does not fall back to `%TEMP%`,
+Downloads, the project, or roaming storage.
+
+On macOS, a filesystem-profile refusal means the project is not on a verified
+local APFS object graph or contains an unsupported alias/cloud-placeholder
+condition. SOS does not remove quarantine attributes or bypass Gatekeeper.
 
 `SOS_LINUX_SUBSTRATE_REQUIRED` remains the typed refusal for any other
 unsupported host platform.
@@ -21,9 +27,10 @@ unsupported host platform.
 ## Filesystem refusal
 
 `SOS_FILESYSTEM_PROFILE_UNSUPPORTED` means the project is on a filesystem SOS
-cannot safely use for atomic canonical state, such as a known Windows-backed
-or shared mount. Move or import a clean Git checkout into an admitted native
-Linux filesystem; do not copy an active dirty worktree.
+cannot safely use for atomic canonical state, such as a network/share mount,
+Windows-backed Linux mount, non-local APFS/NTFS object, or unsupported reparse
+shape. Use a clean checkout on an admitted local filesystem; do not copy an
+active dirty worktree.
 
 ## Existing-stack collision
 
