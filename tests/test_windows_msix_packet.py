@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
     "installers/windows-msix/AppxManifest.xml.in",
+    "installers/windows-msix/assets/Square44x44Logo.png",
+    "installers/windows-msix/assets/Square50x50Logo.png",
+    "installers/windows-msix/assets/Square150x150Logo.png",
     "installers/windows-msix/store-identity.json",
     "tools/build_windows_msix.py",
     "tools/build_windows_msix_pipeline.py",
@@ -40,6 +43,19 @@ def digest(path: Path) -> str:
 
 
 class WindowsMSIXPacketTests(unittest.TestCase):
+    def test_packet_source_snapshot_includes_exact_store_icons(self) -> None:
+        source = (ROOT / "tools/build_windows_msix_packet.py").read_text(
+            encoding="utf-8"
+        )
+        for name in (
+            "Square44x44Logo.png",
+            "Square50x50Logo.png",
+            "Square150x150Logo.png",
+        ):
+            self.assertEqual(
+                source.count(f'"installers/windows-msix/assets/{name}"'), 1
+            )
+
     def fixture(self, root: Path) -> dict[str, Path | str]:
         repository = root / "repository"
         for relative in SOURCE_FILES:

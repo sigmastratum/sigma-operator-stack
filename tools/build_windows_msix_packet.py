@@ -30,6 +30,9 @@ INPUT_LOCK_CONTRACT = "sos_windows_msix_input_lock_v1"
 GO_VERSION = "go1.27.0"
 SOURCE_FILES = (
     "installers/windows-msix/AppxManifest.xml.in",
+    "installers/windows-msix/assets/Square44x44Logo.png",
+    "installers/windows-msix/assets/Square50x50Logo.png",
+    "installers/windows-msix/assets/Square150x150Logo.png",
     "installers/windows-msix/store-identity.json",
     "tools/build_windows_msix.py",
     "tools/build_windows_msix_pipeline.py",
