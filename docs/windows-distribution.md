@@ -50,6 +50,31 @@ The package is public only after Store certification succeeds and the owner
 explicitly approves availability. Creating a local MSIX or uploading a package
 does not by itself authorize publication.
 
+## Certification and update discipline
+
+Microsoft Store certification is an external release gate, not the inner
+development loop. An in-flight package remains immutable while Microsoft
+evaluates it. SOS development, documentation and offline route tests may
+continue in parallel, but they do not change the submitted package.
+
+The Windows package candidate and the public release-routing commit have
+separate exact bindings. README, support text or `release/current.json`
+changes do not by themselves require a rebuilt MSIX. Before publication, an
+explicit rebind must prove that the unchanged Store package still matches the
+advertised SOS version, platform boundary and lifecycle.
+
+If certification or clean-host testing finds several Windows defects, they are
+combined into one reviewed successor. A replacement MSIX is submitted only
+for a reproducible release-blocking change to the packaged payload or
+manifest, after the complete package validation and ordinary-user lifecycle
+have been rerun. This avoids a one-fix/one-certification loop.
+
+After release, ordinary SOS feature updates use the same Store identity and
+per-user lifecycle. Each package update receives a higher Store transport
+version and normal Store certification. The Store updates the immutable host
+payload; SOS then presents a project update/rebind preview without rewriting
+accepted records or deleting `.sigma`.
+
 Azure Artifact Signing is not required for the Store-first public-alpha route.
 It remains a possible future paid signing channel for direct downloads outside
 Microsoft Store. Self-signed packages are limited to private development and

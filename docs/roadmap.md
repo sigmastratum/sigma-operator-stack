@@ -26,6 +26,11 @@ release promise or a compatibility claim.
   pointer or claiming package availability;
 - finish Microsoft Store certification, then run Store-signed Windows
   install/update/remove on a clean ordinary-user profile;
+- while certification runs, finish the exact launcher projection, offline
+  agent-first route replay, and sandbox-to-interactive-user handoff contract;
+- keep public routing/documentation changes separate from immutable platform
+  package bytes so a docs-only correction does not require package
+  recertification;
 - perform the URL-only agent-first drill from the exact public candidate;
 - rebuild the 60–120 second fresh-agent demonstration and bind it to that sole
   candidate;
@@ -48,6 +53,14 @@ release promise or a compatibility claim.
 
 Unknown dates, platforms, agents, and check families remain uncommitted until
 their contracts and qualification evidence exist.
+
+Microsoft Store certification is treated as a slow external gate. SOS does not
+submit a new Windows package for each isolated finding. Findings are collected
+and classified first; a replacement package is built only for a reproducible
+release-blocking payload or manifest defect, then reruns the complete local
+validation and clean-user lifecycle before one consolidated resubmission.
+Documentation-only changes use an explicit evidence rebind to the unchanged
+package instead of silently creating a new package lineage.
 
 The ignored-managed-target fingerprint edge case is fixed and independently
 qualified. It is no longer an open roadmap item.
