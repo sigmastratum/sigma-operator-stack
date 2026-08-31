@@ -41,7 +41,7 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "candidate": CANDIDATE,
         "contract": "sos_windows_msix_payload_v1",
         "executable_acquisition_after_install": False,
-        "msix_version": "0.1.0.2",
+        "msix_version": "1.0.2.0",
         "network_after_package_download": False,
         "platform": "windows-x86_64",
         "sos_version": "0.1.0a2",
@@ -51,6 +51,7 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "AppxManifest.xml": b"<Package/>",
         "Assets/Square150x150Logo.png": b"png150",
         "Assets/Square44x44Logo.png": b"png44",
+        "Assets/Square50x50Logo.png": b"png50",
         "payload-manifest.json": (
             json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode(),

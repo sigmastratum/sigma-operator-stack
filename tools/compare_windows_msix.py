@@ -40,6 +40,7 @@ UNPACKED_GENERATED_ENTRIES = {
     "AppxManifest.xml",
     "Assets/Square150x150Logo.png",
     "Assets/Square44x44Logo.png",
+    "Assets/Square50x50Logo.png",
     "payload-manifest.json",
 }
 CONTAINER_ONLY_ENTRIES = {"[Content_Types].xml"}
@@ -166,7 +167,7 @@ def read_payload_manifest(
         or record["candidate"] != candidate
         or record["tree"] != tree
         or record["sos_version"] != "0.1.0a2"
-        or record["msix_version"] != "0.1.0.2"
+        or record["msix_version"] != "1.0.2.0"
         or record["platform"] != "windows-x86_64"
         or record["network_after_package_download"] is not False
         or record["executable_acquisition_after_install"] is not False

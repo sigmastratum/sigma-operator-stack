@@ -31,7 +31,7 @@ def _load_source_verifier():
 source_verifier = _load_source_verifier()
 
 
-OUTPUT_NAME = "SigmaOperatorStack_0.1.0.2_x64.msix"
+OUTPUT_NAME = "SigmaOperatorStack_1.0.2.0_x64.msix"
 MAX_DIAGNOSTIC_BYTES = 512 * 1024
 BUILDER_KEYS = {
     "candidate",
@@ -195,7 +195,7 @@ def validate_builder_receipt(
         or record["tree"] != tree
         or record["makeappx_sha256"] != makeappx_sha256
         or record["msix_sha256"] != sha256(package)
-        or record["msix_version"] != "0.1.0.2"
+        or record["msix_version"] != "1.0.2.0"
         or record["package_identity_name"] != "SSRG.SigmaOperatorStack"
         or record["store_id"] != "9NNZT70C613H"
         or record["source_manifest_sha256"] != f"sha256:{source_manifest_sha256}"

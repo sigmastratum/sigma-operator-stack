@@ -80,6 +80,11 @@ REQUIRED_ISSUE_FORMS = {
 REQUIRED_FORM_IDS = {"version", "os_profile", "command", "reason_code", "reproducer", "privacy"}
 PRIVACY_WORDS = ("secrets", "private source", "prompts", "raw .sigma", "paths", "hostnames", "customer data")
 MEDIA_SUFFIXES = {".gif", ".mp3", ".mp4", ".png", ".webm"}
+STORE_ICON_SHAPES = {
+    "installers/windows-msix/assets/Square44x44Logo.png": (44, 44),
+    "installers/windows-msix/assets/Square50x50Logo.png": (50, 50),
+    "installers/windows-msix/assets/Square150x150Logo.png": (150, 150),
+}
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 
 
@@ -236,6 +241,21 @@ def _check_media_bytes(
     media_manifest: dict[str, object] | None = None,
 ) -> None:
     suffix = PurePosixPath(name).suffix.lower()
+    if name in STORE_ICON_SHAPES:
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+                if (
+                    image.format != "PNG"
+                    or image.mode != "RGBA"
+                    or image.size != STORE_ICON_SHAPES[name]
+                ):
+                    failures.append(f"SOS_PUBLIC_STORE_ICON_SHAPE_INVALID:{name}")
+                if image.info or len(image.getexif()) != 0:
+                    failures.append(f"SOS_PUBLIC_MEDIA_METADATA_FORBIDDEN:{name}")
+        except (OSError, ValueError):
+            failures.append(f"SOS_PUBLIC_MEDIA_PARSE_FAILED:{name}")
+        return
     raw_text = data.decode("latin-1", errors="ignore")
     for pattern in FORBIDDEN_TEXT:
         if pattern.search(raw_text):

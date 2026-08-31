@@ -68,7 +68,7 @@ def payload_record(artifacts: dict[str, bytes]) -> bytes:
                 "candidate": CANDIDATE,
                 "contract": "sos_windows_msix_payload_v1",
                 "executable_acquisition_after_install": False,
-                "msix_version": "0.1.0.2",
+                "msix_version": "1.0.2.0",
                 "network_after_package_download": False,
                 "platform": "windows-x86_64",
                 "sos_version": "0.1.0a2",
@@ -88,6 +88,7 @@ def unpack_fixture(root: Path, artifacts: dict[str, bytes]) -> None:
         "AppxManifest.xml": b"<Package/>",
         "Assets/Square150x150Logo.png": b"png150",
         "Assets/Square44x44Logo.png": b"png44",
+        "Assets/Square50x50Logo.png": b"png50",
         "payload-manifest.json": payload_record(artifacts),
     }
     for relative, content in generated.items():
@@ -414,6 +415,9 @@ class WindowsMSIXTests(unittest.TestCase):
             for relative in (
                 "installers/windows-msix/AppxManifest.xml.in",
                 "installers/windows-msix/store-identity.json",
+                "installers/windows-msix/assets/Square44x44Logo.png",
+                "installers/windows-msix/assets/Square50x50Logo.png",
+                "installers/windows-msix/assets/Square150x150Logo.png",
                 "tools/build_windows_msix.py",
                 "tools/verify_windows_msix_source.py",
             ):
@@ -560,6 +564,9 @@ class WindowsMSIXTests(unittest.TestCase):
             for relative in (
                 "installers/windows-msix/AppxManifest.xml.in",
                 "installers/windows-msix/store-identity.json",
+                "installers/windows-msix/assets/Square44x44Logo.png",
+                "installers/windows-msix/assets/Square50x50Logo.png",
+                "installers/windows-msix/assets/Square150x150Logo.png",
                 "tools/build_windows_msix.py",
                 "tools/build_windows_msix_pipeline.py",
                 "tools/check_windows_msix_content.py",
@@ -642,7 +649,7 @@ class WindowsMSIXTests(unittest.TestCase):
             )
             self.assertEqual(first_content, second_content)
             self.assertEqual(first_content["status"], "passed")
-            self.assertTrue((output / "SigmaOperatorStack_0.1.0.2_x64.msix").is_file())
+            self.assertTrue((output / "SigmaOperatorStack_1.0.2.0_x64.msix").is_file())
 
 
 if __name__ == "__main__":

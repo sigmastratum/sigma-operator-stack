@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import binascii
 import hashlib
 import importlib.util
 import json
@@ -12,11 +11,9 @@ import os
 import re
 import shutil
 import stat
-import struct
 import subprocess
 import sys
 import tempfile
-import zlib
 from pathlib import Path, PurePosixPath
 
 
@@ -34,7 +31,12 @@ def _load_source_verifier():
 source_verifier = _load_source_verifier()
 
 VERSION = "0.1.0a2"
-MSIX_VERSION = "0.1.0.2"
+MSIX_VERSION = "1.0.2.0"
+LOGO_ASSETS = {
+    "Square44x44Logo.png": (44, 44),
+    "Square50x50Logo.png": (50, 50),
+    "Square150x150Logo.png": (150, 150),
+}
 REQUIRED = {
     "sos.exe",
     "runtime/python.exe",
@@ -70,11 +72,12 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def png(width: int, height: int) -> bytes:
-    def chunk(kind: bytes, payload: bytes) -> bytes:
-        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", binascii.crc32(kind + payload) & 0xFFFFFFFF)
-    row = b"\0" + b"\x12\x34\x56\xff" * width
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(row * height, 9)) + chunk(b"IEND", b"")
+def validate_logo(value: bytes, expected: tuple[int, int]) -> None:
+    if len(value) < 24 or value[:8] != b"\x89PNG\r\n\x1a\n" or value[12:16] != b"IHDR":
+        raise SystemExit("MSIX logo asset is not a bounded PNG")
+    observed = (int.from_bytes(value[16:20], "big"), int.from_bytes(value[20:24], "big"))
+    if observed != expected:
+        raise SystemExit("MSIX logo asset dimensions do not match the Store contract")
 
 
 def is_reparse(observed: os.stat_result) -> bool:
@@ -257,8 +260,14 @@ def main() -> int:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(payload_root / PurePosixPath(item["path"]), destination)
         (stage / "Assets").mkdir()
-        (stage / "Assets" / "Square44x44Logo.png").write_bytes(png(44, 44))
-        (stage / "Assets" / "Square150x150Logo.png").write_bytes(png(150, 150))
+        for name, dimensions in LOGO_ASSETS.items():
+            value = source_verifier.read_bound_source_file(
+                source_root,
+                baseline,
+                f"installers/windows-msix/assets/{name}",
+            )
+            validate_logo(value, dimensions)
+            (stage / "Assets" / name).write_bytes(value)
         (stage / "AppxManifest.xml").write_text(manifest, encoding="utf-8", newline="")
         payload_record = {
             "artifacts": inventory,
@@ -281,6 +290,7 @@ def main() -> int:
             "AppxManifest.xml",
             "Assets/Square150x150Logo.png",
             "Assets/Square44x44Logo.png",
+            "Assets/Square50x50Logo.png",
             "payload-manifest.json",
         }
         if {item["path"] for item in stage_before} != expected_stage_paths:

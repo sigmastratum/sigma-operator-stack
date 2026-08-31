@@ -231,6 +231,9 @@ class WindowsMSIXSourceTests(unittest.TestCase):
                 "tools/verify_windows_msix_source.py",
                 "installers/windows-msix/AppxManifest.xml.in",
                 "installers/windows-msix/store-identity.json",
+                "installers/windows-msix/assets/Square44x44Logo.png",
+                "installers/windows-msix/assets/Square50x50Logo.png",
+                "installers/windows-msix/assets/Square150x150Logo.png",
             ):
                 destination = source / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -322,6 +325,9 @@ class WindowsMSIXSourceTests(unittest.TestCase):
                 "tools/verify_windows_msix_source.py",
                 "installers/windows-msix/AppxManifest.xml.in",
                 "installers/windows-msix/store-identity.json",
+                "installers/windows-msix/assets/Square44x44Logo.png",
+                "installers/windows-msix/assets/Square50x50Logo.png",
+                "installers/windows-msix/assets/Square150x150Logo.png",
             ):
                 destination = source / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
