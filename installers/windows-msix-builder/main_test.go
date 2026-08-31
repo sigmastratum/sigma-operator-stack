@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -61,6 +62,60 @@ func TestSafeRelativePathRejectsWindowsAmbiguity(t *testing.T) {
 	}
 	if observed, err := safeRelativePath("source/tools/build_windows_msix.py"); err != nil || observed != "source/tools/build_windows_msix.py" {
 		t.Fatalf("safe path rejected: %q %v", observed, err)
+	}
+}
+
+func TestFirstStreamClassificationAcceptsOnlyExpectedDirectoryEOFOrDefaultData(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		isDirectory bool
+		streamName  string
+		observedErr error
+		unexpected  bool
+		wantError   bool
+	}{
+		{name: "empty directory", isDirectory: true, observedErr: syscall.Errno(38)},
+		{name: "regular default stream", streamName: "::$DATA"},
+		{name: "regular named stream", streamName: ":secret:$DATA", unexpected: true},
+		{name: "directory named stream", isDirectory: true, streamName: ":secret:$DATA", unexpected: true},
+		{name: "regular EOF is ambiguous", observedErr: syscall.Errno(38), wantError: true},
+		{name: "directory unexpected error fails closed", isDirectory: true, observedErr: syscall.Errno(5), wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unexpected, err := classifyFirstStream(test.isDirectory, test.streamName, test.observedErr)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error = %v, wantError = %v", err, test.wantError)
+			}
+			if unexpected != test.unexpected {
+				t.Fatalf("unexpected = %v, want %v", unexpected, test.unexpected)
+			}
+		})
+	}
+}
+
+func TestWindowsStreamObservationAcceptsOrdinaryDirectoriesAndRejectsNamedStreams(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	root := t.TempDir()
+	unexpected, err := hasUnexpectedStreams(root)
+	if err != nil || unexpected {
+		t.Fatalf("ordinary directory stream observation failed: unexpected=%v err=%v", unexpected, err)
+	}
+	regular := filepath.Join(root, "regular.txt")
+	if err := os.WriteFile(regular, []byte("ordinary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unexpected, err = hasUnexpectedStreams(regular)
+	if err != nil || unexpected {
+		t.Fatalf("ordinary file stream observation failed: unexpected=%v err=%v", unexpected, err)
+	}
+	if err := os.WriteFile(regular+":named", []byte("forbidden\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unexpected, err = hasUnexpectedStreams(regular)
+	if err != nil || !unexpected {
+		t.Fatalf("named stream was not rejected: unexpected=%v err=%v", unexpected, err)
 	}
 }
 

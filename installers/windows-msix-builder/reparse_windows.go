@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"unsafe"
@@ -59,11 +60,27 @@ func hasUnexpectedStreams(path string) (bool, error) {
 		0,
 	)
 	if handle == ^uintptr(0) {
-		return false, callErr
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return false, statErr
+		}
+		reparse, reparseErr := isReparse(path, info)
+		if reparseErr != nil || reparse || info.Mode()&os.ModeSymlink != 0 {
+			return false, errors.New("stream observation target is a link or reparse object")
+		}
+		return classifyFirstStream(info.IsDir(), "", callErr)
 	}
 	defer findClose.Call(handle)
 	for {
-		if syscall.UTF16ToString(data.StreamName[:]) != "::$DATA" {
+		unexpected, streamErr := classifyFirstStream(
+			false,
+			syscall.UTF16ToString(data.StreamName[:]),
+			nil,
+		)
+		if streamErr != nil {
+			return false, streamErr
+		}
+		if unexpected {
 			return true, nil
 		}
 		result, _, nextErr := findNextStream.Call(handle, uintptr(unsafe.Pointer(&data)))

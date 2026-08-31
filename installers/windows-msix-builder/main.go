@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -64,6 +65,16 @@ func sha256File(path string) (string, error) {
 func bindingForBytes(path string, data []byte) fileBinding {
 	digest := sha256.Sum256(data)
 	return fileBinding{Path: path, SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
+}
+
+func classifyFirstStream(isDirectory bool, streamName string, observedErr error) (bool, error) {
+	if observedErr != nil {
+		if isDirectory && errors.Is(observedErr, syscall.Errno(38)) {
+			return false, nil
+		}
+		return false, observedErr
+	}
+	return streamName != "::$DATA", nil
 }
 
 func verifyRegularFile(path string, binding fileBinding) error {
