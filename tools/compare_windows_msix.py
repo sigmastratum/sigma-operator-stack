@@ -35,14 +35,15 @@ PAYLOAD_KEYS = {
     "sos_version",
     "tree",
 }
-GENERATED_ENTRIES = {
+UNPACKED_GENERATED_ENTRIES = {
     "AppxBlockMap.xml",
     "AppxManifest.xml",
     "Assets/Square150x150Logo.png",
     "Assets/Square44x44Logo.png",
-    "[Content_Types].xml",
     "payload-manifest.json",
 }
+CONTAINER_ONLY_ENTRIES = {"[Content_Types].xml"}
+RESERVED_GENERATED_ENTRIES = UNPACKED_GENERATED_ENTRIES | CONTAINER_ONLY_ENTRIES
 MAX_FILES = 50_000
 MAX_FILE_SIZE = 512 * 1024 * 1024
 MAX_TOTAL_SIZE = 2 * 1024 * 1024 * 1024
@@ -191,9 +192,9 @@ def read_payload_manifest(
             raise ComparisonError("Python bytecode is forbidden in the MSIX payload")
         bound[path] = digest
         previous = path
-    if set(bound) & GENERATED_ENTRIES:
+    if set(bound) & RESERVED_GENERATED_ENTRIES:
         raise ComparisonError("payload artifact collides with a generated entry")
-    expected = set(bound) | GENERATED_ENTRIES
+    expected = set(bound) | UNPACKED_GENERATED_ENTRIES
     if set(observed) != expected:
         raise ComparisonError("unpacked package inventory differs from the exact payload")
     for path, digest in bound.items():
@@ -278,7 +279,7 @@ def validate_block_map(
         raise ComparisonError("block map namespace is invalid")
     if document.attrib.get("HashMethod") != BLOCKMAP_HASH_METHOD:
         raise ComparisonError("block map hash method is invalid")
-    expected = set(observed) - {"AppxBlockMap.xml", "[Content_Types].xml"}
+    expected = set(observed) - {"AppxBlockMap.xml"}
     files: dict[str, int] = {}
     for child in document:
         if child.tag != f"{{{BLOCKMAP_NAMESPACE}}}File" or set(
@@ -313,7 +314,7 @@ def validate_block_map(
 def validate_package_xml(
     root: Path, observed: dict[str, tuple[int, str]]
 ) -> None:
-    for relative in ("AppxManifest.xml", "[Content_Types].xml"):
+    for relative in ("AppxManifest.xml",):
         value = read_bound_bytes(root, observed, relative, MAX_MANIFEST_SIZE)
         upper = value.upper()
         if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:

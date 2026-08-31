@@ -51,7 +51,6 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "AppxManifest.xml": b"<Package/>",
         "Assets/Square150x150Logo.png": b"png150",
         "Assets/Square44x44Logo.png": b"png44",
-        "[Content_Types].xml": b"<Types/>",
         "payload-manifest.json": (
             json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode(),
@@ -60,7 +59,7 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         write(root, relative, value)
     block_files = {
         **payload,
-        **{path: value for path, value in generated.items() if path != "[Content_Types].xml"},
+        **generated,
     }
     records: list[str] = []
     for path, value in sorted(block_files.items()):
@@ -118,7 +117,7 @@ class WindowsMSIXContentTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertFalse(report["raw_content_serialized"])
             self.assertFalse(report["absolute_paths_serialized"])
-            self.assertGreaterEqual(report["scanned_text_file_count"], 4)
+            self.assertGreaterEqual(report["scanned_text_file_count"], 3)
             self.assertRegex(report["report_digest"], r"^sha256:[0-9a-f]{64}$")
 
     def test_content_safety_rejects_private_patterns_without_echoing_them(self) -> None:

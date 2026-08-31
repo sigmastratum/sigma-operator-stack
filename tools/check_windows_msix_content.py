@@ -42,7 +42,6 @@ MAX_TEXT_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_TEXT_BYTES = 64 * 1024 * 1024
 GENERATED_TEXT = {
     "AppxManifest.xml",
-    "[Content_Types].xml",
     "payload-manifest.json",
 }
 SOS_TEXT_PREFIXES = (

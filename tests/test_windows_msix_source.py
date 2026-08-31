@@ -355,7 +355,7 @@ class WindowsMSIXSourceTests(unittest.TestCase):
                 " (t/'AppxBlockMap.xml').write_text('<BlockMap xmlns=\\\"http://schemas.microsoft.com/appx/2010/blockmap\\\" HashMethod=\\\"http://www.w3.org/2001/04/xmlenc#sha256\\\">'+''.join(records)+'</BlockMap>')\n"
                 " p.write_bytes(b'MSIX-'+p.name.encode())\n"
                 "elif mode=='unpack':\n"
-                " p=pathlib.Path(a[a.index('/p')+1]); d=pathlib.Path(a[a.index('/d')+1]); shutil.copytree(p.with_suffix('.tree'),d,dirs_exist_ok=True)\n"
+                " p=pathlib.Path(a[a.index('/p')+1]); d=pathlib.Path(a[a.index('/d')+1]); shutil.copytree(p.with_suffix('.tree'),d,dirs_exist_ok=True); (d/'[Content_Types].xml').unlink()\n"
                 "else: raise SystemExit(9)\n",
                 encoding="utf-8",
             )
