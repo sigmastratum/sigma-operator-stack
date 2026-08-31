@@ -59,6 +59,7 @@ WINDOWS_RESERVED = {
     *(f"LPT{number}" for number in range(1, 10)),
 }
 BLOCKMAP_NAMESPACE = "http://schemas.microsoft.com/appx/2010/blockmap"
+BLOCKMAP_FILE_HASH_NAMESPACE = "http://schemas.microsoft.com/appx/2021/blockmap"
 BLOCKMAP_HASH_METHOD = "http://www.w3.org/2001/04/xmlenc#sha256"
 
 
@@ -224,8 +225,22 @@ def validate_file_blocks(
     root: Path,
     relative: str,
     expected: tuple[int, str],
-    blocks: list[ET.Element],
+    children: list[ET.Element],
 ) -> None:
+    blocks: list[ET.Element] = []
+    file_hash: ET.Element | None = None
+    for child in children:
+        if child.tag == f"{{{BLOCKMAP_NAMESPACE}}}Block" and file_hash is None:
+            blocks.append(child)
+            continue
+        if (
+            child.tag == f"{{{BLOCKMAP_FILE_HASH_NAMESPACE}}}FileHash"
+            and file_hash is None
+            and set(child.attrib) == {"Hash"}
+        ):
+            file_hash = child
+            continue
+        raise ComparisonError("block map file child record is invalid")
     whole = hashlib.sha256()
     index = 0
     with (root / relative).open("rb") as source:
@@ -262,6 +277,15 @@ def validate_file_blocks(
         raise ComparisonError("block map gives blocks to an empty file")
     if whole.hexdigest() != expected[1]:
         raise ComparisonError("package file changed during block validation")
+    if file_hash is not None:
+        try:
+            decoded_file_hash = base64.b64decode(
+                file_hash.attrib["Hash"], validate=True
+            )
+        except (KeyError, ValueError) as error:
+            raise ComparisonError("block map file hash is invalid") from error
+        if len(decoded_file_hash) != 32 or decoded_file_hash.hex() != expected[1]:
+            raise ComparisonError("block map file hash differs from package content")
 
 
 def validate_block_map(
@@ -277,8 +301,18 @@ def validate_block_map(
         raise ComparisonError("block map XML is invalid") from error
     if document.tag != f"{{{BLOCKMAP_NAMESPACE}}}BlockMap":
         raise ComparisonError("block map namespace is invalid")
+    if set(document.attrib) not in (
+        {"HashMethod"},
+        {"HashMethod", "IgnorableNamespaces"},
+    ):
+        raise ComparisonError("block map root attributes are invalid")
     if document.attrib.get("HashMethod") != BLOCKMAP_HASH_METHOD:
         raise ComparisonError("block map hash method is invalid")
+    if (
+        "IgnorableNamespaces" in document.attrib
+        and document.attrib["IgnorableNamespaces"] != "b4"
+    ):
+        raise ComparisonError("block map ignorable namespace is invalid")
     expected = set(observed) - {"AppxBlockMap.xml"}
     files: dict[str, int] = {}
     for child in document:
@@ -303,7 +337,13 @@ def validate_block_map(
         files[name] = size
         if name not in observed:
             raise ComparisonError("block map names content outside the package")
-        validate_file_blocks(root, name, observed[name], list(child))
+        children = list(child)
+        if any(
+            item.tag == f"{{{BLOCKMAP_FILE_HASH_NAMESPACE}}}FileHash"
+            for item in children
+        ) and document.attrib.get("IgnorableNamespaces") != "b4":
+            raise ComparisonError("block map file hash namespace is not ignorable")
+        validate_file_blocks(root, name, observed[name], children)
     if set(files) != expected:
         raise ComparisonError("block map inventory differs from package content")
     for name, size in files.items():

@@ -104,6 +104,12 @@ def unpack_fixture(root: Path, artifacts: dict[str, bytes]) -> None:
             + '" />'
             for offset in range(0, len(content), 65536)
         )
+        if len(content) > 65536:
+            blocks += (
+                '<b4:FileHash Hash="'
+                + base64.b64encode(hashlib.sha256(content).digest()).decode()
+                + '" />'
+            )
         records.append(
             f'<File Name="{html.escape(path.replace("/", chr(92)))}" '
             f'Size="{len(content)}" LfhSize="40">{blocks}</File>'
@@ -113,6 +119,8 @@ def unpack_fixture(root: Path, artifacts: dict[str, bytes]) -> None:
         "AppxBlockMap.xml",
         (
             '<BlockMap xmlns="http://schemas.microsoft.com/appx/2010/blockmap" '
+            'xmlns:b4="http://schemas.microsoft.com/appx/2021/blockmap" '
+            'IgnorableNamespaces="b4" '
             'HashMethod="http://www.w3.org/2001/04/xmlenc#sha256">'
             + "".join(records)
             + "</BlockMap>"
@@ -145,6 +153,7 @@ class WindowsMSIXTests(unittest.TestCase):
         artifacts = {
             "bootstrap/uv.exe": b"MZuv",
             "runtime/Lib/site-packages/sos/__init__.py": b"version",
+            "runtime/large.bin": b"x" * 70000,
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
             "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"wheel",
@@ -198,14 +207,20 @@ class WindowsMSIXTests(unittest.TestCase):
                 "case-collision",
                 "block-hash",
                 "block-child",
+                "file-hash",
+                "file-hash-order",
+                "file-hash-duplicate",
             ):
                 with self.subTest(case=case):
                     first = root / f"{case}-first"
                     second = root / f"{case}-second"
                     first.mkdir()
                     second.mkdir()
-                    unpack_fixture(first, artifacts)
-                    unpack_fixture(second, artifacts)
+                    case_artifacts = dict(artifacts)
+                    if case.startswith("file-hash"):
+                        case_artifacts["runtime/large.bin"] = b"x" * 70000
+                    unpack_fixture(first, case_artifacts)
+                    unpack_fixture(second, case_artifacts)
                     if case == "content":
                         (second / "sos.exe").write_bytes(b"drift")
                     elif case == "extra":
@@ -244,11 +259,31 @@ class WindowsMSIXTests(unittest.TestCase):
                                 value = block_map.read_text(encoding="utf-8")
                                 value = value.replace('Hash="', 'Hash="AAAA', 1)
                                 block_map.write_text(value, encoding="utf-8")
-                        else:
+                        elif case == "block-child":
                             for directory in (first, second):
                                 block_map = directory / "AppxBlockMap.xml"
                                 value = block_map.read_text(encoding="utf-8")
                                 value = value.replace("<Block Hash=", "<Unexpected Hash=", 1)
+                                block_map.write_text(value, encoding="utf-8")
+                        else:
+                            for directory in (first, second):
+                                block_map = directory / "AppxBlockMap.xml"
+                                value = block_map.read_text(encoding="utf-8")
+                                entry_start = value.index('<File Name="runtime\\large.bin"')
+                                entry_end = value.index("</File>", entry_start) + len("</File>")
+                                entry = value[entry_start:entry_end]
+                                hash_start = entry.index("<b4:FileHash")
+                                hash_end = entry.index("/>", hash_start) + 2
+                                file_hash = entry[hash_start:hash_end]
+                                if case == "file-hash":
+                                    changed = file_hash.replace('Hash="', 'Hash="AAAA', 1)
+                                    entry = entry.replace(file_hash, changed, 1)
+                                elif case == "file-hash-order":
+                                    entry = entry.replace(file_hash, "", 1)
+                                    entry = entry.replace(">", ">" + file_hash, 1)
+                                else:
+                                    entry = entry.replace(file_hash, file_hash + file_hash, 1)
+                                value = value[:entry_start] + entry + value[entry_end:]
                                 block_map.write_text(value, encoding="utf-8")
                     completed = subprocess.run(
                         self.comparator_command(first_msix, second_msix, first, second),
@@ -258,6 +293,10 @@ class WindowsMSIXTests(unittest.TestCase):
                     )
                     self.assertEqual(completed.returncode, 2)
                     self.assertIn("SOS_MSIX_SEMANTIC_COMPARISON_FAILED", completed.stderr)
+                    if case == "file-hash":
+                        self.assertIn("file hash differs", completed.stderr)
+                    elif case in ("file-hash-order", "file-hash-duplicate"):
+                        self.assertIn("file child record is invalid", completed.stderr)
 
     def test_payload_preparation_removes_only_source_backed_bytecode(self) -> None:
         tool = ROOT / "tools/prepare_windows_msix_payload.py"
