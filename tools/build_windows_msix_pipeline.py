@@ -114,20 +114,27 @@ def closed_environment() -> dict[str, str]:
     return environment
 
 
-def run_phase(phase: str, command: list[str], timeout: int = 600) -> str:
+def run_phase(
+    phase: str,
+    command: list[str],
+    timeout: int = 600,
+    *,
+    capture_stdout: bool = True,
+) -> str:
     try:
         completed = subprocess.run(
             command,
             check=False,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if capture_stdout else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             timeout=timeout,
             env=closed_environment(),
         )
     except subprocess.TimeoutExpired as error:
         raise PipelineError(f"{phase} timed out") from error
-    if len(completed.stdout) > MAX_DIAGNOSTIC_BYTES or len(completed.stderr) > MAX_DIAGNOSTIC_BYTES:
+    stdout = completed.stdout if completed.stdout is not None else b""
+    if len(stdout) > MAX_DIAGNOSTIC_BYTES or len(completed.stderr) > MAX_DIAGNOSTIC_BYTES:
         raise PipelineError(f"{phase} output exceeded the bounded limit")
     if completed.returncode != 0:
         diagnostic_digest = hashlib.sha256(completed.stderr).hexdigest()
@@ -142,7 +149,7 @@ def run_phase(phase: str, command: list[str], timeout: int = 600) -> str:
             f"{phase} failed with exit {completed.returncode}; {last}"
         )
     try:
-        return completed.stdout.decode("utf-8")
+        return stdout.decode("utf-8")
     except UnicodeDecodeError as error:
         raise PipelineError(f"{phase} output was not UTF-8") from error
 
@@ -156,7 +163,15 @@ def exact_makeappx(
     before = sha256(makeappx)
     if before != expected_digest:
         raise PipelineError(f"MakeAppx digest drifted before {phase}")
-    output = run_phase(phase, [os.fspath(makeappx), *arguments])
+    # MakeAppx emits one success line per payload entry.  The immutable Python
+    # runtime contains enough entries to exceed the diagnostic bound, while
+    # callers never consume successful MakeAppx stdout.  Discard it at the OS
+    # pipe boundary; stderr remains bounded and non-zero exits still fail.
+    output = run_phase(
+        phase,
+        [os.fspath(makeappx), *arguments],
+        capture_stdout=False,
+    )
     if sha256(makeappx) != before:
         raise PipelineError(f"MakeAppx digest drifted during {phase}")
     return output

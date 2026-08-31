@@ -553,7 +553,7 @@ class WindowsMSIXTests(unittest.TestCase):
                 "  b=x.read_bytes(); bs=''.join('<Block Hash=\"'+base64.b64encode(hashlib.sha256(b[o:o+65536]).digest()).decode()+'\" />' for o in range(0,len(b),65536)); rs+=f'<File Name=\"{x.relative_to(t).as_posix().replace(chr(47),chr(92))}\" Size=\"{len(b)}\" LfhSize=\"40\">{bs}</File>'\n"
                 " (t/'AppxBlockMap.xml').write_text('<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">'+rs+'</BlockMap>'); p.write_bytes(b'MSIX-'+p.name.encode())\n"
                 "elif mode=='unpack':\n"
-                " p=pathlib.Path(a[a.index('/p')+1]); d=pathlib.Path(a[a.index('/d')+1]); shutil.copytree(p.with_suffix('.tree'),d,dirs_exist_ok=True)\n"
+                " p=pathlib.Path(a[a.index('/p')+1]); d=pathlib.Path(a[a.index('/d')+1]); sys.stdout.write('x'*(600*1024)); shutil.copytree(p.with_suffix('.tree'),d,dirs_exist_ok=True)\n"
                 "else: raise SystemExit(9)\n",
                 encoding="utf-8",
             )
