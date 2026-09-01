@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-agent-first-terminal-snapshot-v1.schema.json",
+  "title": "SOS agent-first terminal snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["authority_state", "configured_family_count", "contract", "qualification_state", "setup_state", "workspace_state"],
+  "properties": {
+    "authority_state": {"enum": ["accepted", "owner_required"]},
+    "configured_family_count": {"type": "integer", "minimum": 0, "maximum": 64},
+    "contract": {"const": "sos_agent_first_terminal_snapshot_v1"},
+    "qualification_state": {"enum": ["blocked", "failed", "not_run", "passed_local", "stale"]},
+    "setup_state": {"enum": ["blocked", "invalid", "success"]},
+    "workspace_state": {"enum": ["current", "invalid", "stale"]}
+  }
+}

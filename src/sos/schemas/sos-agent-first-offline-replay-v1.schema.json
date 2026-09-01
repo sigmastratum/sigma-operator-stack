@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-agent-first-offline-replay-v1.schema.json",
+  "title": "SOS agent-first offline replay receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["absolute_paths_serialized", "case_count", "cases", "contract", "mutations_performed", "network_performed", "provider_calls", "raw_content_serialized", "receipt_digest", "simulated_fresh_session", "simulated_store_success", "status"],
+  "properties": {
+    "absolute_paths_serialized": {"const": false},
+    "case_count": {"type": "integer", "minimum": 1, "maximum": 128},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["case_id", "reason", "status"],
+        "properties": {
+          "action_kind": {"enum": ["complete", "configure_check_family", "download_archive", "handoff_to_interactive_user", "invoke_launcher", "none", "open_store", "remediate", "review_and_rebind", "run_qualification", "select_authority", "stop"]},
+          "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$"},
+          "reason": {"type": "string", "pattern": "^SOS_[A-Z0-9_]+$", "maxLength": 96},
+          "status": {"enum": ["blocked", "invalid", "not_configured", "not_verified", "owner_required", "ready", "stale", "success", "unsupported", "user_action_required"]}
+        }
+      }
+    },
+    "contract": {"const": "sos_agent_first_offline_replay_v1"},
+    "mutations_performed": {"const": false},
+    "network_performed": {"const": false},
+    "provider_calls": {"const": 0},
+    "raw_content_serialized": {"const": false},
+    "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "simulated_fresh_session": {"const": false},
+    "simulated_store_success": {"const": false},
+    "status": {"enum": ["failed", "passed"]}
+  }
+}

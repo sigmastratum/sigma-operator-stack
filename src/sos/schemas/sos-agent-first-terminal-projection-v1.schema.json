@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-agent-first-terminal-projection-v1.schema.json",
+  "title": "SOS agent-first terminal projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["absolute_paths_serialized", "contract", "mutations_performed", "network_performed", "next_action", "projection_digest", "provider_calls", "raw_content_serialized", "reasons", "status"],
+  "properties": {
+    "absolute_paths_serialized": {"const": false},
+    "contract": {"const": "sos_agent_first_terminal_projection_v1"},
+    "mutations_performed": {"const": false},
+    "network_performed": {"const": false},
+    "next_action": {"enum": ["complete", "configure_check_family", "remediate", "review_and_rebind", "run_qualification", "select_authority", "stop"]},
+    "projection_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "provider_calls": {"const": 0},
+    "raw_content_serialized": {"const": false},
+    "reasons": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": {"type": "string", "pattern": "^SOS_[A-Z0-9_]+$", "maxLength": 96}},
+    "status": {"enum": ["blocked", "invalid", "not_configured", "not_verified", "owner_required", "stale", "success"]}
+  }
+}
