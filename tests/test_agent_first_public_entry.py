@@ -79,7 +79,13 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         invalid = dict(index)
         invalid["platforms"] = [admitted]
         self.assertTrue(tuple(validator.iter_errors(invalid)))
-        unsupported = dict(index["platforms"][1])
+        unsupported = {
+            "architecture": "x86_64",
+            "profile_id": "windows-x86_64-unreleased",
+            "reason": "SOS_PUBLIC_RELEASE_NOT_AVAILABLE",
+            "status": "unsupported",
+            "system": "windows",
+        }
         unsupported["launcher"] = "SOS-Installer.exe"
         invalid["platforms"] = [unsupported]
         self.assertTrue(tuple(validator.iter_errors(invalid)))

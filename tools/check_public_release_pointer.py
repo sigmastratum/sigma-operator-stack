@@ -71,6 +71,8 @@ def inspect(repository: Path, *, require_public: bool = False) -> dict[str, obje
     if index_errors:
         failures.append("SOS_PUBLIC_RELEASE_INDEX_SCHEMA_INVALID")
     if not failures:
+        if pointer["availability"] != "public":
+            failures.append("SOS_PUBLIC_RELEASE_WITHHELD")
         for field in ("candidate", "tree", "version", "release_tag"):
             if pointer[field] != index[field]:
                 failures.append("SOS_PUBLIC_RELEASE_BINDING_MISMATCH")

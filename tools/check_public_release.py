@@ -67,6 +67,9 @@ REQUIRED_FILES = {
     "examples/fresh-agent-recovery/expected.json",
     "pyproject.toml",
     "requirements/audit.txt",
+    "src/sos/schemas/sos-agent-first-route-projection-v1.schema.json",
+    "src/sos/schemas/sos-windows-store-observation-v1.schema.json",
+    "tools/resolve_agent_first_route.py",
     "tools/check_public_release_pointer.py",
 }
 REQUIRED_ISSUE_FORMS = {

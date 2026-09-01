@@ -4,8 +4,9 @@
   "title": "SOS public release pointer v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["candidate", "claim_state", "contract", "index_path", "index_sha256", "maturity", "release_tag", "tree", "version"],
+  "required": ["availability", "candidate", "claim_state", "contract", "index_path", "index_sha256", "maturity", "release_tag", "tree", "version"],
   "properties": {
+    "availability": {"enum": ["public", "withheld"]},
     "candidate": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "claim_state": {"enum": ["engineering_alpha", "agent_first_qualified"]},
     "contract": {"const": "sos_public_release_pointer_v1"},

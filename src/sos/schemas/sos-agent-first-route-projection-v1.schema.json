@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-agent-first-route-projection-v1.schema.json",
+  "title": "SOS agent-first route projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["absolute_paths_serialized", "action", "architecture", "contract", "mutations_performed", "network_performed", "projection_digest", "provider_calls", "raw_content_serialized", "reasons", "status", "system"],
+  "properties": {
+    "absolute_paths_serialized": {"const": false},
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "archive_filename": {"type": "string", "maxLength": 120},
+        "archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "invocation": {"type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+        "kind": {"enum": ["download_archive", "handoff_to_interactive_user", "invoke_launcher", "none", "open_store"]},
+        "launcher": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "maxLength": 80},
+        "store_product_id": {"type": "string", "pattern": "^[A-Z0-9]{12}$"},
+        "store_protocol_uri": {"type": "string", "pattern": "^ms-windows-store://pdp/\\?productid=[A-Z0-9]{12}$", "maxLength": 100},
+        "store_web_url": {"type": "string", "pattern": "^https://apps\\.microsoft\\.com/detail/[A-Z0-9]{12}$", "maxLength": 120}
+      }
+    },
+    "architecture": {"enum": ["x86_64", "arm64", "unknown"]},
+    "candidate": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "contract": {"const": "sos_agent_first_route_projection_v1"},
+    "delivery": {"enum": ["archive", "microsoft_store"]},
+    "mutations_performed": {"const": false},
+    "network_performed": {"const": false},
+    "projection_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "provider_calls": {"const": 0},
+    "raw_content_serialized": {"const": false},
+    "reasons": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^SOS_[A-Z0-9_]+$", "maxLength": 96}},
+    "release_tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 40},
+    "status": {"enum": ["blocked", "invalid", "ready", "unsupported", "user_action_required"]},
+    "system": {"enum": ["darwin", "linux", "unknown", "windows"]},
+    "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 32}
+  }
+}

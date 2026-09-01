@@ -74,6 +74,7 @@ class PublicReleasePointerTests(unittest.TestCase):
             index_bytes = (json.dumps(fixture_index, sort_keys=True, separators=(",", ":")) + "\n").encode()
             (release / "sos-release-index-v1.json").write_bytes(index_bytes)
             pointer = {
+                "availability": "public",
                 "candidate": head,
                 "claim_state": "agent_first_qualified",
                 "contract": "sos_public_release_pointer_v1",

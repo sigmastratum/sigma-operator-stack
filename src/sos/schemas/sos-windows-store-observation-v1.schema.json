@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-windows-store-observation-v1.schema.json",
+  "title": "SOS Windows Store observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "execution_context", "installed", "launcher_available"],
+  "properties": {
+    "contract": {"const": "sos_windows_store_observation_v1"},
+    "execution_context": {"enum": ["interactive_user", "sandbox"]},
+    "installed": {"type": "boolean"},
+    "launcher_available": {"type": "boolean"},
+    "package_family_name": {"type": "string", "pattern": "^[A-Za-z0-9.]+_[a-z0-9]+$", "maxLength": 160},
+    "package_identity_name": {"type": "string", "pattern": "^[A-Za-z0-9.]+$", "maxLength": 120},
+    "package_publisher": {"type": "string", "pattern": "^CN=[A-F0-9-]+$", "maxLength": 160},
+    "package_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", "maxLength": 32}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"installed": {"const": true}}},
+      "then": {"required": ["package_family_name", "package_identity_name", "package_publisher", "package_version"]},
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["package_family_name"]},
+            {"required": ["package_identity_name"]},
+            {"required": ["package_publisher"]},
+            {"required": ["package_version"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {"properties": {"installed": {"const": false}}},
+      "then": {"properties": {"launcher_available": {"const": false}}}
+    }
+  ]
+}

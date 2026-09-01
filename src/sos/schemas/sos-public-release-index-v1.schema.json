@@ -28,25 +28,66 @@
         "archive_filename": {"type": "string", "pattern": "^SOS-[A-Za-z0-9._-]+\\.(zip|tar\\.gz)$", "maxLength": 120},
         "archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "archive_size": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "delivery": {"enum": ["archive", "microsoft_store"]},
         "inner_manifest": {"const": "release-manifest.json"},
         "inner_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "invocation": {"type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
         "launcher": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "maxLength": 80},
+        "package_family_name": {"type": "string", "pattern": "^[A-Za-z0-9.]+_[a-z0-9]+$", "maxLength": 160},
+        "package_identity_name": {"type": "string", "pattern": "^[A-Za-z0-9.]+$", "maxLength": 120},
+        "package_publisher": {"type": "string", "pattern": "^CN=[A-F0-9-]+$", "maxLength": 160},
+        "package_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", "maxLength": 32},
         "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$"},
         "reason": {"type": "string", "pattern": "^SOS_[A-Z0-9_]+$", "maxLength": 96},
         "status": {"enum": ["admitted", "unsupported"]},
+        "store_product_id": {"type": "string", "pattern": "^[A-Z0-9]{12}$"},
+        "store_protocol_uri": {"type": "string", "pattern": "^ms-windows-store://pdp/\\?productid=[A-Z0-9]{12}$", "maxLength": 100},
+        "store_web_url": {"type": "string", "pattern": "^https://apps\\.microsoft\\.com/detail/[A-Z0-9]{12}$", "maxLength": 120},
         "system": {"enum": ["linux", "windows", "darwin"]}
       },
       "oneOf": [
         {
-          "properties": {"status": {"const": "admitted"}},
-          "required": ["archive_filename", "archive_sha256", "archive_size", "inner_manifest", "inner_manifest_sha256", "invocation", "launcher"],
-          "not": {"required": ["reason"]}
+          "properties": {"delivery": {"const": "archive"}, "status": {"const": "admitted"}},
+          "required": ["archive_filename", "archive_sha256", "archive_size", "delivery", "inner_manifest", "inner_manifest_sha256", "invocation", "launcher"],
+          "not": {
+            "anyOf": [
+              {"required": ["reason"]},
+              {"required": ["store_product_id"]},
+              {"required": ["store_protocol_uri"]},
+              {"required": ["store_web_url"]},
+              {"required": ["package_identity_name"]},
+              {"required": ["package_family_name"]},
+              {"required": ["package_publisher"]},
+              {"required": ["package_version"]}
+            ]
+          }
+        },
+        {
+          "properties": {"delivery": {"const": "microsoft_store"}, "status": {"const": "admitted"}, "system": {"const": "windows"}},
+          "required": ["delivery", "invocation", "launcher", "package_family_name", "package_identity_name", "package_publisher", "package_version", "store_product_id", "store_protocol_uri", "store_web_url"],
+          "not": {
+            "anyOf": [
+              {"required": ["reason"]},
+              {"required": ["archive_filename"]},
+              {"required": ["archive_sha256"]},
+              {"required": ["archive_size"]},
+              {"required": ["inner_manifest"]},
+              {"required": ["inner_manifest_sha256"]}
+            ]
+          }
         },
         {
           "properties": {"status": {"const": "unsupported"}},
           "required": ["reason"],
-          "not": {"anyOf": [{"required": ["archive_filename"]}, {"required": ["launcher"]}, {"required": ["invocation"]}]}
+          "not": {
+            "anyOf": [
+              {"required": ["delivery"]},
+              {"required": ["archive_filename"]},
+              {"required": ["launcher"]},
+              {"required": ["invocation"]},
+              {"required": ["store_product_id"]}
+            ]
+          }
         }
       ]
     }

@@ -25,20 +25,39 @@ When a public pointer exists, Codex must:
 5. require exact agreement on version, candidate and tree;
 6. observe the host system and architecture without changing host settings;
 7. select exactly one `admitted` platform entry or stop with its typed reason;
-8. download the declared archive and verify its size and SHA-256;
-9. extract into a new disposable directory without following links;
-10. verify the declared inner manifest and every manifest artifact digest;
-11. invoke only the exact launcher and argument grammar named by the index;
-12. show the SOS aggregate preview and wait for the human to confirm or refuse;
-13. retain the exact managed executable path returned by the launcher;
-14. render setup, workspace, check-plan and qualification state truthfully;
-15. recommend qualification only when a configured executable family exists;
-16. ask the user to open a genuinely fresh Codex task for recovery proof.
+8. follow exactly one declared delivery contract:
+   - `archive`: download the declared archive and verify its size and SHA-256;
+   - `microsoft_store`: require the exact Store product, package identity,
+     publisher, package family and transport version from the index;
+9. for an archive, extract into a new disposable directory without following
+   links and verify the inner manifest plus every artifact digest;
+10. for Microsoft Store, open the declared Store deep link and wait for the
+    ordinary signed-in user to complete the Store installation;
+11. observe the installed Store identity/version and launcher availability;
+12. invoke only the exact launcher and argument grammar named by the index;
+13. show the SOS aggregate preview and wait for the human to confirm or refuse;
+14. retain the exact managed executable path returned by the launcher;
+15. render setup, workspace, check-plan and qualification state truthfully;
+16. recommend qualification only when a configured executable family exists;
+17. ask the user to open a genuinely fresh Codex task for recovery proof.
 
 Codex may request ordinary network or command-execution permission. It must
 not answer the SOS mutation prompt, select project authority, change PATH or a
 shell profile, install undeclared host dependencies, weaken TLS/platform
 security, run qualification automatically, commit, push or deploy.
+
+The repository-owned route projection uses five states: `ready`,
+`user_action_required`, `unsupported`, `blocked` and `invalid`. Only `ready`
+permits automatic continuation. `user_action_required` is a typed stop, not a
+green result.
+
+On Windows, a Store install and SOS project mutation are two different user
+decisions. If a sandbox can verify the Store package but cannot invoke the
+per-user launcher, return `SOS_INTERACTIVE_USER_HANDOFF_REQUIRED`. Do not use
+Administrator, change ACLs, repair PATH or weaken the sandbox. Continue only
+through the ordinary interactive user session. The exact public-alpha handoff
+mechanism remains a release gate until the clean Store-signed AF104 drill
+passes.
 
 ## Expected terminal states
 
