@@ -4,6 +4,9 @@ This file records public repository metadata and reversible settings for a
 future publication operation. It grants no remote mutation or release
 authority.
 
+The exact ordered transaction, readback and rollback boundary are defined in
+the [public repository opening runbook](repository-opening-runbook.md).
+
 ## Metadata
 
 - About: `Project state and fresh-session recovery for coding agents.`
@@ -49,6 +52,12 @@ The repository may become public before an installable release only when:
 Current preparation state: source-publication candidate in progress. Microsoft
 Store certification is external and pending; Windows Store lifecycle evidence
 does not yet exist.
+
+The submitted Store MSIX was the correct reviewed artifact when uploaded. It
+is now classified as predecessor evidence because the later source successor
+adds schemas that are included in the release wheel. This is candidate drift,
+not an erroneous upload, and it is not a reason to cancel the in-flight
+certification.
 
 This source-publication successor does not inherit exact-package evidence from
 an earlier candidate. Before package release, every Linux, macOS, Windows,

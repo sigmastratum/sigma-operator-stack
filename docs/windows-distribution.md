@@ -63,6 +63,15 @@ changes do not by themselves require a rebuilt MSIX. Before publication, an
 explicit rebind must prove that the unchanged Store package still matches the
 advertised SOS version, platform boundary and lifecycle.
 
+That exception applies only to routing or documentation bytes outside the
+packaged payload. If a successor changes the wheel, packaged schemas,
+launcher, managed runtime, manifest, platform behavior or any claim whose
+proof depends on those bytes, the earlier Store package becomes predecessor
+evidence. A certification pass for that predecessor is still useful, but it
+cannot authorize the successor without either a new exact package submission
+or a separately reviewed semantic-equivalence disposition covering every
+changed packaged byte.
+
 If certification or clean-host testing finds several Windows defects, they are
 combined into one reviewed successor. A replacement MSIX is submitted only
 for a reproducible release-blocking change to the packaged payload or

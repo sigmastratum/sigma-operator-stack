@@ -62,6 +62,12 @@ validation and clean-user lifecycle before one consolidated resubmission.
 Documentation-only changes use an explicit evidence rebind to the unchanged
 package instead of silently creating a new package lineage.
 
+An in-flight Store package remains valid predecessor evidence when the source
+lineage advances. A successor that changes files included in the wheel,
+including packaged schemas, is not documentation-only: it requires an exact
+package rebuild or a separately reviewed semantic-equivalence disposition
+before it can become the final release artifact.
+
 The ignored-managed-target fingerprint edge case is fixed and independently
 qualified. It is no longer an open roadmap item.
 

@@ -14,7 +14,7 @@ next action.
 
 ![Terminal view of SOS recovering project state and refusing a stale result](demo/recovery-terminal.png)
 
-The [90-second narrated demo](demo/recovery-demo.mp4) and its
+The [60-second narrated demo](demo/recovery-demo.mp4) and its
 [text transcript](demo/transcript.md) show initialization, separate
 qualification, fresh-session recovery, a source change, and the stale refusal.
 This earlier Linux proof demonstrates the product loop; it is not evidence for

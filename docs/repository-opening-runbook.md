@@ -1,0 +1,62 @@
+# Public repository opening runbook
+
+This runbook separates publication of auditable source from package release.
+It grants no remote mutation authority. Every phase requires its own owner
+approval and an exact candidate/tree recorded immediately before execution.
+
+## Preconditions
+
+- the repository-designated canonical local checkout is clean;
+- the candidate is a linear descendant of the public product-only root;
+- the current-tree and full-history public scans pass;
+- independent review binds the exact candidate and tree;
+- `release/current.json`, public tags and GitHub Releases are absent;
+- README says source preview and makes no installable-release claim;
+- private vulnerability reporting can be enabled before visibility changes.
+
+## Transaction
+
+1. With separate push approval, push the exact reviewed candidate to a new
+   release-candidate branch while the repository remains private.
+2. Read the remote branch back and require the exact candidate/tree. Stop on
+   any drift; do not merge, force-push or rewrite history.
+3. With separate settings approval, set the reviewed branch as default, apply
+   the checked About/topics/features metadata and enable private vulnerability
+   reporting. Read every setting back.
+4. With separate visibility approval, change only repository visibility to
+   public. Do not create a tag, Release, package, Store publication or release
+   pointer in this transaction.
+5. Read the anonymous public repository back, verify the default candidate,
+   tree, README, license and absence of `release/current.json`, then observe
+   public Actions for that exact SHA.
+
+## Stop conditions
+
+Stop before visibility on candidate/tree drift, a dirty worktree, history-scan
+failure, missing vulnerability reporting, wrong default branch, broken links,
+private content or any unsupported package-availability claim.
+
+After visibility, immediately return the repository to private if the public
+readback exposes the wrong source, private content, credentials, an unexpected
+release pointer or a materially broader claim. Public exposure cannot be
+undone historically, so retain the incident record privately and rotate any
+credential even if the repository is made private again.
+
+A failing public CI job without a content or trust-boundary violation does not
+authorize history rewriting. Keep package publication blocked, diagnose on a
+successor, and require a new exact review before changing the default branch.
+
+## Separate later gates
+
+The following are deliberately outside the source-opening transaction:
+
+- immutable release tag;
+- GitHub Release and release assets;
+- PyPI publication;
+- `release/current.json` activation;
+- Microsoft Store publication;
+- macOS signed/notarized distribution;
+- promotion or adoption claims.
+
+Each later gate binds one final release candidate and has its own rollback or
+successor policy.

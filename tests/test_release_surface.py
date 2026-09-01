@@ -6,6 +6,7 @@ import io
 import hashlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,40 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
                     ["SOS_PUBLIC_MARKDOWN_LINK_BROKEN:docs/guide.md"],
                 )
 
+    def test_public_scanner_rejects_forbidden_content_removed_from_head(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        specification = importlib.util.spec_from_file_location(
+            "sos_public_scan_history", root / "tools" / "check_public_release.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary).resolve()
+            subprocess.run(["git", "init", "-q", repository], check=True)
+            subprocess.run(
+                ["git", "-C", repository, "config", "user.name", "Synthetic Reviewer"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", repository, "config", "user.email", "reviewer@example.invalid"],
+                check=True,
+            )
+            leaked = repository / "removed.txt"
+            forbidden_path = "/" + "home" + "/example/private-project"
+            leaked.write_text(f"private path: {forbidden_path}\n", encoding="utf-8")
+            subprocess.run(["git", "-C", repository, "add", "removed.txt"], check=True)
+            subprocess.run(["git", "-C", repository, "commit", "-qm", "synthetic root"], check=True)
+            leaked.unlink()
+            subprocess.run(["git", "-C", repository, "add", "-u"], check=True)
+            subprocess.run(["git", "-C", repository, "commit", "-qm", "remove fixture"], check=True)
+            failures: list[str] = []
+            commit_count, scanned = module._check_git_history(repository, failures)
+            self.assertEqual(commit_count, 2)
+            self.assertGreater(scanned, 0)
+            self.assertIn("SOS_PUBLIC_HISTORY_CONTENT_FORBIDDEN", failures)
+
     def test_ci_and_release_workflows_are_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = self.run_tool(root, "check_workflows.py")
@@ -59,6 +94,24 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_public_release_pointer.py")
         self.assertEqual(result["status"], "not_published", result)
         self.assertFalse((root / "release" / "current.json").exists())
+
+    def test_repository_opening_runbook_separates_remote_gates(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs" / "repository-opening-runbook.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "full-history public scans",
+            "private vulnerability reporting",
+            "change only repository visibility",
+            "Do not create a tag",
+            "return the repository to private",
+            "Public exposure cannot be",
+            "undone historically",
+            "PyPI publication",
+            "Microsoft Store publication",
+        ):
+            self.assertIn(required, text)
 
     def test_windows_signing_is_oidc_only_and_digest_bound(self) -> None:
         root = Path(__file__).resolve().parents[1]

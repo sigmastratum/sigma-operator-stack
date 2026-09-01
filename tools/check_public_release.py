@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FILES = 4096
+MAX_HISTORY_BYTES = 128 * 1024 * 1024
 FORBIDDEN_PARTS = {".env", "evidence", "private", "secrets"}
 FORBIDDEN_TEXT = (
     re.compile(r"/home/[A-Za-z0-9._-]+/"),
@@ -62,6 +63,7 @@ REQUIRED_FILES = {
     "docs/agent-first-offline-replay.md",
     "docs/agent-first-public-drill.md",
     "docs/publication-checklist.md",
+    "docs/repository-opening-runbook.md",
     "docs/roadmap.md",
     "docs/threat-model.md",
     "docs/troubleshooting.md",
@@ -110,6 +112,59 @@ def _inventory(repository: Path) -> list[str]:
     )
     files = [item.decode("utf-8") for item in completed.stdout.split(b"\0") if item]
     return sorted(files)
+
+
+def _check_git_history(repository: Path, failures: list[str]) -> tuple[int, int]:
+    commit_count_result = subprocess.run(
+        ["git", "-C", os.fspath(repository), "rev-list", "--count", "HEAD"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    commit_count = int(commit_count_result.stdout.decode("ascii").strip())
+    names_result = subprocess.run(
+        ["git", "-C", os.fspath(repository), "log", "--format=", "--name-only", "-z", "HEAD"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    for item in names_result.stdout.split(b"\0"):
+        if not item:
+            continue
+        try:
+            name = item.decode("utf-8")
+        except UnicodeDecodeError:
+            failures.append("SOS_PUBLIC_HISTORY_PATH_ENCODING_INVALID")
+            continue
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts or FORBIDDEN_PARTS.intersection(path.parts):
+            failures.append(f"SOS_PUBLIC_HISTORY_PATH_FORBIDDEN:{name}")
+
+    history_result = subprocess.run(
+        [
+            "git",
+            "-C",
+            os.fspath(repository),
+            "log",
+            "--format=%H%n%B",
+            "--no-ext-diff",
+            "--binary",
+            "HEAD",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    history = history_result.stdout
+    if len(history) > MAX_HISTORY_BYTES:
+        failures.append("SOS_PUBLIC_HISTORY_BYTE_LIMIT_EXCEEDED")
+        return commit_count, len(history)
+    history_text = history.decode("latin-1")
+    for pattern in FORBIDDEN_TEXT:
+        if pattern.search(history_text):
+            failures.append("SOS_PUBLIC_HISTORY_CONTENT_FORBIDDEN")
+            break
+    return commit_count, len(history)
 
 
 def _slug(value: str) -> str:
@@ -341,6 +396,7 @@ def inspect(repository: Path) -> dict[str, object]:
     repository = repository.resolve(strict=True)
     files = _inventory(repository)
     failures: list[str] = []
+    history_commit_count, history_bytes_scanned = _check_git_history(repository, failures)
     media_manifest: dict[str, object] | None = None
     try:
         value = json.loads((repository / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
@@ -426,6 +482,8 @@ def inspect(repository: Path) -> dict[str, object]:
     return {
         "contract": "sos_public_release_scan_v2",
         "file_count": len(files),
+        "history_bytes_scanned": history_bytes_scanned,
+        "history_commit_count": history_commit_count,
         "failures": sorted(set(failures)),
         "status": "passed" if not failures else "failed",
     }
