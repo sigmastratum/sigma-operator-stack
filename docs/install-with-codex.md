@@ -77,4 +77,5 @@ Removal may remove SOS-owned executable integration and managed runtime. It
 must preserve repository-owned `.sigma` records and unrelated user files.
 
 See [troubleshooting](troubleshooting.md) for typed refusals and
-[support](../SUPPORT.md) for content-safe reporting.
+[support](../SUPPORT.md) for content-safe reporting. The exact release proof is
+defined by the [AF104 public URL-only drill](agent-first-public-drill.md).

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sigmastratum/sigma-operator-stack/schemas/sos-agent-first-drill-receipt-v1.schema.json",
+  "title": "SOS agent-first public drill receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["absolute_paths_serialized", "architecture", "attempt_id", "candidate", "clean_host", "contract", "defender_enabled", "founder_hints", "hidden_confirmation", "instruction", "manual_commands", "mutations_outside_confirmed_project", "ordinary_user", "path_repair", "provider_calls", "raw_content_serialized", "receipt_digest", "release_tag", "security_bypass", "sigma_preserved", "source_url", "status", "steps", "store_product_id", "store_signed", "store_trust_valid", "system", "tree", "uac_enabled", "user_project_confirmation", "user_store_confirmation", "version"],
+  "properties": {
+    "absolute_paths_serialized": {"const": false},
+    "architecture": {"const": "x86_64"},
+    "attempt_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$"},
+    "candidate": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "clean_host": {"const": true},
+    "contract": {"const": "sos_agent_first_drill_receipt_v1"},
+    "defender_enabled": {"const": true},
+    "founder_hints": {"const": false},
+    "hidden_confirmation": {"const": false},
+    "instruction": {"const": "Install SOS in my current project. Show me the preview before changing it."},
+    "manual_commands": {"const": false},
+    "mutations_outside_confirmed_project": {"const": false},
+    "ordinary_user": {"const": true},
+    "path_repair": {"const": false},
+    "provider_calls": {"const": 2},
+    "raw_content_serialized": {"const": false},
+    "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "release_tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 40},
+    "security_bypass": {"const": false},
+    "sigma_preserved": {"const": true},
+    "source_url": {"const": "https://github.com/sigmastratum/sigma-operator-stack"},
+    "status": {"enum": ["blocked", "failed", "passed"]},
+    "steps": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step_id", "status"],
+        "properties": {
+          "step_id": {"enum": ["fresh_recovery", "project_apply", "project_preview", "release_discovery", "store_install", "truthful_state", "update_remove"]},
+          "status": {"enum": ["blocked", "failed", "passed"]}
+        }
+      }
+    },
+    "store_product_id": {"type": "string", "pattern": "^[A-Z0-9]{12}$"},
+    "store_signed": {"const": true},
+    "store_trust_valid": {"const": true},
+    "system": {"const": "windows"},
+    "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "uac_enabled": {"const": true},
+    "user_project_confirmation": {"const": true},
+    "user_store_confirmation": {"const": true},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 32}
+  }
+}

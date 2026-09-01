@@ -27,6 +27,10 @@ authority.
 - current support matrix and regenerated demo media;
 - update/downgrade documentation and qualification claims bound to the exact
   release candidate;
+- AF102 exact route projection and AF103 offline replay pass for the final
+  pointer/index bindings;
+- one Store-signed AF104 receipt passes all seven ordered steps with no manual
+  command, founder hint, admin session, PATH repair or security bypass;
 - no known release-blocking existing-stack or platform ambiguity;
 - separate approval for remote metadata, visibility, tag, release, and package
   publication.
