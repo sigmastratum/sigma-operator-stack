@@ -503,6 +503,17 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             with self.assertRaisesRegex(PlatformServiceError, "not_found"):
                 self.service.read_regular_file_bounded(root, "AGENTS.md", 64)
 
+    def test_missing_directory_is_projected_as_typed_not_found(self) -> None:
+        def missing_directory(
+            root: _NativeRoot, relative_path: str, limit: int
+        ) -> tuple[list[EphemeralDirectoryEntry], str]:
+            raise FileNotFoundError(relative_path)
+
+        self.native.enumerate_directory = missing_directory
+        with self._open() as root:
+            with self.assertRaisesRegex(PlatformServiceError, "not_found"):
+                self.service.enumerate_directory_bounded(root, ".sigma/ledger/tips", 64)
+
     def test_reparse_placeholder_special_and_hardlink_objects_fail_closed(self) -> None:
         identity = _digest(b"object")
         cases = [

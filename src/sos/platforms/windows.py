@@ -233,7 +233,16 @@ class WindowsPlatformServices:
         if limit < 0:
             raise PlatformServiceError("limit_invalid")
         relative = _validate_relative_path(relative_path, allow_root=True)
-        entries, names_digest = self._native.enumerate_directory(self._root_token(root), relative, limit)
+        try:
+            entries, names_digest = self._native.enumerate_directory(
+                self._root_token(root), relative, limit
+            )
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise PlatformServiceError("not_found") from exc
+        except PlatformServiceError:
+            raise
+        except OSError as exc:
+            raise PlatformServiceError("enumeration_failed") from exc
         if len(entries) > limit:
             raise PlatformServiceError("directory_limit_exceeded")
         names = [entry.name for entry in entries]
