@@ -26,7 +26,7 @@ MAX_MESSAGE_BYTES = 4096
 BLOCKED_NAME = "Blocked executables"
 DPI_NAME = "DPIAwarenessValidation"
 BLOCKED_MESSAGE = re.compile(
-    r'^File (?P<path>.+?) contains (?:a reference to a "Launch Process" related API .+|a blocked executable reference to ".+")$'
+    r'^File (?P<path>.+?) contains (?:a reference to a "Launch Process" related API .+|a blocked executable reference to ".+"\.)$'
 )
 
 

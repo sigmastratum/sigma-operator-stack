@@ -45,7 +45,7 @@ BLOCKED = (
     "FAIL",
     (
         'File bootstrap\\uv.exe contains a reference to a "Launch Process" related API kernel32.dll!CreateProcessW',
-        'File runtime/Lib/subprocess.py contains a blocked executable reference to "cmd"',
+        'File runtime/Lib/subprocess.py contains a blocked executable reference to "cmd".',
     ),
 )
 
