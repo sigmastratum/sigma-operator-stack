@@ -55,10 +55,49 @@ def synthetic_pe(subsystem: int, candidate: str) -> bytes:
     struct.pack_into("<H", value, 0x98, 0x20B)
     struct.pack_into("<H", value, 0x98 + 68, subsystem)
     value.extend(candidate.encode("ascii"))
+    if subsystem == 3:
+        value.extend(b"sos_windows_msix_command_launcher_v1")
     return bytes(value)
 
 
 class WindowsMSIXPacketTests(unittest.TestCase):
+    def test_packet_requires_the_store_command_launcher_contract(self) -> None:
+        source = (ROOT / "tools/build_windows_msix_packet.py").read_text(
+            encoding="utf-8"
+        )
+        launcher = (ROOT / "installers/windows-msix/main.go").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'const launcherContract = "sos_windows_msix_command_launcher_v1"',
+            launcher,
+        )
+        self.assertIn(
+            'COMMAND_LAUNCHER_CONTRACT = b"sos_windows_msix_command_launcher_v1"',
+            source,
+        )
+        self.assertIn(
+            'if COMMAND_LAUNCHER_CONTRACT not in bound_inputs["sos.exe"]:',
+            source,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.fixture(root)
+            values["sos"].write_bytes(
+                synthetic_pe(3, str(values["candidate"])).replace(
+                    b"sos_windows_msix_command_launcher_v1", b"private_bootstrap"
+                )
+            )
+            completed = subprocess.run(
+                self.command(values, root / "rejected.zip"),
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("command launcher contract is invalid", completed.stderr)
+
     def test_packet_source_snapshot_includes_exact_store_icons(self) -> None:
         source = (ROOT / "tools/build_windows_msix_packet.py").read_text(
             encoding="utf-8"

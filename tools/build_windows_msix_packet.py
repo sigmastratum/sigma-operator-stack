@@ -29,6 +29,7 @@ PACKET_CONTRACT = "sos_windows_msix_build_packet_v1"
 SOURCE_CONTRACT = "sos_windows_msix_source_manifest_v1"
 INPUT_LOCK_CONTRACT = "sos_windows_msix_input_lock_v1"
 GO_VERSION = "go1.27.0"
+COMMAND_LAUNCHER_CONTRACT = b"sos_windows_msix_command_launcher_v1"
 SOURCE_FILES = (
     "installers/windows-msix/AppxManifest.xml.in",
     "installers/windows-msix/assets/Square44x44Logo.png",
@@ -657,6 +658,8 @@ def main() -> int:
         files[relative] = value
     if pe_subsystem(bound_inputs["sos.exe"], "SOS command launcher") != 3:
         raise PacketError("SOS command launcher is not a console PE")
+    if COMMAND_LAUNCHER_CONTRACT not in bound_inputs["sos.exe"]:
+        raise PacketError("SOS command launcher contract is invalid")
     if pe_subsystem(bound_inputs["sos-launcher.exe"], "SOS Store entrypoint") != 2:
         raise PacketError("SOS Store entrypoint is not a GUI PE")
     for label, value in (

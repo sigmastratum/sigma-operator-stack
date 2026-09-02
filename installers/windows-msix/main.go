@@ -10,6 +10,8 @@ import (
 
 var candidate = "unbound"
 
+const launcherContract = "sos_windows_msix_command_launcher_v1"
+
 func closedPythonEnvironment(packageRoot string) []string {
 	blocked := map[string]bool{
 		"PYTHONHOME": true, "PYTHONPATH": true, "PYTHONSTARTUP": true,
@@ -51,7 +53,7 @@ func translated(arguments []string) ([]string, error) {
 }
 
 func run() int {
-	if candidate == "unbound" {
+	if candidate == "unbound" || launcherContract != "sos_windows_msix_command_launcher_v1" {
 		fmt.Fprintln(os.Stderr, "SOS_MSIX_LAUNCHER_UNBOUND")
 		return 2
 	}
