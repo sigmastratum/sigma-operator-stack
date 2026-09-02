@@ -1080,7 +1080,8 @@ class _Kernel32:
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS = 0x00000002
     FILE_DISPOSITION_FLAG_ON_CLOSE = 0x00000008
     FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE = 0x00000010
-    FILE_RENAME_INFO_EX = 22
+    FILE_DISPOSITION_INFO = 4
+    FILE_RENAME_INFORMATION = 10
     FILE_ID_BOTH_DIRECTORY_INFO = 10
     FILE_ID_BOTH_DIRECTORY_RESTART_INFO = 11
     DRIVE_FIXED = 3
@@ -1176,6 +1177,16 @@ class _Kernel32:
         self.kernel32.GetDriveTypeW.restype = ctypes.c_uint32
         self.kernel32.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
         self.ntdll.NtCreateFile.restype = ctypes.c_long
+        self.ntdll.NtSetInformationFile.restype = ctypes.c_long
+        self.ntdll.NtSetInformationFile.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_int,
+        ]
+        self.ntdll.RtlNtStatusToDosError.restype = ctypes.c_uint32
+        self.ntdll.RtlNtStatusToDosError.argtypes = [ctypes.c_long]
 
     def open_path(self, path: str, *, directory: bool | None, write: bool, create: str, share: int | None = None) -> int:
         desired = self.GENERIC_READ | (self.GENERIC_WRITE if write else 0)
@@ -1489,29 +1500,43 @@ class _Kernel32:
             raise PlatformServiceError("identity_changed")
         encoded = target.replace("/", "\\").encode("utf-16-le")
 
-        class FILE_RENAME_INFO_HEADER(ctypes.Structure):
+        class FILE_RENAME_INFORMATION_HEADER(ctypes.Structure):
             _fields_ = [
-                ("Flags", ctypes.c_uint32),
+                ("ReplaceIfExists", ctypes.c_ubyte),
                 ("RootDirectory", ctypes.c_void_p),
                 ("FileNameLength", ctypes.c_uint32),
             ]
 
-        name_offset = FILE_RENAME_INFO_HEADER.FileNameLength.offset + ctypes.sizeof(
+        class IO_STATUS_BLOCK(ctypes.Structure):
+            _fields_ = [
+                ("Status", ctypes.c_void_p),
+                ("Information", ctypes.c_size_t),
+            ]
+
+        name_offset = FILE_RENAME_INFORMATION_HEADER.FileNameLength.offset + ctypes.sizeof(
             ctypes.c_uint32
         )
-        buffer = ctypes.create_string_buffer(name_offset + len(encoded))
-        header = FILE_RENAME_INFO_HEADER.from_buffer(buffer)
-        header.Flags = 0
+        # FILE_RENAME_INFORMATION is naturally aligned to 24 bytes on x64.
+        # NtSetInformationFile rejects the tempting 20+name truncated buffer.
+        buffer = ctypes.create_string_buffer(
+            ctypes.sizeof(FILE_RENAME_INFORMATION_HEADER) + len(encoded)
+        )
+        header = FILE_RENAME_INFORMATION_HEADER.from_buffer(buffer)
+        header.ReplaceIfExists = 0
         header.RootDirectory = ctypes.c_void_p(root.handle)
         header.FileNameLength = len(encoded)
         ctypes.memmove(ctypes.addressof(buffer) + name_offset, encoded, len(encoded))
-        if not self.kernel32.SetFileInformationByHandle(
+        io_status = IO_STATUS_BLOCK()
+        status = self.ntdll.NtSetInformationFile(
             source_handle,
-            self.FILE_RENAME_INFO_EX,
+            ctypes.byref(io_status),
             buffer,
             len(buffer),
-        ):
-            error = ctypes.get_last_error()
+            self.FILE_RENAME_INFORMATION,
+        )
+        unsigned = ctypes.c_uint32(status).value
+        if unsigned & 0x80000000:
+            error = int(self.ntdll.RtlNtStatusToDosError(status))
             if error in {80, 183}:
                 raise PlatformServiceError("collision")
             raise PlatformServiceError("publication_failed")
@@ -1632,7 +1657,17 @@ class _Kernel32:
             ctypes.byref(disposition),
             ctypes.sizeof(disposition),
         ):
-            raise PlatformServiceError("publication_failed")
+            error = ctypes.get_last_error()
+            if error != 50:  # ERROR_NOT_SUPPORTED
+                raise PlatformServiceError("publication_failed")
+            legacy = ctypes.c_ubyte(1)
+            if not self.kernel32.SetFileInformationByHandle(
+                handle,
+                self.FILE_DISPOSITION_INFO,
+                ctypes.byref(legacy),
+                ctypes.sizeof(legacy),
+            ):
+                raise PlatformServiceError("publication_failed")
 
     def flush_parent(self, root: _NativeRoot, relative: str) -> None:
         parent = str(PurePosixPath(relative).parent)

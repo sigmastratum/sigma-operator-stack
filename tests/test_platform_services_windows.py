@@ -7,6 +7,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sos.platform_services import (
     EphemeralDirectoryEntry,
@@ -792,9 +793,9 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.observed: tuple[int, int, int, int, int, bytes] | None = None
 
-            def SetFileInformationByHandle(self, source, info_class, buffer, size):
+            def NtSetInformationFile(self, source, io_status, buffer, size, info_class):
                 address = ctypes.addressof(buffer)
-                flags = ctypes.c_uint32.from_address(address).value
+                replace = ctypes.c_ubyte.from_address(address).value
                 root_handle = ctypes.c_void_p.from_address(address + 8).value
                 name_length = ctypes.c_uint32.from_address(address + 16).value
                 name = bytes((ctypes.c_ubyte * name_length).from_address(address + 20))
@@ -802,14 +803,17 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
                     source,
                     info_class,
                     size,
-                    flags,
+                    replace,
                     int(root_handle or 0),
                     name,
                 )
-                return 1
+                return 0
+
+            def RtlNtStatusToDosError(self, status):
+                raise AssertionError("successful rename must not translate status")
 
         recorder = RenameRecorder()
-        api.kernel32 = recorder
+        api.ntdll = recorder
         identity = _digest(b"source")
         api.object_info = lambda handle: (
             "regular",
@@ -827,8 +831,9 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             expected_source_identity=identity,
         )
         self.assertIsNotNone(recorder.observed)
-        source, info_class, _size, flags, root_handle, name = recorder.observed
-        self.assertEqual((source, info_class, flags, root_handle), (77, 22, 0, 41))
+        source, info_class, size, replace, root_handle, name = recorder.observed
+        self.assertEqual((source, info_class, replace, root_handle), (77, 10, 0, 41))
+        self.assertEqual(size, 24 + len(name))
         self.assertEqual(name.decode("utf-16-le"), r"nested\target")
 
         staging = ".sigma.init." + "e" * 64
@@ -848,6 +853,28 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
         self.assertFalse(
             any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
         )
+
+    def test_native_delete_falls_back_only_when_extended_disposition_is_unsupported(self) -> None:
+        class DispositionRecorder:
+            def __init__(self) -> None:
+                self.classes: list[tuple[int, int]] = []
+
+            def SetFileInformationByHandle(self, handle, info_class, buffer, size):
+                self.classes.append((info_class, size))
+                return 0 if info_class == 21 else 1
+
+        api = object.__new__(_Kernel32)
+        api.kernel32 = DispositionRecorder()
+        with mock.patch.object(ctypes, "get_last_error", return_value=50, create=True):
+            api._delete_handle(77)
+        self.assertEqual(api.kernel32.classes, [(21, 4), (4, 1)])
+
+        denied = DispositionRecorder()
+        api.kernel32 = denied
+        with mock.patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            with self.assertRaisesRegex(PlatformServiceError, "publication_failed"):
+                api._delete_handle(77)
+        self.assertEqual(denied.classes, [(21, 4)])
 
     def test_nt_relative_open_has_the_exact_no_follow_create_option(self) -> None:
         class NtdllRecorder:
@@ -909,7 +936,8 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             "NtCreateFile",
             "OBJ_DONT_REPARSE",
             "CompareStringOrdinal",
-            "FILE_RENAME_INFO_EX",
+            "FILE_RENAME_INFORMATION",
+            "NtSetInformationFile",
             "DuplicateHandle",
             "SetFileInformationByHandle",
             "GetFileInformationByHandleEx",
