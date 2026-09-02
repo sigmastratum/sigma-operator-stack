@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	outputMSIXName                = "SigmaOperatorStack_1.0.2.0_x64.msix"
+	outputMSIXName                = "SigmaOperatorStack_1.0.3.0_x64.msix"
 	outputBuildResultName         = "build-result.json"
 	outputFirstBuildName          = "first-build.json"
 	outputFirstContentSafetyName  = "first-content-safety.json"
@@ -22,7 +22,7 @@ const (
 	outputPackageIdentityName     = "SSRG.SigmaOperatorStack"
 	outputPackageFamilyName       = "SSRG.SigmaOperatorStack_2358e20nvr064"
 	outputStoreID                 = "9NNZT70C613H"
-	outputVersion                 = "1.0.2.0"
+	outputVersion                 = "1.0.3.0"
 	outputBuilderContract         = "sos_windows_unsigned_msix_build_v1"
 	outputComparisonContract      = "sos_windows_msix_semantic_comparison_v2"
 	outputContentSafetyContract   = "sos_windows_msix_content_safety_v1"

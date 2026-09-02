@@ -18,17 +18,18 @@ import (
 )
 
 const (
-	packetContract       = "sos_windows_msix_build_packet_v1"
-	sourceContract       = "sos_windows_msix_source_manifest_v1"
-	packetManifestName   = "packet-manifest.json"
-	maxManifestBytes     = 8 * 1024 * 1024
-	expectedRunnerName   = "Build-SOS-MSIX.exe"
-	expectedSourceRoot   = "source"
-	expectedSourceRecord = "source-manifest.json"
-	expectedInputLock    = "input-lock.json"
-	expectedRuntimeName  = "windows-python-runtime-3.12.14.zip"
-	expectedSOSName      = "sos.exe"
-	expectedUVName       = "uv.exe"
+	packetContract              = "sos_windows_msix_build_packet_v1"
+	sourceContract              = "sos_windows_msix_source_manifest_v1"
+	packetManifestName          = "packet-manifest.json"
+	maxManifestBytes            = 8 * 1024 * 1024
+	expectedRunnerName          = "Build-SOS-MSIX.exe"
+	expectedSourceRoot          = "source"
+	expectedSourceRecord        = "source-manifest.json"
+	expectedInputLock           = "input-lock.json"
+	expectedRuntimeName         = "windows-python-runtime-3.12.14.zip"
+	expectedSOSName             = "sos.exe"
+	expectedStoreEntrypointName = "sos-launcher.exe"
+	expectedUVName              = "uv.exe"
 )
 
 var (
@@ -76,17 +77,18 @@ type toolchainBinding struct {
 }
 
 type inputLockManifest struct {
-	Candidate      string           `json:"candidate"`
-	Contract       string           `json:"contract"`
-	Git            toolchainBinding `json:"git"`
-	Go             toolchainBinding `json:"go"`
-	MakeAppx       makeAppxBinding  `json:"makeappx"`
-	PythonRuntime  fileBinding      `json:"python_runtime"`
-	SOSLauncher    fileBinding      `json:"sos_launcher"`
-	SourceManifest fileBinding      `json:"source_manifest"`
-	Tree           string           `json:"tree"`
-	UV             fileBinding      `json:"uv"`
-	Wheelhouse     []fileBinding    `json:"wheelhouse"`
+	Candidate       string           `json:"candidate"`
+	Contract        string           `json:"contract"`
+	Git             toolchainBinding `json:"git"`
+	Go              toolchainBinding `json:"go"`
+	MakeAppx        makeAppxBinding  `json:"makeappx"`
+	PythonRuntime   fileBinding      `json:"python_runtime"`
+	SOSLauncher     fileBinding      `json:"sos_launcher"`
+	StoreEntrypoint fileBinding      `json:"store_entrypoint"`
+	SourceManifest  fileBinding      `json:"source_manifest"`
+	Tree            string           `json:"tree"`
+	UV              fileBinding      `json:"uv"`
+	Wheelhouse      []fileBinding    `json:"wheelhouse"`
 }
 
 type packetManifest struct {
@@ -99,6 +101,7 @@ type packetManifest struct {
 	InputLock       string          `json:"input_lock"`
 	PythonRuntime   string          `json:"python_runtime"`
 	SOSLauncher     string          `json:"sos_launcher"`
+	StoreEntrypoint string          `json:"store_entrypoint"`
 	UV              string          `json:"uv"`
 	Wheelhouse      []string        `json:"wheelhouse"`
 	MakeAppx        makeAppxBinding `json:"makeappx"`
@@ -306,7 +309,7 @@ func validatePacketManifest(manifest *packetManifest) error {
 	}
 	if manifest.Runner != expectedRunnerName || manifest.SourceRoot != expectedSourceRoot ||
 		manifest.SourceManifest != expectedSourceRecord || manifest.InputLock != expectedInputLock || manifest.PythonRuntime != expectedRuntimeName ||
-		manifest.SOSLauncher != expectedSOSName || manifest.UV != expectedUVName {
+		manifest.SOSLauncher != expectedSOSName || manifest.StoreEntrypoint != expectedStoreEntrypointName || manifest.UV != expectedUVName {
 		return errors.New("packet artifact naming contract is invalid")
 	}
 	if len(manifest.Wheelhouse) != len(expectedWheels) || !strictlySortedStrings(manifest.Wheelhouse) {
@@ -331,7 +334,7 @@ func validatePacketManifest(manifest *packetManifest) error {
 		byPath[file.Path] = file
 	}
 	for _, required := range append([]string{
-		manifest.Runner, manifest.SourceManifest, manifest.InputLock, manifest.PythonRuntime, manifest.SOSLauncher, manifest.UV,
+		manifest.Runner, manifest.SourceManifest, manifest.InputLock, manifest.PythonRuntime, manifest.SOSLauncher, manifest.StoreEntrypoint, manifest.UV,
 	}, manifest.Wheelhouse...) {
 		if _, ok := byPath[required]; !ok {
 			return errors.New("packet required artifact is not inventory-bound")
@@ -375,10 +378,11 @@ func validateInputLock(lock *inputLockManifest, expectedCandidate string, expect
 		return errors.New("input-lock MakeAppx binding is invalid")
 	}
 	for binding, expectedPath := range map[fileBinding]string{
-		lock.PythonRuntime:  expectedRuntimeName,
-		lock.SOSLauncher:    expectedSOSName,
-		lock.SourceManifest: expectedSourceRecord,
-		lock.UV:             expectedUVName,
+		lock.PythonRuntime:   expectedRuntimeName,
+		lock.SOSLauncher:     expectedSOSName,
+		lock.StoreEntrypoint: expectedStoreEntrypointName,
+		lock.SourceManifest:  expectedSourceRecord,
+		lock.UV:              expectedUVName,
 	} {
 		if err := validateLockedFile(binding, expectedPath); err != nil {
 			return err
@@ -433,6 +437,7 @@ func validatePacketAgainstInputLock(packet *packetManifest, lock *inputLockManif
 	if packetFiles[expectedInputLock] != lockBinding ||
 		packetFiles[expectedRuntimeName] != lock.PythonRuntime ||
 		packetFiles[expectedSOSName] != lock.SOSLauncher ||
+		packetFiles[expectedStoreEntrypointName] != lock.StoreEntrypoint ||
 		packetFiles[expectedSourceRecord] != lock.SourceManifest ||
 		packetFiles[expectedUVName] != lock.UV {
 		return errors.New("packet artifacts differ from the input-lock")

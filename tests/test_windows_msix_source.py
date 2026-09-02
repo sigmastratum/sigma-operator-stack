@@ -244,6 +244,7 @@ class WindowsMSIXSourceTests(unittest.TestCase):
             payload = base / "payload"
             required = {
                 "sos.exe": b"MZlauncher",
+                "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
                 "bootstrap/uv.exe": b"MZuv",
@@ -338,6 +339,7 @@ class WindowsMSIXSourceTests(unittest.TestCase):
             payload = base / "payload"
             for relative, content in {
                 "sos.exe": b"MZlauncher",
+                "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="alpha"\n',
                 "bootstrap/uv.exe": b"MZuv",

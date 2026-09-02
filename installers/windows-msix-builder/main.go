@@ -344,6 +344,9 @@ func assemblePayload(packetRoot string, buildRoot string, manifest *packetManife
 	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.SOSLauncher)), bindings[manifest.SOSLauncher], payload, "sos.exe"); err != nil {
 		return err
 	}
+	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.StoreEntrypoint)), bindings[manifest.StoreEntrypoint], payload, "sos-launcher.exe"); err != nil {
+		return err
+	}
 	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.UV)), bindings[manifest.UV], payload, "bootstrap/uv.exe"); err != nil {
 		return err
 	}
@@ -660,7 +663,7 @@ func execute() *buildError {
 		return fail("SOS_MSIX_BUILD_ROOT_CLEANUP_FAILED", "The verified package was produced, but the marker-owned build root could not be removed safely.", err)
 	}
 	fmt.Println("SOS MSIX build passed.")
-	fmt.Println("Package: output/SigmaOperatorStack_1.0.2.0_x64.msix")
+	fmt.Println("Package: output/SigmaOperatorStack_1.0.3.0_x64.msix")
 	return nil
 }
 

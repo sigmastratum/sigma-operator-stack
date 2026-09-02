@@ -164,12 +164,13 @@ func validSyntheticInputLock() inputLockManifest {
 			SHA256:                      strings.Repeat("e", 64),
 			Size:                        1,
 		},
-		PythonRuntime:  syntheticBinding(expectedRuntimeName, "f"),
-		SOSLauncher:    syntheticBinding(expectedSOSName, "1"),
-		SourceManifest: syntheticBinding(expectedSourceRecord, "2"),
-		Tree:           strings.Repeat("3", 40),
-		UV:             syntheticBinding(expectedUVName, "4"),
-		Wheelhouse:     wheels,
+		PythonRuntime:   syntheticBinding(expectedRuntimeName, "f"),
+		SOSLauncher:     syntheticBinding(expectedSOSName, "1"),
+		StoreEntrypoint: syntheticBinding(expectedStoreEntrypointName, "5"),
+		SourceManifest:  syntheticBinding(expectedSourceRecord, "2"),
+		Tree:            strings.Repeat("3", 40),
+		UV:              syntheticBinding(expectedUVName, "4"),
+		Wheelhouse:      wheels,
 	}
 }
 
@@ -188,7 +189,7 @@ func TestInputLockDigestAndPacketCrossBindings(t *testing.T) {
 	if observedBinding != lockBinding {
 		t.Fatal("input-lock byte binding changed")
 	}
-	files := []fileBinding{lockBinding, lock.PythonRuntime, lock.SOSLauncher, lock.SourceManifest, lock.UV}
+	files := []fileBinding{lockBinding, lock.PythonRuntime, lock.SOSLauncher, lock.StoreEntrypoint, lock.SourceManifest, lock.UV}
 	files = append(files, lock.Wheelhouse...)
 	packet := packetManifest{MakeAppx: lock.MakeAppx, Wheelhouse: append([]string(nil), expectedWheels...), Files: files}
 	if err := validatePacketAgainstInputLock(&packet, loaded, lockBinding); err != nil {

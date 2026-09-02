@@ -31,7 +31,7 @@ def _load_source_verifier():
 source_verifier = _load_source_verifier()
 
 VERSION = "0.1.0a2"
-MSIX_VERSION = "1.0.2.0"
+MSIX_VERSION = "1.0.3.0"
 LOGO_ASSETS = {
     "Square44x44Logo.png": (44, 44),
     "Square50x50Logo.png": (50, 50),
@@ -39,6 +39,7 @@ LOGO_ASSETS = {
 }
 REQUIRED = {
     "sos.exe",
+    "sos-launcher.exe",
     "runtime/python.exe",
     "runtime/Lib/site-packages/sos/__init__.py",
     "bootstrap/uv.exe",
@@ -178,6 +179,25 @@ def store_identity(raw: bytes, manifest: str) -> dict[str, str]:
     return identity
 
 
+def validate_launch_contract(manifest: str) -> None:
+    application = re.findall(
+        r'<Application\b[^>]*\bExecutable="([^"]+)"[^>]*>', manifest
+    )
+    aliases = re.findall(
+        r'<desktop:ExecutionAlias\b[^>]*\bAlias="([^"]+)"[^>]*/>', manifest
+    )
+    alias_extensions = re.findall(
+        r'<uap3:Extension\b[^>]*\bCategory="windows\.appExecutionAlias"[^>]*\bExecutable="([^"]+)"[^>]*>',
+        manifest,
+    )
+    if application != ["sos-launcher.exe"]:
+        raise SystemExit("MSIX Start-menu entrypoint binding is invalid")
+    if aliases != ["sos.exe"] or alias_extensions != ["sos.exe"]:
+        raise SystemExit("MSIX command alias binding is invalid")
+    if manifest.count('Version="1.0.3.0"') != 1:
+        raise SystemExit("MSIX transport version binding is invalid")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=Path, required=True)
@@ -244,6 +264,7 @@ def main() -> int:
         "installers/windows-msix/AppxManifest.xml.in",
     ).decode("utf-8")
     manifest = template
+    validate_launch_contract(manifest)
     identity = store_identity(
         source_verifier.read_bound_source_file(
             source_root,

@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,10 @@ SOURCE_FILES = (
     "installers/windows-msix/assets/Square50x50Logo.png",
     "installers/windows-msix/assets/Square150x150Logo.png",
     "installers/windows-msix/store-identity.json",
+    "installers/windows-msix-entrypoint/go.mod",
+    "installers/windows-msix-entrypoint/main_windows.go",
+    "installers/windows-msix-entrypoint/model.go",
+    "tools/build_windows_msix_entrypoint.py",
     "tools/build_windows_msix.py",
     "tools/build_windows_msix_pipeline.py",
     "tools/check_windows_msix_content.py",
@@ -40,6 +45,17 @@ MAKEAPPX_SHA = "0123456789abcdef" * 4
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def synthetic_pe(subsystem: int, candidate: str) -> bytes:
+    value = bytearray(256)
+    value[:2] = b"MZ"
+    struct.pack_into("<I", value, 0x3C, 0x80)
+    value[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<H", value, 0x98, 0x20B)
+    struct.pack_into("<H", value, 0x98 + 68, subsystem)
+    value.extend(candidate.encode("ascii"))
+    return bytes(value)
 
 
 class WindowsMSIXPacketTests(unittest.TestCase):
@@ -118,7 +134,9 @@ class WindowsMSIXPacketTests(unittest.TestCase):
         )
         go.chmod(0o700)
         sos = root / "sos.exe"
-        sos.write_bytes(b"MZ-sos")
+        sos.write_bytes(synthetic_pe(3, candidate))
+        store_entrypoint = root / "sos-launcher.exe"
+        store_entrypoint.write_bytes(synthetic_pe(2, candidate))
         uv = root / "uv.exe"
         uv.write_bytes(b"MZ-uv")
         runtime = root / "windows-python-runtime-3.12.14.zip"
@@ -137,6 +155,7 @@ class WindowsMSIXPacketTests(unittest.TestCase):
             "go_sha": digest(go),
             "runtime": runtime,
             "sos": sos,
+            "store_entrypoint": store_entrypoint,
             "tree": tree,
             "uv": uv,
             "wheelhouse": wheelhouse,
@@ -160,6 +179,8 @@ class WindowsMSIXPacketTests(unittest.TestCase):
             str(values["go_sha"]),
             "--sos-launcher",
             os.fspath(values["sos"]),
+            "--store-entrypoint",
+            os.fspath(values["store_entrypoint"]),
             "--uv",
             os.fspath(values["uv"]),
             "--python-runtime",
@@ -237,6 +258,7 @@ class WindowsMSIXPacketTests(unittest.TestCase):
                         "python_runtime",
                         "sos_launcher",
                         "source_manifest",
+                        "store_entrypoint",
                         "tree",
                         "uv",
                         "wheelhouse",
@@ -257,6 +279,7 @@ class WindowsMSIXPacketTests(unittest.TestCase):
                 for name in (
                     "source_manifest",
                     "sos_launcher",
+                    "store_entrypoint",
                     "python_runtime",
                     "uv",
                 ):
@@ -292,6 +315,33 @@ class WindowsMSIXPacketTests(unittest.TestCase):
                 )
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn("SOS_MSIX_PACKET_BUILD_FAILED", completed.stderr)
+
+    def test_packet_rejects_swapped_or_unbound_launchers(self) -> None:
+        for case in ("swapped", "unbound"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                values = self.fixture(root)
+                if case == "swapped":
+                    values["sos"], values["store_entrypoint"] = (
+                        values["store_entrypoint"],
+                        values["sos"],
+                    )
+                else:
+                    Path(values["store_entrypoint"]).write_bytes(
+                        synthetic_pe(2, "f" * 40)
+                    )
+                completed = subprocess.run(
+                    self.command(values, root / "packet.zip"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("SOS_MSIX_PACKET_BUILD_FAILED", completed.stderr)
+                self.assertIn(
+                    "console PE" if case == "swapped" else "exact candidate",
+                    completed.stderr,
+                )
 
     def test_packet_rejects_dirty_or_drifting_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

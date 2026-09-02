@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -34,7 +35,11 @@ SOURCE_FILES = (
     "installers/windows-msix/assets/Square50x50Logo.png",
     "installers/windows-msix/assets/Square150x150Logo.png",
     "installers/windows-msix/store-identity.json",
+    "installers/windows-msix-entrypoint/go.mod",
+    "installers/windows-msix-entrypoint/main_windows.go",
+    "installers/windows-msix-entrypoint/model.go",
     "tools/build_windows_msix.py",
+    "tools/build_windows_msix_entrypoint.py",
     "tools/build_windows_msix_pipeline.py",
     "tools/check_windows_msix_content.py",
     "tools/compare_windows_msix.py",
@@ -272,6 +277,19 @@ def read_bound_input(path: Path, label: str) -> bytes:
     return value
 
 
+def pe_subsystem(value: bytes, label: str) -> int:
+    if len(value) < 0x40 or value[:2] != b"MZ":
+        raise PacketError(f"{label} is not a PE image")
+    offset = struct.unpack_from("<I", value, 0x3C)[0]
+    if offset + 94 > len(value) or value[offset : offset + 4] != b"PE\0\0":
+        raise PacketError(f"{label} PE header is invalid")
+    optional = offset + 24
+    magic = struct.unpack_from("<H", value, optional)[0]
+    if magic not in (0x10B, 0x20B):
+        raise PacketError(f"{label} optional header is invalid")
+    return struct.unpack_from("<H", value, optional + 68)[0]
+
+
 def source_snapshot(
     git: Path,
     git_digest: str,
@@ -437,6 +455,7 @@ def build_input_lock(
     makeappx_size: int,
     source_manifest: bytes,
     sos_launcher: bytes,
+    store_entrypoint: bytes,
     uv: bytes,
     python_runtime: bytes,
     wheels: dict[str, bytes],
@@ -466,6 +485,7 @@ def build_input_lock(
             "windows-python-runtime-3.12.14.zip", python_runtime
         ),
         "sos_launcher": entry("sos.exe", sos_launcher),
+        "store_entrypoint": entry("sos-launcher.exe", store_entrypoint),
         "source_manifest": entry("source-manifest.json", source_manifest),
         "tree": tree,
         "uv": entry("uv.exe", uv),
@@ -508,6 +528,7 @@ def main() -> int:
     parser.add_argument("--go", required=True, type=Path)
     parser.add_argument("--go-sha256", required=True)
     parser.add_argument("--sos-launcher", required=True, type=Path)
+    parser.add_argument("--store-entrypoint", required=True, type=Path)
     parser.add_argument("--uv", required=True, type=Path)
     parser.add_argument("--python-runtime", required=True, type=Path)
     parser.add_argument("--wheelhouse", required=True, type=Path)
@@ -612,6 +633,12 @@ def main() -> int:
     files["START-HERE.md"] = start_here(candidate, tree)
     inputs = (
         ("sos.exe", arguments.sos_launcher, "SOS launcher", b"MZ"),
+        (
+            "sos-launcher.exe",
+            arguments.store_entrypoint,
+            "SOS Store entrypoint",
+            b"MZ",
+        ),
         ("uv.exe", arguments.uv, "uv executable", b"MZ"),
         (
             "windows-python-runtime-3.12.14.zip",
@@ -628,6 +655,16 @@ def main() -> int:
             raise PacketError(f"{label} magic is invalid")
         bound_inputs[relative] = value
         files[relative] = value
+    if pe_subsystem(bound_inputs["sos.exe"], "SOS command launcher") != 3:
+        raise PacketError("SOS command launcher is not a console PE")
+    if pe_subsystem(bound_inputs["sos-launcher.exe"], "SOS Store entrypoint") != 2:
+        raise PacketError("SOS Store entrypoint is not a GUI PE")
+    for label, value in (
+        ("SOS command launcher", bound_inputs["sos.exe"]),
+        ("SOS Store entrypoint", bound_inputs["sos-launcher.exe"]),
+    ):
+        if candidate.encode("ascii") not in value:
+            raise PacketError(f"{label} is not bound to the exact candidate")
     bound_wheels: dict[str, bytes] = {}
     for name in WHEELS:
         value = read_bound_input(wheelhouse / name, "wheelhouse artifact")
@@ -651,6 +688,7 @@ def main() -> int:
         makeappx_size=arguments.makeappx_size,
         source_manifest=source_manifest,
         sos_launcher=bound_inputs["sos.exe"],
+        store_entrypoint=bound_inputs["sos-launcher.exe"],
         uv=bound_inputs["uv.exe"],
         python_runtime=bound_inputs["windows-python-runtime-3.12.14.zip"],
         wheels=bound_wheels,
@@ -675,6 +713,7 @@ def main() -> int:
     source_manifest_path = "source-manifest.json"
     runtime_path = "windows-python-runtime-3.12.14.zip"
     sos_path = "sos.exe"
+    store_entrypoint_path = "sos-launcher.exe"
     uv_path = "uv.exe"
     wheels = [f"wheelhouse/{name}" for name in WHEELS]
     packet_record: dict[str, object] = {
@@ -692,6 +731,7 @@ def main() -> int:
         "python_runtime": runtime_path,
         "runner": runner_path,
         "sos_launcher": sos_path,
+        "store_entrypoint": store_entrypoint_path,
         "source_manifest": source_manifest_path,
         "source_root": source_root,
         "tree": tree,

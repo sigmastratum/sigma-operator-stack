@@ -68,7 +68,7 @@ def payload_record(artifacts: dict[str, bytes]) -> bytes:
                 "candidate": CANDIDATE,
                 "contract": "sos_windows_msix_payload_v1",
                 "executable_acquisition_after_install": False,
-                "msix_version": "1.0.2.0",
+                "msix_version": "1.0.3.0",
                 "network_after_package_download": False,
                 "platform": "windows-x86_64",
                 "sos_version": "0.1.0a2",
@@ -157,6 +157,7 @@ class WindowsMSIXTests(unittest.TestCase):
             "runtime/large.bin": b"x" * 70000,
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
+            "sos-launcher.exe": b"MZlauncher",
             "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"wheel",
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -192,6 +193,7 @@ class WindowsMSIXTests(unittest.TestCase):
             "bootstrap/uv.exe": b"MZuv",
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
+            "sos-launcher.exe": b"MZlauncher",
             "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"wheel",
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -382,6 +384,8 @@ class WindowsMSIXTests(unittest.TestCase):
             'uap10:TrustLevel="mediumIL"',
             'uap10:RuntimeBehavior="packagedClassicApp"',
             'Category="windows.appExecutionAlias"',
+            '<Application Id="SOS" Executable="sos-launcher.exe"',
+            '<uap3:Extension Category="windows.appExecutionAlias" Executable="sos.exe"',
             'Alias="sos.exe"',
             'Name="SSRG.SigmaOperatorStack"',
             'Publisher="CN=D713C275-467D-4A03-9D24-0DC02F1C3031"',
@@ -392,6 +396,23 @@ class WindowsMSIXTests(unittest.TestCase):
             self.assertIn(required, manifest)
         for forbidden in ("allowElevation", "machine", "customAction"):
             self.assertNotIn(forbidden, manifest)
+
+    def test_manifest_cannot_swap_store_entrypoint_and_command_alias(self) -> None:
+        source = (ROOT / "tools/build_windows_msix.py").read_text(encoding="utf-8")
+        self.assertIn("validate_launch_contract(manifest)", source)
+        manifest = (ROOT / "installers/windows-msix/AppxManifest.xml.in").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            manifest.count('<Application Id="SOS" Executable="sos-launcher.exe"'), 1
+        )
+        self.assertEqual(
+            manifest.count(
+                '<uap3:Extension Category="windows.appExecutionAlias" Executable="sos.exe"'
+            ),
+            1,
+        )
+        self.assertNotIn('Alias="sos-launcher.exe"', manifest)
 
     def test_launcher_disables_bytecode_writes_and_acquisition(self) -> None:
         source = (ROOT / "installers/windows-msix/main.go").read_text(encoding="utf-8")
@@ -429,6 +450,7 @@ class WindowsMSIXTests(unittest.TestCase):
             payload = root / "payload"
             required = {
                 "sos.exe": b"MZlauncher",
+                "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
                 "bootstrap/uv.exe": b"MZuv",
@@ -581,6 +603,7 @@ class WindowsMSIXTests(unittest.TestCase):
             payload = root / "payload"
             for relative, content in {
                 "sos.exe": b"MZlauncher",
+                "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
                 "bootstrap/uv.exe": b"MZuv",
@@ -649,7 +672,7 @@ class WindowsMSIXTests(unittest.TestCase):
             )
             self.assertEqual(first_content, second_content)
             self.assertEqual(first_content["status"], "passed")
-            self.assertTrue((output / "SigmaOperatorStack_1.0.2.0_x64.msix").is_file())
+            self.assertTrue((output / "SigmaOperatorStack_1.0.3.0_x64.msix").is_file())
 
 
 if __name__ == "__main__":

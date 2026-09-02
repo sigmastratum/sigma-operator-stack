@@ -34,7 +34,7 @@ class AgentFirstRouteTests(unittest.TestCase):
             "package_family_name": "SSRG.SigmaOperatorStack_2358e20nvr064",
             "package_identity_name": "SSRG.SigmaOperatorStack",
             "package_publisher": "CN=D713C275-467D-4A03-9D24-0DC02F1C3031",
-            "package_version": "1.0.2.0",
+            "package_version": "1.0.3.0",
         }
 
     def resolve(self, system: str, architecture: str, **kwargs: object) -> dict[str, object]:
@@ -92,7 +92,7 @@ class AgentFirstRouteTests(unittest.TestCase):
 
     def test_store_binding_mismatch_blocks(self) -> None:
         observation = dict(self.observation)
-        observation["package_version"] = "1.0.3.0"
+        observation["package_version"] = "1.0.2.0"
         result = self.resolve("windows", "x86_64", observation=observation)
         self.assert_projection(result)
         self.assertEqual(result["status"], "blocked")
