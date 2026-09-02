@@ -429,6 +429,32 @@ class WindowsMSIXTests(unittest.TestCase):
         for forbidden in ("cmd.exe", "powershell", "uv python install", "http://", "https://"):
             self.assertNotIn(forbidden, source.lower())
 
+    def test_native_builder_rebinds_payload_runtime_to_exact_offline_wheelhouse(self) -> None:
+        source = (ROOT / "installers/windows-msix-builder/main.go").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "func installExactWheelhouse(",
+            "func verifyInstalledSOSPackage(",
+            '"--no-config", "--no-cache", "--offline", "--no-python-downloads"',
+            '"pip", "install", "--python", python, "--no-index", "--reinstall", "--no-deps"',
+            "for _, relative := range manifest.Wheelhouse",
+            'strings.HasPrefix(filepath.Base(relative), "sigma_operator_stack-")',
+            'filepath.Join(buildRoot, "payload", "runtime", "Lib", "site-packages", "sos")',
+            'errors.New("installed SOS package differs from the exact wheel")',
+            "return verifyInstalledSOSPackage(packetRoot, buildRoot, manifest)",
+            'fail("SOS_MSIX_WHEELHOUSE_INSTALL_FAILED"',
+        ):
+            self.assertIn(required, source)
+        install_call = (
+            "if err := installExactWheelhouse(packetRoot, buildRoot, environment, "
+            "&packet, bindings); err != nil {"
+        )
+        self.assertLess(
+            source.index(install_call),
+            source.index('prepareTool := filepath.Join(sourceRoot'),
+        )
+
     def test_unsigned_builder_binds_payload_stage_source_and_makeappx(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -439,6 +441,140 @@ func runPython(python string, workingDirectory string, environment []string, tim
 	return nil
 }
 
+func installExactWheelhouse(packetRoot string, buildRoot string, environment []string, manifest *packetManifest, bindings map[string]fileBinding) error {
+	uv := filepath.Join(packetRoot, filepath.FromSlash(manifest.UV))
+	if err := verifyRegularFile(uv, bindings[manifest.UV]); err != nil {
+		return errors.New("bound uv executable is invalid")
+	}
+	python := filepath.Join(buildRoot, "payload", "runtime", "python.exe")
+	pythonInfo, err := os.Lstat(python)
+	if err != nil || !pythonInfo.Mode().IsRegular() {
+		return errors.New("payload Python is invalid")
+	}
+	arguments := []string{
+		"--no-config", "--no-cache", "--offline", "--no-python-downloads",
+		"pip", "install", "--python", python, "--no-index", "--reinstall", "--no-deps",
+	}
+	for _, relative := range manifest.Wheelhouse {
+		wheel := filepath.Join(packetRoot, filepath.FromSlash(relative))
+		if err := verifyRegularFile(wheel, bindings[relative]); err != nil {
+			return errors.New("bound wheelhouse entry is invalid")
+		}
+		arguments = append(arguments, wheel)
+	}
+	command := exec.Command(uv, arguments...)
+	command.Dir = buildRoot
+	command.Env = environment
+	command.Stdin = strings.NewReader("")
+	var stdout, stderr boundedBuffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	timedOut, err := runCommandInJob(command, 10*time.Minute)
+	if timedOut {
+		return errors.New("bounded wheelhouse installation timed out")
+	}
+	if stdout.overflow || stderr.overflow {
+		return errors.New("bounded wheelhouse installation exceeded its output limit")
+	}
+	if err != nil {
+		diagnostic := sha256.Sum256(stderr.data)
+		return fmt.Errorf("bounded wheelhouse installation failed (diagnostic sha256:%x)", diagnostic)
+	}
+	if err := verifyRegularFile(uv, bindings[manifest.UV]); err != nil {
+		return err
+	}
+	return verifyInstalledSOSPackage(packetRoot, buildRoot, manifest)
+}
+
+func verifyInstalledSOSPackage(packetRoot string, buildRoot string, manifest *packetManifest) error {
+	var wheelPath string
+	for _, relative := range manifest.Wheelhouse {
+		if strings.HasPrefix(filepath.Base(relative), "sigma_operator_stack-") {
+			wheelPath = filepath.Join(packetRoot, filepath.FromSlash(relative))
+			break
+		}
+	}
+	if wheelPath == "" {
+		return errors.New("SOS wheel is missing")
+	}
+	wheel, err := zip.OpenReader(wheelPath)
+	if err != nil {
+		return errors.New("SOS wheel cannot be opened")
+	}
+	defer wheel.Close()
+	expected := make(map[string]fileBinding)
+	for _, entry := range wheel.File {
+		if entry.FileInfo().IsDir() || !strings.HasPrefix(entry.Name, "sos/") {
+			continue
+		}
+		relative := strings.TrimPrefix(entry.Name, "sos/")
+		if relative == "" || strings.Contains(relative, "\\") {
+			return errors.New("SOS wheel package path is invalid")
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative)))
+		if clean != relative || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return errors.New("SOS wheel package path is unsafe")
+		}
+		input, err := entry.Open()
+		if err != nil {
+			return errors.New("SOS wheel package entry cannot be opened")
+		}
+		digest := sha256.New()
+		size, copyErr := io.Copy(digest, input)
+		closeErr := input.Close()
+		if copyErr != nil || closeErr != nil || size != int64(entry.UncompressedSize64) {
+			return errors.New("SOS wheel package entry cannot be read")
+		}
+		if _, duplicate := expected[relative]; duplicate {
+			return errors.New("SOS wheel contains a duplicate package entry")
+		}
+		expected[relative] = fileBinding{Path: relative, SHA256: hex.EncodeToString(digest.Sum(nil)), Size: size}
+	}
+	if len(expected) == 0 {
+		return errors.New("SOS wheel package is empty")
+	}
+	installedRoot := filepath.Join(buildRoot, "payload", "runtime", "Lib", "site-packages", "sos")
+	observed := make([]string, 0, len(expected))
+	err = filepath.Walk(installedRoot, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(installedRoot, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if strings.HasSuffix(strings.ToLower(relative), ".pyc") || strings.Contains(relative, "/__pycache__/") {
+			return nil
+		}
+		binding, ok := expected[relative]
+		if !ok {
+			return errors.New("installed SOS package contains an unbound file")
+		}
+		if err := verifyRegularFile(path, binding); err != nil {
+			return errors.New("installed SOS package differs from the exact wheel")
+		}
+		observed = append(observed, relative)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Strings(observed)
+	expectedNames := make([]string, 0, len(expected))
+	for name := range expected {
+		expectedNames = append(expectedNames, name)
+	}
+	sort.Strings(expectedNames)
+	if strings.Join(observed, "\n") != strings.Join(expectedNames, "\n") {
+		return errors.New("installed SOS package inventory differs from the exact wheel")
+	}
+	return nil
+}
+
 func verifyMakeAppx(binding makeAppxBinding) (string, error) {
 	programFiles, err := programFilesX86Path()
 	if err != nil {
@@ -597,6 +733,9 @@ func execute() *buildError {
 	environment, err := closedEnvironment(buildRoot)
 	if err != nil {
 		return fail("SOS_MSIX_TOOL_ENVIRONMENT_INVALID", "The closed build-tool environment could not be created.", err)
+	}
+	if err := installExactWheelhouse(packetRoot, buildRoot, environment, &packet, bindings); err != nil {
+		return fail("SOS_MSIX_WHEELHOUSE_INSTALL_FAILED", "The exact offline wheelhouse could not be installed into the immutable payload runtime.", err)
 	}
 	python := filepath.Join(buildRoot, "tool-runtime", "python.exe")
 	sourceRoot := filepath.Join(buildRoot, "source")
