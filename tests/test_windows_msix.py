@@ -152,7 +152,7 @@ class WindowsMSIXTests(unittest.TestCase):
 
     def test_semantic_comparator_accepts_different_containers_with_exact_trees(self) -> None:
         artifacts = {
-            "bootstrap/uv.exe": b"MZuv",
+            "uv.exe": b"MZuv",
             "runtime/Lib/site-packages/sos/__init__.py": b"version",
             "runtime/large.bin": b"x" * 70000,
             "runtime/python.exe": b"MZpython",
@@ -190,7 +190,7 @@ class WindowsMSIXTests(unittest.TestCase):
 
     def test_semantic_comparator_rejects_content_inventory_and_binding_drift(self) -> None:
         artifacts = {
-            "bootstrap/uv.exe": b"MZuv",
+            "uv.exe": b"MZuv",
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
             "sos-launcher.exe": b"MZlauncher",
@@ -442,11 +442,13 @@ class WindowsMSIXTests(unittest.TestCase):
             "for _, relative := range manifest.Wheelhouse",
             'strings.HasPrefix(filepath.Base(relative), "sigma_operator_stack-")',
             'filepath.Join(buildRoot, "payload", "runtime", "Lib", "site-packages", "sos")',
+            'bindings[manifest.UV], payload, "uv.exe"',
             'errors.New("installed SOS package differs from the exact wheel")',
             "return verifyInstalledSOSPackage(packetRoot, buildRoot, manifest)",
             'fail("SOS_MSIX_WHEELHOUSE_INSTALL_FAILED"',
         ):
             self.assertIn(required, source)
+        self.assertNotIn('payload, "bootstrap/uv.exe"', source)
         install_call = (
             "if err := installExactWheelhouse(packetRoot, buildRoot, environment, "
             "&packet, bindings); err != nil {"
@@ -480,7 +482,7 @@ class WindowsMSIXTests(unittest.TestCase):
                 "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
-                "bootstrap/uv.exe": b"MZuv",
+                "uv.exe": b"MZuv",
                 "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
             }
             for relative, content in required.items():
@@ -633,7 +635,7 @@ class WindowsMSIXTests(unittest.TestCase):
                 "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
-                "bootstrap/uv.exe": b"MZuv",
+                "uv.exe": b"MZuv",
                 "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
             }.items():
                 write_file(payload, relative, content)

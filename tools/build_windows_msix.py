@@ -42,7 +42,7 @@ REQUIRED = {
     "sos-launcher.exe",
     "runtime/python.exe",
     "runtime/Lib/site-packages/sos/__init__.py",
-    "bootstrap/uv.exe",
+    "uv.exe",
     "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl",
 }
 STORE_IDENTITY_KEYS = {

@@ -25,7 +25,7 @@ def write(root: Path, relative: str, value: bytes) -> None:
 
 def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> None:
     payload = {
-        "bootstrap/uv.exe": b"MZ-uv",
+        "uv.exe": b"MZ-uv",
         "runtime/Lib/site-packages/sos/__init__.py": sos_source,
         "runtime/python.exe": b"MZ-python",
         "sos.exe": b"MZ-sos",

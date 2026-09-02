@@ -349,7 +349,7 @@ func assemblePayload(packetRoot string, buildRoot string, manifest *packetManife
 	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.StoreEntrypoint)), bindings[manifest.StoreEntrypoint], payload, "sos-launcher.exe"); err != nil {
 		return err
 	}
-	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.UV)), bindings[manifest.UV], payload, "bootstrap/uv.exe"); err != nil {
+	if err := copyBoundFile(filepath.Join(packetRoot, filepath.FromSlash(manifest.UV)), bindings[manifest.UV], payload, "uv.exe"); err != nil {
 		return err
 	}
 	for _, wheel := range manifest.Wheelhouse {
