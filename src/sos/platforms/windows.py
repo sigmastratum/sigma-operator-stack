@@ -198,7 +198,16 @@ class WindowsPlatformServices:
         if limit < 0:
             raise PlatformServiceError("limit_invalid")
         relative = _validate_relative_path(relative_path)
-        observed, payload = self._native.read_regular_file(self._root_token(root), relative, limit)
+        try:
+            observed, payload = self._native.read_regular_file(
+                self._root_token(root), relative, limit
+            )
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise PlatformServiceError("not_found") from exc
+        except PlatformServiceError:
+            raise
+        except OSError as exc:
+            raise PlatformServiceError("read_failed") from exc
         if observed.kind != "regular":
             raise PlatformServiceError("not_regular")
         if len(payload) > limit or observed.byte_count > limit:

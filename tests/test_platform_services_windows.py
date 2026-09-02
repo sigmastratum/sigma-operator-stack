@@ -491,6 +491,17 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             self.assertNotIn("private payload", rendered)
             self.assertNotIn(r"C:\repo", rendered)
 
+    def test_missing_file_is_projected_as_typed_not_found(self) -> None:
+        def missing_file(
+            root: _NativeRoot, relative_path: str, limit: int
+        ) -> tuple[_NativeObject, bytes]:
+            raise FileNotFoundError(relative_path)
+
+        self.native.read_regular_file = missing_file
+        with self._open() as root:
+            with self.assertRaisesRegex(PlatformServiceError, "not_found"):
+                self.service.read_regular_file_bounded(root, "AGENTS.md", 64)
+
     def test_reparse_placeholder_special_and_hardlink_objects_fail_closed(self) -> None:
         identity = _digest(b"object")
         cases = [
