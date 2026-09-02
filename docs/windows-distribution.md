@@ -111,6 +111,8 @@ digest-bound project preview and only the user confirms that mutation.
 
 The supported public-alpha host is Windows 11 x86_64 with UAC enabled, Defender
 and SmartScreen enabled, and an ordinary Medium Integrity interactive user.
+Windows S mode is not supported or claimed; the packaged application relies on
+its declared full-trust desktop process boundary.
 Machine-wide installation, admin helpers, hidden custom actions, enterprise
 deployment, direct Windows qualification execution, and security bypasses are
 outside this boundary.

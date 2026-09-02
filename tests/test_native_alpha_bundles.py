@@ -187,6 +187,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         report = pe_manifest.verify_pe_manifest(_synthetic_pe([manifest]), manifest)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["manifest_count"], 1)
+        self.assertEqual(report["dpi_awareness"], "PerMonitorV2, PerMonitor")
         with self.assertRaises(pe_manifest.ManifestResourceError):
             pe_manifest.verify_pe_manifest(_synthetic_pe([]), manifest)
         with self.assertRaises(pe_manifest.ManifestResourceError):
@@ -195,6 +196,10 @@ class NativeAlphaBundleTests(unittest.TestCase):
             pe_manifest.verify_pe_manifest(
                 _synthetic_pe([manifest.replace(b"asInvoker", b"highestAvailable")]),
                 manifest,
+            )
+        with self.assertRaises(pe_manifest.ManifestResourceError):
+            pe_manifest.build_manifest_coff(
+                manifest.replace(b"PerMonitorV2, PerMonitor", b"unaware")
             )
 
     def test_native_windows_entrypoint_does_not_depend_on_powershell_policy(self) -> None:

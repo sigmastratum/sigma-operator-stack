@@ -807,6 +807,36 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
         )
 
+    def test_nt_relative_open_has_the_exact_no_follow_create_option(self) -> None:
+        class NtdllRecorder:
+            def __init__(self) -> None:
+                self.options: int | None = None
+
+            def NtCreateFile(self, *arguments):
+                self.options = int(arguments[8])
+                return 0xC0000034
+
+        api = object.__new__(_Kernel32)
+        recorder = NtdllRecorder()
+        api.ntdll = recorder
+        with self.assertRaises(FileNotFoundError):
+            api._nt_open_relative(
+                41,
+                "managed",
+                directory=True,
+                write=False,
+                create="open",
+                share=None,
+            )
+        self.assertEqual(_Kernel32.FILE_OPEN_REPARSE_POINT, 0x00200000)
+        self.assertIsNotNone(recorder.options)
+        self.assertEqual(
+            recorder.options,
+            _Kernel32.FILE_OPEN_REPARSE_POINT
+            | _Kernel32.FILE_SYNCHRONOUS_IO_NONALERT
+            | _Kernel32.FILE_DIRECTORY_FILE,
+        )
+
     def test_launcher_is_bounded_to_codex_and_git_and_content_safe(self) -> None:
         observed = self.service.observe_launcher("codex")
         self.assertEqual(observed.package_version, "0.1.0a2")

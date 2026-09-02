@@ -42,7 +42,7 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "candidate": CANDIDATE,
         "contract": "sos_windows_msix_payload_v1",
         "executable_acquisition_after_install": False,
-        "msix_version": "1.0.3.0",
+        "msix_version": "1.0.4.0",
         "network_after_package_download": False,
         "platform": "windows-x86_64",
         "sos_version": "0.1.0a2",

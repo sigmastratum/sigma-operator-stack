@@ -42,6 +42,13 @@ def build_manifest_coff(manifest: bytes) -> bytes:
         raise ManifestResourceError("manifest execution-level cardinality is invalid")
     if b'level="asInvoker"' not in manifest or b'uiAccess="false"' not in manifest:
         raise ManifestResourceError("manifest execution-level contract is invalid")
+    if (
+        manifest.count(b"<dpiAware ") != 1
+        or manifest.count(b"<dpiAwareness ") != 1
+        or b">true/pm</dpiAware>" not in manifest
+        or b">PerMonitorV2, PerMonitor</dpiAwareness>" not in manifest
+    ):
+        raise ManifestResourceError("manifest DPI-awareness contract is invalid")
 
     # IMAGE_RESOURCE_DIRECTORY hierarchy: type -> id -> language -> data.
     data_offset = 88
@@ -186,6 +193,7 @@ def verify_pe_manifest(pe: bytes, expected: bytes) -> dict[str, object]:
         raise ManifestResourceError("embedded PE manifest differs from canonical bytes")
     return {
         "contract": "sos_windows_pe_manifest_verification_v1",
+        "dpi_awareness": "PerMonitorV2, PerMonitor",
         "manifest_count": 1,
         "manifest_sha256": hashlib.sha256(expected).hexdigest(),
         "requested_execution_level": "asInvoker",

@@ -49,6 +49,10 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertEqual(manifest.count('requestedExecutionLevel level="asInvoker"'), 1)
         self.assertIn('uiAccess="false"', manifest)
+        self.assertEqual(manifest.count("<dpiAware "), 1)
+        self.assertEqual(manifest.count("<dpiAwareness "), 1)
+        self.assertIn(">true/pm</dpiAware>", manifest)
+        self.assertIn(">PerMonitorV2, PerMonitor</dpiAwareness>", manifest)
 
 if __name__ == "__main__":
     unittest.main()

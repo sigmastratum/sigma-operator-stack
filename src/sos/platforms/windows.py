@@ -1044,6 +1044,10 @@ class _Kernel32:
     FILE_CREATE = 2
     FILE_OPEN_IF = 3
     FILE_DIRECTORY_FILE = 0x00000001
+    # NtCreateFile create-option value.  It intentionally shares the numeric
+    # value with Win32 FILE_FLAG_OPEN_REPARSE_POINT, but the names belong to
+    # different API contracts and must remain independently available.
+    FILE_OPEN_REPARSE_POINT = 0x00200000
     FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
     FILE_NON_DIRECTORY_FILE = 0x00000040
     OBJ_CASE_INSENSITIVE = 0x00000040
