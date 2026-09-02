@@ -920,9 +920,14 @@ class _Win32NativeBoundary:
         if capability is None:
             raise PlatformServiceError("staging_recovery_required")
         token = capability._platform_token()
-        if not isinstance(token, _NativeStaging) or token.closed or token.root is not root:
+        if not isinstance(token, _NativeStaging) or token.closed:
             raise PlatformServiceError("staging_recovery_required")
-        if token.staging_name != operation.staging_name or token.target_name != operation.target_name or capability.root_identity_digest != root.identity_digest:
+        if (
+            token.staging_name != operation.staging_name
+            or token.target_name != operation.target_name
+            or capability.root_identity_digest != root.identity_digest
+            or token.root.final_path != root.final_path
+        ):
             raise PlatformServiceError("staging_identity_changed")
         self._assert_staging(capability)
         return capability

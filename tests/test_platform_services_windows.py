@@ -725,6 +725,37 @@ class WindowsPlatformServicesContractTests(unittest.TestCase):
             any(call[:3] == ("open_beneath", 1, staging) for call in kernel.calls)
         )
 
+    def test_staging_capability_accepts_reopened_exact_root_and_rejects_root_drift(self) -> None:
+        staging = ".sigma.init." + "9" * 64
+        root, boundary, capability, _kernel = self._identity_bound_lifecycle(staging)
+        reopened = _NativeRoot(91, root.final_path, root.volume_root, root.identity_digest)
+        operation = TreePublicationOperation(
+            reopened,
+            staging,
+            ".sigma",
+            "extend",
+            capability=capability,
+        )
+        self.assertIs(boundary._require_staging(reopened, operation), capability)
+
+        for drifted in (
+            _NativeRoot(92, root.final_path, root.volume_root, _digest(b"other-root")),
+            _NativeRoot(93, r"C:\repo\other", root.volume_root, root.identity_digest),
+            _NativeRoot(94, r"c:\repo", root.volume_root, root.identity_digest),
+        ):
+            with self.subTest(path=drifted.final_path, identity=drifted.identity_digest):
+                drifted_operation = TreePublicationOperation(
+                    drifted,
+                    staging,
+                    ".sigma",
+                    "extend",
+                    capability=capability,
+                )
+                with self.assertRaisesRegex(
+                    PlatformServiceError, "staging_identity_changed"
+                ):
+                    boundary._require_staging(drifted, drifted_operation)
+
     def test_commit_and_discard_use_retained_handles_after_name_substitution(self) -> None:
         staging = ".sigma.init." + "d" * 64
         root, boundary, capability, kernel = self._identity_bound_lifecycle(staging)
