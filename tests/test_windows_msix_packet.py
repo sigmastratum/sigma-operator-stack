@@ -69,6 +69,10 @@ class WindowsMSIXPacketTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(
+            'var launcherContract = "sos_windows_msix_command_launcher_v1"',
+            launcher,
+        )
+        self.assertNotIn(
             'const launcherContract = "sos_windows_msix_command_launcher_v1"',
             launcher,
         )

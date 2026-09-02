@@ -10,7 +10,9 @@ import (
 
 var candidate = "unbound"
 
-const launcherContract = "sos_windows_msix_command_launcher_v1"
+// Keep the launcher identity in the compiled PE. A const-only comparison is
+// folded away by the Go compiler and cannot bind the packet to this launcher.
+var launcherContract = "sos_windows_msix_command_launcher_v1"
 
 func closedPythonEnvironment(packageRoot string) []string {
 	blocked := map[string]bool{
