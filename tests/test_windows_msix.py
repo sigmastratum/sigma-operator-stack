@@ -438,6 +438,7 @@ class WindowsMSIXTests(unittest.TestCase):
             "func verifyInstalledSOSPackage(",
             '"--no-config", "--no-cache", "--offline", "--no-python-downloads"',
             '"pip", "install", "--python", python, "--no-index", "--reinstall", "--no-deps"',
+            '"--break-system-packages"',
             "for _, relative := range manifest.Wheelhouse",
             'strings.HasPrefix(filepath.Base(relative), "sigma_operator_stack-")',
             'filepath.Join(buildRoot, "payload", "runtime", "Lib", "site-packages", "sos")',

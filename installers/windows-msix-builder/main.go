@@ -454,6 +454,7 @@ func installExactWheelhouse(packetRoot string, buildRoot string, environment []s
 	arguments := []string{
 		"--no-config", "--no-cache", "--offline", "--no-python-downloads",
 		"pip", "install", "--python", python, "--no-index", "--reinstall", "--no-deps",
+		"--break-system-packages",
 	}
 	for _, relative := range manifest.Wheelhouse {
 		wheel := filepath.Join(packetRoot, filepath.FromSlash(relative))
