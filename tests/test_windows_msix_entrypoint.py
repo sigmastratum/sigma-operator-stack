@@ -35,7 +35,6 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
     def test_clipboard_work_never_blocks_the_window_message_loop(self) -> None:
         implementation = (ENTRYPOINT / "main_windows.go").read_text(encoding="utf-8")
         for required in (
-            'runtime.LockOSThread()',
             'copyInProgress.CompareAndSwap(false, true)',
             'go copyInstructionWorker(hwnd)',
             'procPostMessage.Call(hwnd, wmClipboardComplete',
@@ -47,6 +46,13 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
             'defer runtime.UnlockOSThread()',
         ):
             self.assertIn(required, implementation)
+        worker = implementation.split('func copyInstructionWorker', 1)[1].split(
+            'func beginInstructionCopy', 1
+        )[0]
+        self.assertIn('runtime.LockOSThread()', worker)
+        self.assertIn('defer runtime.UnlockOSThread()', worker)
+        run = implementation.split('func run()', 1)[1]
+        self.assertNotIn('runtime.LockOSThread()', run)
         command_case = implementation.split('case buttonCopy:', 1)[1].split(
             'case buttonClose:', 1
         )[0]

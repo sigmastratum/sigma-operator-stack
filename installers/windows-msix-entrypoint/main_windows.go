@@ -146,8 +146,8 @@ func copyInstructionWorker(hwnd uintptr) {
 	// The clipboard is thread-affine. Keep OpenClipboard through CloseClipboard
 	// on one locked worker thread so the window message loop remains responsive.
 	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	copied := copyInstruction(hwnd)
-	runtime.UnlockOSThread()
 	result := uintptr(0)
 	if copied {
 		result = 1
@@ -212,8 +212,6 @@ func createControl(class, text string, style uintptr, x, y, width, height int32,
 }
 
 func run() int {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
 	if candidate == "unbound" {
 		return 2
 	}
