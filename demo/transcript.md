@@ -35,8 +35,9 @@ results, session identifiers and absolute paths were not retained.
    `review-and-qualify` action instead of silently continuing.
 
 The public media is rendered from this transcript, the canonical terminal
-frame and the receipt for product candidate `0f81483`. It is product evidence,
-not a compatibility, release-readiness or broad adoption claim.
+frame and the receipt for product candidate `d234078`. The demonstrated run is
+inside the admitted native-Linux profile; it does not by itself establish
+Windows, macOS, release-readiness or broad adoption.
 
 The video opens immediately with the outcome rather than an idle terminal
 frame. Its English narration is the exact public text in `voiceover.txt`; the

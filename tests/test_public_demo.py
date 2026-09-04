@@ -83,6 +83,13 @@ class PublicDemoTests(unittest.TestCase):
         ):
             self.assertIn(token, transcript)
 
+    def test_media_renderer_requests_bitexact_containers_and_codecs(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        renderer = (root / "demo" / "render_video.py").read_text(encoding="utf-8")
+        self.assertIn('"-fflags", "+bitexact"', renderer)
+        self.assertEqual(renderer.count('"-flags:v", "+bitexact"'), 2)
+        self.assertEqual(renderer.count('"-flags:a", "+bitexact"'), 2)
+
     def test_fresh_codex_verifier_requires_exact_read_only_mcp_recovery(self) -> None:
         module = self.load_verifier()
         events = [

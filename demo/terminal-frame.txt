@@ -1,4 +1,4 @@
-SOS 0.1.0a1 - exact synthetic recovery demo
+SOS 0.1.0a2 · candidate d234078 · exact synthetic recovery demo
 
 $ sos compatibility . --json
 owner_required  SOS_PRIMARY_AUTHORITY_REQUIRED

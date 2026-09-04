@@ -19,6 +19,9 @@ release promise or a compatibility claim.
   filesystem adapters;
 - native macOS Apple Silicon install/update/remove lifecycle evidence;
 - an exact Windows 11 x86_64 MSIX accepted into Microsoft Store certification.
+- a 60-second narrated fresh-agent demonstration bound to the exact `0.1.0a2`
+  product candidate and its reproducible wheel inside the admitted native-Linux
+  profile.
 
 ## Next
 
@@ -32,8 +35,6 @@ release promise or a compatibility claim.
   package bytes so a docs-only correction does not require package
   recertification;
 - perform the URL-only agent-first drill from the exact public candidate;
-- rebuild the 60–120 second fresh-agent demonstration and bind it to that sole
-  candidate;
 - freeze the wheel, platform packages, SBOM, checksums, provenance,
   documentation, release index, and demo as one exact release packet;
 - publish `release/current.json` only after every declared platform artifact

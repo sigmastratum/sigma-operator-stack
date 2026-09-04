@@ -17,9 +17,9 @@ next action.
 The [60-second narrated demo](demo/recovery-demo.mp4) and its
 [text transcript](demo/transcript.md) show initialization, separate
 qualification, fresh-session recovery, a source change, and the stale refusal.
-This earlier Linux proof demonstrates the product loop; it is not evidence for
-the current cross-platform release candidate and will be rebuilt before
-package publication.
+It is bound to exact product candidate `d234078` and demonstrates the product
+loop inside the admitted native-Linux profile. Platform-specific support
+remains bounded by the matrix below.
 
 ## Install with Codex
 

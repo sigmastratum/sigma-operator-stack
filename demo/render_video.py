@@ -93,11 +93,12 @@ def main() -> int:
         common = [
             "-f", "concat", "-safe", "0", "-i", str(concat),
             "-i", str(VOICEOVER_AUDIO), "-map", "0:v:0", "-map", "1:a:0",
+            "-fflags", "+bitexact",
             "-map_metadata", "-1", "-metadata", "title=", "-metadata", "comment=",
             "-vf", "fps=25,format=yuv420p",
         ]
-        run(ffmpeg, [*common, "-c:v", "libx264", "-preset", "veryslow", "-crf", "31", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(ROOT / "recovery-demo.mp4")])
-        run(ffmpeg, [*common, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "39", "-threads", "1", "-c:a", "libopus", "-b:a", "64k", str(ROOT / "recovery-demo.webm")])
+        run(ffmpeg, [*common, "-c:v", "libx264", "-preset", "veryslow", "-crf", "31", "-flags:v", "+bitexact", "-c:a", "aac", "-b:a", "96k", "-flags:a", "+bitexact", "-movflags", "+faststart", str(ROOT / "recovery-demo.mp4")])
+        run(ffmpeg, [*common, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "39", "-threads", "1", "-flags:v", "+bitexact", "-c:a", "libopus", "-b:a", "64k", "-flags:a", "+bitexact", str(ROOT / "recovery-demo.webm")])
 
     media = {}
     for name, container, codec in (
