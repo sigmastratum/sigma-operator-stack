@@ -90,6 +90,15 @@ class PublicDemoTests(unittest.TestCase):
         self.assertEqual(renderer.count('"-flags:v", "+bitexact"'), 2)
         self.assertEqual(renderer.count('"-flags:a", "+bitexact"'), 2)
 
+    def test_terminal_frame_displays_abbreviated_candidate_and_wheel_sha(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        manifest = json.loads(
+            (root / "demo" / "media-manifest.json").read_text(encoding="utf-8")
+        )
+        frame = (root / "demo" / "terminal-frame.txt").read_text(encoding="utf-8")
+        self.assertIn(f"candidate {manifest['candidate'][:7]}", frame)
+        self.assertIn(f"wheel {manifest['wheel_sha256'][:8]}", frame)
+
     def test_fresh_codex_verifier_requires_exact_read_only_mcp_recovery(self) -> None:
         module = self.load_verifier()
         events = [

@@ -39,6 +39,10 @@ frame and the receipt for product candidate `d234078`. The demonstrated run is
 inside the admitted native-Linux profile; it does not by itself establish
 Windows, macOS, release-readiness or broad adoption.
 
+The first frame displays abbreviated product-candidate and wheel identities:
+`d234078` and `04c4722e`. Their complete bindings are recorded in
+`media-manifest.json`.
+
 The video opens immediately with the outcome rather than an idle terminal
 frame. Its English narration is the exact public text in `voiceover.txt`; the
 generated audio and TTS provider count are separately digest-bound in the
