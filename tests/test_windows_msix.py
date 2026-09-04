@@ -68,7 +68,7 @@ def payload_record(artifacts: dict[str, bytes]) -> bytes:
                 "candidate": CANDIDATE,
                 "contract": "sos_windows_msix_payload_v1",
                 "executable_acquisition_after_install": False,
-                "msix_version": "1.0.4.0",
+                "msix_version": "1.0.5.0",
                 "network_after_package_download": False,
                 "platform": "windows-x86_64",
                 "sos_version": "0.1.0a2",
@@ -701,7 +701,7 @@ class WindowsMSIXTests(unittest.TestCase):
             )
             self.assertEqual(first_content, second_content)
             self.assertEqual(first_content["status"], "passed")
-            self.assertTrue((output / "SigmaOperatorStack_1.0.4.0_x64.msix").is_file())
+            self.assertTrue((output / "SigmaOperatorStack_1.0.5.0_x64.msix").is_file())
 
 
 if __name__ == "__main__":

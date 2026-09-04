@@ -32,6 +32,28 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden.lower(), (model + implementation).lower())
 
+    def test_clipboard_work_never_blocks_the_window_message_loop(self) -> None:
+        implementation = (ENTRYPOINT / "main_windows.go").read_text(encoding="utf-8")
+        for required in (
+            'runtime.LockOSThread()',
+            'copyInProgress.CompareAndSwap(false, true)',
+            'go copyInstructionWorker(hwnd)',
+            'procPostMessage.Call(hwnd, wmClipboardComplete',
+            'case wmClipboardComplete:',
+            'procEnableWindow.Call(copyButtonHandle, 0)',
+            'procEnableWindow.Call(copyButtonHandle, 1)',
+            'clipboardOpenAttempts',
+            '= 5',
+            'defer runtime.UnlockOSThread()',
+        ):
+            self.assertIn(required, implementation)
+        command_case = implementation.split('case buttonCopy:', 1)[1].split(
+            'case buttonClose:', 1
+        )[0]
+        self.assertIn('beginInstructionCopy(hwnd)', command_case)
+        self.assertNotIn('copyInstruction(hwnd)', command_case)
+        self.assertNotIn('MessageBoxW', implementation)
+
     def test_builder_requires_gui_subsystem_candidate_and_asinvoker(self) -> None:
         source = (ROOT / "tools/build_windows_msix_entrypoint.py").read_text(
             encoding="utf-8"

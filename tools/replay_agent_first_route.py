@@ -166,7 +166,7 @@ def _route_inputs(
             "package_family_name": "SSRG.SigmaOperatorStack_2358e20nvr064",
             "package_identity_name": "SSRG.SigmaOperatorStack",
             "package_publisher": "CN=D713C275-467D-4A03-9D24-0DC02F1C3031",
-            "package_version": "1.0.4.0",
+            "package_version": "1.0.5.0",
         }
     index_bytes = _canonical(selected_index)
     if mutation != "index_digest_mismatch":

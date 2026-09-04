@@ -1,31 +1,37 @@
 package main
 
 import (
+	"runtime"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
 const (
-	className     = "SOSStoreEntrypointWindow"
-	buttonCopy    = 1001
-	buttonClose   = 1002
-	cfUnicodeText = 13
-	gmMoveable    = 0x0002
-	wmCommand     = 0x0111
-	wmClose       = 0x0010
-	wmDestroy     = 0x0002
-	wsCaption     = 0x00C00000
-	wsSysMenu     = 0x00080000
-	wsMinimizeBox = 0x00020000
-	wsVisible     = 0x10000000
-	wsChild       = 0x40000000
-	bsPushButton  = 0x00000000
-	ssLeft        = 0x00000000
-	colorWindow   = 5
-	cwUseDefault  = 0x80000000
-	swShow        = 5
-	idcArrow      = 32512
-	idError       = -1
+	className               = "SOSStoreEntrypointWindow"
+	buttonCopy              = 1001
+	buttonClose             = 1002
+	cfUnicodeText           = 13
+	gmMoveable              = 0x0002
+	wmCommand               = 0x0111
+	wmClose                 = 0x0010
+	wmDestroy               = 0x0002
+	wmClipboardComplete     = 0x8001
+	clipboardOpenAttempts   = 5
+	clipboardOpenRetryDelay = 20 * time.Millisecond
+	wsCaption               = 0x00C00000
+	wsSysMenu               = 0x00080000
+	wsMinimizeBox           = 0x00020000
+	wsVisible               = 0x10000000
+	wsChild                 = 0x40000000
+	bsPushButton            = 0x00000000
+	ssLeft                  = 0x00000000
+	colorWindow             = 5
+	cwUseDefault            = 0x80000000
+	swShow                  = 5
+	idcArrow                = 32512
+	idError                 = -1
 )
 
 type point struct{ x, y int32 }
@@ -69,7 +75,9 @@ var (
 	procShowWindow       = user32.NewProc("ShowWindow")
 	procUpdateWindow     = user32.NewProc("UpdateWindow")
 	procLoadCursor       = user32.NewProc("LoadCursorW")
-	procMessageBox       = user32.NewProc("MessageBoxW")
+	procPostMessage      = user32.NewProc("PostMessageW")
+	procEnableWindow     = user32.NewProc("EnableWindow")
+	procSetWindowText    = user32.NewProc("SetWindowTextW")
 	procOpenClipboard    = user32.NewProc("OpenClipboard")
 	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
 	procSetClipboardData = user32.NewProc("SetClipboardData")
@@ -79,15 +87,29 @@ var (
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
+	copyButtonHandle     uintptr
+	copyInProgress       atomic.Bool
 )
 
 func utf16(value string) *uint16 { return syscall.StringToUTF16Ptr(value) }
 
 func lowWord(value uintptr) uint16 { return uint16(value & 0xffff) }
 
+func openClipboardBounded(hwnd uintptr) bool {
+	for attempt := 0; attempt < clipboardOpenAttempts; attempt++ {
+		opened, _, _ := procOpenClipboard.Call(hwnd)
+		if opened != 0 {
+			return true
+		}
+		if attempt+1 < clipboardOpenAttempts {
+			time.Sleep(clipboardOpenRetryDelay)
+		}
+	}
+	return false
+}
+
 func copyInstruction(hwnd uintptr) bool {
-	opened, _, _ := procOpenClipboard.Call(hwnd)
-	if opened == 0 {
+	if !openClipboardBounded(hwnd) {
 		return false
 	}
 	defer procCloseClipboard.Call()
@@ -116,19 +138,56 @@ func copyInstruction(hwnd uintptr) bool {
 	return true
 }
 
+func setControlText(hwnd uintptr, value string) {
+	procSetWindowText.Call(hwnd, uintptr(unsafe.Pointer(utf16(value))))
+}
+
+func copyInstructionWorker(hwnd uintptr) {
+	// The clipboard is thread-affine. Keep OpenClipboard through CloseClipboard
+	// on one locked worker thread so the window message loop remains responsive.
+	runtime.LockOSThread()
+	copied := copyInstruction(hwnd)
+	runtime.UnlockOSThread()
+	result := uintptr(0)
+	if copied {
+		result = 1
+	}
+	procPostMessage.Call(hwnd, wmClipboardComplete, result, 0)
+}
+
+func beginInstructionCopy(hwnd uintptr) {
+	if !copyInProgress.CompareAndSwap(false, true) {
+		return
+	}
+	procEnableWindow.Call(copyButtonHandle, 0)
+	setControlText(copyButtonHandle, "Copying...")
+	go copyInstructionWorker(hwnd)
+}
+
+func finishInstructionCopy(copied bool) {
+	if copied {
+		setControlText(copyButtonHandle, "Copied")
+	} else {
+		setControlText(copyButtonHandle, "Try copy again")
+	}
+	procEnableWindow.Call(copyButtonHandle, 1)
+	copyInProgress.Store(false)
+}
+
 func windowProcedure(hwnd uintptr, event uint32, wParam, lParam uintptr) uintptr {
 	switch event {
 	case wmCommand:
 		switch lowWord(wParam) {
 		case buttonCopy:
-			if !copyInstruction(hwnd) {
-				procMessageBox.Call(hwnd, uintptr(unsafe.Pointer(utf16("The instruction could not be copied."))), uintptr(unsafe.Pointer(utf16(productName))), 0x10)
-			}
+			beginInstructionCopy(hwnd)
 			return 0
 		case buttonClose:
 			procDestroyWindow.Call(hwnd)
 			return 0
 		}
+	case wmClipboardComplete:
+		finishInstructionCopy(wParam == 1)
+		return 0
 	case wmClose:
 		procDestroyWindow.Call(hwnd)
 		return 0
@@ -153,6 +212,8 @@ func createControl(class, text string, style uintptr, x, y, width, height int32,
 }
 
 func run() int {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if candidate == "unbound" {
 		return 2
 	}
@@ -181,11 +242,12 @@ func run() int {
 	if hwnd == 0 {
 		return 2
 	}
+	copyButtonHandle = createControl("BUTTON", "Copy instruction", wsChild|wsVisible|bsPushButton, 280, 215, 150, 34, hwnd, buttonCopy, instance)
 	if createControl("STATIC", statusText, wsChild|wsVisible|ssLeft, 28, 24, 540, 28, hwnd, 0, instance) == 0 ||
 		createControl("STATIC", versionText, wsChild|wsVisible|ssLeft, 28, 58, 540, 22, hwnd, 0, instance) == 0 ||
 		createControl("STATIC", "Open your project in Codex and ask:", wsChild|wsVisible|ssLeft, 28, 100, 540, 22, hwnd, 0, instance) == 0 ||
 		createControl("STATIC", instruction, wsChild|wsVisible|ssLeft, 28, 128, 540, 52, hwnd, 0, instance) == 0 ||
-		createControl("BUTTON", "Copy instruction", wsChild|wsVisible|bsPushButton, 280, 215, 150, 34, hwnd, buttonCopy, instance) == 0 ||
+		copyButtonHandle == 0 ||
 		createControl("BUTTON", "Close", wsChild|wsVisible|bsPushButton, 445, 215, 120, 34, hwnd, buttonClose, instance) == 0 {
 		procDestroyWindow.Call(hwnd)
 		return 2
