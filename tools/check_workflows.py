@@ -89,7 +89,8 @@ def inspect(root: Path) -> dict[str, object]:
         "test -f release/sos-release-index-v1.json",
         "Install exact pointer verification dependencies",
         "check_public_release_pointer.py --repository . --require-public",
-        "compare_wheel_payloads.py --rebuilt",
+        'cp tools/compare_wheel_payloads.py "$RUNNER_TEMP/routing/"',
+        'python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt',
         'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
         "Check out immutable release candidate",
     ):

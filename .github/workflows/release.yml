@@ -55,6 +55,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/routing"
           cp release/current.json release/sos-release-index-v1.json "$RUNNER_TEMP/routing/"
           cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"
+          cp tools/compare_wheel_payloads.py "$RUNNER_TEMP/routing/"
           test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
           mkdir -p "$RUNNER_TEMP/existing"
           gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
@@ -92,7 +93,7 @@ jobs:
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/a"
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/b"
           cmp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/b/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
-          python tools/compare_wheel_payloads.py --rebuilt "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --staged "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
+          python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --staged "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
           cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"
       - name: Fresh installed-wheel qualification and SBOM
         run: |

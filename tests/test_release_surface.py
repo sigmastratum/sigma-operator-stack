@@ -181,7 +181,13 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
     def test_release_qualifies_the_exact_staged_wheel(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertIn("compare_wheel_payloads.py --rebuilt", workflow)
+        preserve = workflow.index('cp tools/compare_wheel_payloads.py "$RUNNER_TEMP/routing/"')
+        checkout = workflow.index("Check out immutable release candidate")
+        execute = workflow.index(
+            'python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt'
+        )
+        self.assertLess(preserve, checkout)
+        self.assertLess(checkout, execute)
         self.assertIn(
             'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
