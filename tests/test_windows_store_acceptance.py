@@ -64,16 +64,16 @@ class WindowsStoreAcceptanceTests(unittest.TestCase):
 
     def test_exact_manifest_and_assets_satisfy_store_acceptance_contract(self) -> None:
         self.assertEqual(store_acceptance_errors(self.manifest), [])
-        self.assertIn('Version="1.0.5.0"', self.manifest)
+        self.assertIn('Version="1.0.6.0"', self.manifest)
         self.assertIn('<Resource Language="en-US" />', self.manifest)
         self.assertIn('<PublisherDisplayName>SSRG</PublisherDisplayName>', self.manifest)
 
     def test_nonzero_revision_is_rejected(self) -> None:
-        changed = self.manifest.replace('Version="1.0.5.0"', 'Version="1.0.5.1"')
+        changed = self.manifest.replace('Version="1.0.6.0"', 'Version="1.0.6.1"')
         self.assertIn("store_version_invalid", store_acceptance_errors(changed))
 
     def test_zero_major_is_rejected(self) -> None:
-        changed = self.manifest.replace('Version="1.0.5.0"', 'Version="0.1.0.0"')
+        changed = self.manifest.replace('Version="1.0.6.0"', 'Version="0.1.0.0"')
         self.assertIn("store_version_invalid", store_acceptance_errors(changed))
 
     def test_missing_or_unknown_language_is_rejected(self) -> None:
