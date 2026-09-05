@@ -463,6 +463,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
         for launcher in (shell, powershell):
             self.assertIn("removal cannot acquire a runtime from the network", launcher)
             self.assertIn("--no-python-downloads", launcher)
+        self.assertIn("--primary-authority EXACT_ID", shell)
+        self.assertIn('set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"', shell)
+        self.assertIn('if [ "$MODE" != "install" ]', shell)
 
     def test_checked_uv_must_match_manifest_digest_and_exact_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

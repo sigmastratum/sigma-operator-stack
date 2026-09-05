@@ -3,6 +3,14 @@ set -eu
 
 MODE="${1:-install}"
 PROJECT="${2:-$(pwd)}"
+PRIMARY_AUTHORITY=""
+if [ "$#" -gt 2 ]; then
+  if [ "$#" -ne 4 ] || [ "$3" != "--primary-authority" ] || [ -z "$4" ]; then
+    echo "SOS_ALPHA_ARGUMENTS_INVALID: use Install-SOS.command install PROJECT [--primary-authority EXACT_ID]." >&2
+    exit 2
+  fi
+  PRIMARY_AUTHORITY="$4"
+fi
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 UV_SOURCE="$SCRIPT_DIR/uv"
 case "$(uname -s)" in
@@ -59,8 +67,18 @@ if [ "$PYTHON_STATUS" -ne 0 ]; then
   PYTHON=$("$UV" python find --no-config --managed-python --no-python-downloads 3.12.14)
 fi
 
+set -- "$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE"
+if [ -n "$PRIMARY_AUTHORITY" ]; then
+  if [ "$MODE" != "install" ]; then
+    echo "SOS_ALPHA_ARGUMENTS_INVALID: --primary-authority is valid only with install." >&2
+    exit 2
+  fi
+  set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"
+fi
+set -- "$@" "$PROJECT"
+
 set +e
-"$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE" "$PROJECT"
+"$@"
 STATUS=$?
 set -e
 

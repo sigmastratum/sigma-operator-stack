@@ -67,6 +67,12 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertEqual(pointer["index_sha256"], hashlib.sha256(index_bytes).hexdigest())
         for field in ("candidate", "tree", "version", "release_tag"):
             self.assertEqual(pointer[field], index[field])
+        linux = next(item for item in index["platforms"] if item["system"] == "linux")
+        self.assertEqual(linux["launcher"], "Install-SOS.command")
+        self.assertEqual(
+            linux["invocation"],
+            ["Install-SOS.command", "install", "{project}"],
+        )
 
     def test_invalid_or_ambiguous_release_surfaces_fail_schema(self) -> None:
         schema = json.loads(
