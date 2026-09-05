@@ -51,6 +51,18 @@ def inspect(root: Path) -> dict[str, object]:
     release_artifacts = ci.get("jobs", {}).get("release-artifacts", {})
     if release_artifacts.get("needs") != "source":
         failures.append("SOS_CI_RELEASE_DEPENDENCY_INVALID")
+    for job_name in ("source", "release-artifacts"):
+        job = ci.get("jobs", {}).get(job_name, {})
+        checkout_steps = [
+            step
+            for step in job.get("steps", [])
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+        if len(checkout_steps) != 1 or checkout_steps[0].get("with", {}).get(
+            "fetch-depth"
+        ) != "0":
+            failures.append(f"SOS_CI_FULL_HISTORY_CHECKOUT_MISSING:{job_name}")
 
     triggers = release.get("on", {})
     if set(triggers) != {"workflow_dispatch"}:

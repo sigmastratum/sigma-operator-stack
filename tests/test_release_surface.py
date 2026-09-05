@@ -202,6 +202,25 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("--draft=false --prerelease --latest=false", workflow)
 
+    def test_ci_fetches_full_history_for_public_pointer_and_history_scan(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        specification = importlib.util.spec_from_file_location(
+            "sos_workflow_contract", root / "tools" / "check_workflows.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        result = module.inspect(root)
+        self.assertFalse(
+            [
+                failure
+                for failure in result["failures"]
+                if failure.startswith("SOS_CI_FULL_HISTORY_CHECKOUT_MISSING")
+            ],
+            result,
+        )
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(
