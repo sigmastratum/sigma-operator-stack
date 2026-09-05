@@ -154,7 +154,7 @@ def _route_inputs(
     elif mutation == "index_digest_mismatch":
         selected_pointer["index_sha256"] = "0" * 64
     elif mutation == "index_binding_mismatch":
-        selected_index["version"] = "0.1.0a3"
+        selected_index["version"] = "9.9.9a9"
     elif mutation == "platform_ambiguous":
         selected_index["platforms"].append(deepcopy(selected_index["platforms"][0]))
     elif mutation == "sandbox_handoff":
