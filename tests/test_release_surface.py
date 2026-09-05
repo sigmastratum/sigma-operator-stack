@@ -197,6 +197,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             workflow,
         )
 
+    def test_alpha_release_is_published_as_nonlatest_prerelease(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("--draft=false --prerelease --latest=false", workflow)
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(

@@ -128,6 +128,18 @@ def inspect(root: Path) -> dict[str, object]:
     draft_run = str(draft_step.get("run", ""))
     if 'cmp "$RUNNER_TEMP/existing/SHA256SUMS"' in draft_run:
         failures.append("SOS_RELEASE_COMBINED_CHECKSUM_MUST_NOT_MATCH_SOURCE_ONLY")
+    publish_release_step = next(
+        (
+            step
+            for step in publish.get("steps", [])
+            if isinstance(step, dict)
+            and step.get("name") == "Publish verified GitHub Release"
+        ),
+        {},
+    )
+    publish_release_run = str(publish_release_step.get("run", ""))
+    if "--draft=false --prerelease --latest=false" not in publish_release_run:
+        failures.append("SOS_RELEASE_ALPHA_METADATA_INVALID")
     dispatch_inputs = triggers.get("workflow_dispatch", {}).get("inputs", {})
     pypi_input = dispatch_inputs.get("publish_pypi", {})
     steps = publish.get("steps", [])
