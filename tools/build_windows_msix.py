@@ -30,8 +30,8 @@ def _load_source_verifier():
 
 source_verifier = _load_source_verifier()
 
-VERSION = "0.1.0a2"
-MSIX_VERSION = "1.0.6.0"
+VERSION = "0.1.0a3"
+MSIX_VERSION = "1.0.7.0"
 LOGO_ASSETS = {
     "Square44x44Logo.png": (44, 44),
     "Square50x50Logo.png": (50, 50),
@@ -43,7 +43,7 @@ REQUIRED = {
     "runtime/python.exe",
     "runtime/Lib/site-packages/sos/__init__.py",
     "uv.exe",
-    "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl",
+    "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl",
 }
 STORE_IDENTITY_KEYS = {
     "contract",
@@ -194,7 +194,7 @@ def validate_launch_contract(manifest: str) -> None:
         raise SystemExit("MSIX Start-menu entrypoint binding is invalid")
     if aliases != ["sos.exe"] or alias_extensions != ["sos.exe"]:
         raise SystemExit("MSIX command alias binding is invalid")
-    if manifest.count('Version="1.0.6.0"') != 1:
+    if manifest.count('Version="1.0.7.0"') != 1:
         raise SystemExit("MSIX transport version binding is invalid")
 
 

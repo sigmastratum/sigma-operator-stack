@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 
-VERSION = "0.1.0a2"
+VERSION = "0.1.0a3"
 _MAX_OUTPUT_BYTES = 1024 * 1024
 _EXPECTED_STATUS_REASONS = [
     "SOS_WORKSPACE_CURRENT",

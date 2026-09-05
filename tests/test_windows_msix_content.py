@@ -30,7 +30,7 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "runtime/python.exe": b"MZ-python",
         "sos.exe": b"MZ-sos",
         "sos-launcher.exe": b"MZ-launcher",
-        "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PK-wheel",
+        "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"PK-wheel",
     }
     for relative, value in payload.items():
         write(root, relative, value)
@@ -42,10 +42,10 @@ def package_fixture(root: Path, sos_source: bytes = b"VERSION = 'alpha'\n") -> N
         "candidate": CANDIDATE,
         "contract": "sos_windows_msix_payload_v1",
         "executable_acquisition_after_install": False,
-        "msix_version": "1.0.6.0",
+        "msix_version": "1.0.7.0",
         "network_after_package_download": False,
         "platform": "windows-x86_64",
-        "sos_version": "0.1.0a2",
+        "sos_version": "0.1.0a3",
         "tree": TREE,
     }
     generated = {

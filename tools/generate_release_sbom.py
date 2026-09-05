@@ -67,7 +67,7 @@ def generate(
         )
         document = json.loads(raw_output.read_text(encoding="utf-8"))
     root = document.get("metadata", {}).get("component", {})
-    if root.get("name") != "sigma-operator-stack" or root.get("version") != "0.1.0a2":
+    if root.get("name") != "sigma-operator-stack" or root.get("version") != "0.1.0a3":
         raise RuntimeError("CycloneDX root component does not match the installed alpha")
     properties = [
         item

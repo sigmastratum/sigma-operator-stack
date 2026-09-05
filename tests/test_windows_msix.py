@@ -68,10 +68,10 @@ def payload_record(artifacts: dict[str, bytes]) -> bytes:
                 "candidate": CANDIDATE,
                 "contract": "sos_windows_msix_payload_v1",
                 "executable_acquisition_after_install": False,
-                "msix_version": "1.0.6.0",
+                "msix_version": "1.0.7.0",
                 "network_after_package_download": False,
                 "platform": "windows-x86_64",
-                "sos_version": "0.1.0a2",
+                "sos_version": "0.1.0a3",
                 "tree": TREE,
             },
             sort_keys=True,
@@ -158,7 +158,7 @@ class WindowsMSIXTests(unittest.TestCase):
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
             "sos-launcher.exe": b"MZlauncher",
-            "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"wheel",
+            "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"wheel",
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -194,7 +194,7 @@ class WindowsMSIXTests(unittest.TestCase):
             "runtime/python.exe": b"MZpython",
             "sos.exe": b"MZsos",
             "sos-launcher.exe": b"MZlauncher",
-            "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"wheel",
+            "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"wheel",
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -481,9 +481,9 @@ class WindowsMSIXTests(unittest.TestCase):
                 "sos.exe": b"MZlauncher",
                 "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
-                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
+                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a3"\n',
                 "uv.exe": b"MZuv",
-                "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
+                "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"PKwheel",
             }
             for relative, content in required.items():
                 write_file(payload, relative, content)
@@ -634,9 +634,9 @@ class WindowsMSIXTests(unittest.TestCase):
                 "sos.exe": b"MZlauncher",
                 "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
-                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
+                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a3"\n',
                 "uv.exe": b"MZuv",
-                "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
+                "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"PKwheel",
             }.items():
                 write_file(payload, relative, content)
             makeappx = root / "MakeAppx.exe"
@@ -701,7 +701,7 @@ class WindowsMSIXTests(unittest.TestCase):
             )
             self.assertEqual(first_content, second_content)
             self.assertEqual(first_content["status"], "passed")
-            self.assertTrue((output / "SigmaOperatorStack_1.0.6.0_x64.msix").is_file())
+            self.assertTrue((output / "SigmaOperatorStack_1.0.7.0_x64.msix").is_file())
 
 
 if __name__ == "__main__":

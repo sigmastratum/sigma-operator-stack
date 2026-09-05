@@ -103,7 +103,7 @@ def inspect(root: Path) -> dict[str, object]:
         "check_public_release_pointer.py --repository . --require-public",
         'cp tools/compare_wheel_payloads.py "$RUNNER_TEMP/routing/"',
         'python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt',
-        'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+        'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
         "Check out immutable release candidate",
     ):
         if required not in release_source:
@@ -119,8 +119,8 @@ def inspect(root: Path) -> dict[str, object]:
         'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
         'cd "$RUNNER_TEMP/existing"',
         "sha256sum -c SHA256SUMS",
-        "SOS-Linux-0.1.0a2.zip",
-        "SOS-macOS-0.1.0a2.tar.gz",
+        "SOS-Linux-0.1.0a3.zip",
+        "SOS-macOS-0.1.0a3.tar.gz",
         "--json isDraft",
     ):
         if required not in release_source:

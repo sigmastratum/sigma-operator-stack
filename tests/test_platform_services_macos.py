@@ -312,7 +312,7 @@ class MacOSPlatformServicesTests(unittest.TestCase):
                     )
                 )
                 self.assertEqual(committed.operation, "create_tree")
-                fake_distribution = mock.Mock(version="0.1.0a2")
+                fake_distribution = mock.Mock(version="0.1.0a3")
                 fake_distribution.read_text.return_value = None
                 with ExitStack() as stack:
                     stack.enter_context(
@@ -334,7 +334,7 @@ class MacOSPlatformServicesTests(unittest.TestCase):
                         )
                     )
                     launcher = service.observe_launcher("codex")
-                self.assertEqual(launcher.package_version, "0.1.0a2")
+                self.assertEqual(launcher.package_version, "0.1.0a3")
                 self.assertFalse(launcher.safe_projection()["absolute_paths_serialized"])
 
     def test_case_and_unicode_lookup_collisions_fail_before_mutation(self) -> None:

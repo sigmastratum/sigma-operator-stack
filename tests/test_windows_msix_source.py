@@ -246,9 +246,9 @@ class WindowsMSIXSourceTests(unittest.TestCase):
                 "sos.exe": b"MZlauncher",
                 "sos-launcher.exe": b"MZstorelauncher",
                 "runtime/python.exe": b"MZpython",
-                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a2"\n',
+                "runtime/Lib/site-packages/sos/__init__.py": b'version="0.1.0a3"\n',
                 "uv.exe": b"MZuv",
-                "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
+                "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"PKwheel",
             }
             for relative, content in required.items():
                 destination = payload / relative
@@ -343,7 +343,7 @@ class WindowsMSIXSourceTests(unittest.TestCase):
                 "runtime/python.exe": b"MZpython",
                 "runtime/Lib/site-packages/sos/__init__.py": b'version="alpha"\n',
                 "uv.exe": b"MZuv",
-                "wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl": b"PKwheel",
+                "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl": b"PKwheel",
             }.items():
                 destination = payload / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)

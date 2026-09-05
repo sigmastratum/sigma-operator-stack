@@ -51,7 +51,7 @@ class ReproducibleReleaseWheelTests(unittest.TestCase):
                 self.assertFalse(result["network_allowed"])
                 with zipfile.ZipFile(wheel) as archive:
                     self.assertIn(
-                        "sigma_operator_stack-0.1.0a2.dist-info/licenses/LICENSE",
+                        "sigma_operator_stack-0.1.0a3.dist-info/licenses/LICENSE",
                         archive.namelist(),
                     )
                 results.append(result)

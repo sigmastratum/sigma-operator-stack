@@ -3,7 +3,21 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
-## Unreleased candidate: 0.1.0a2
+## 0.1.0a3 — 2026-09-05
+
+### Fixed
+
+- Separate owner-requested SOS maintenance from project qualification gates.
+  A fresh Codex session may now perform an exact-release same-version update,
+  public smoke test, and removal preview when qualification is `not_verified`;
+  project work, qualification claims, and external actions remain fail closed.
+
+### Changed
+
+- Linux and macOS release artifacts, release metadata, and the next Windows
+  Store payload are rebound to product version `0.1.0a3`.
+
+## 0.1.0a2 — 2026-09-04
 
 ### Added
 
@@ -42,6 +56,6 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Package replacement preserves immutable receipt history but fails stale until
   setup rebind, agent restart, and separate per-project qualification complete.
 
-The release date and immutable tag link are added only after the exact
-candidate is tagged. Checked-in routing metadata alone does not claim that the
-tag or its assets are already public.
+[0.1.0a2](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a2)
+is the immutable predecessor release. Release links for `0.1.0a3` are added
+only after its exact candidate is tagged and its assets are public.

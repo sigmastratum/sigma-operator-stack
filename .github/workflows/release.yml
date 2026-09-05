@@ -56,9 +56,9 @@ jobs:
           cp release/current.json release/sos-release-index-v1.json "$RUNNER_TEMP/routing/"
           cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"
           cp tools/compare_wheel_payloads.py "$RUNNER_TEMP/routing/"
-          test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
+          test "$(gh release view v0.1.0a3 --json isDraft --jq .isDraft)" = "true"
           mkdir -p "$RUNNER_TEMP/existing"
-          gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
+          gh release download v0.1.0a3 --dir "$RUNNER_TEMP/existing"
           python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
           cd "$RUNNER_TEMP/existing"
           sha256sum -c SHA256SUMS
@@ -72,9 +72,9 @@ jobs:
       - name: Verify immutable tag and clean exact source
         run: |
           test "$(git rev-parse HEAD)" = "${{ inputs.candidate }}"
-          test "$(git rev-parse v0.1.0a2^{commit})" = "${{ inputs.candidate }}"
+          test "$(git rev-parse v0.1.0a3^{commit})" = "${{ inputs.candidate }}"
           test -z "$(git status --short)"
-          grep -qx 'version = "0.1.0a2"' pyproject.toml
+          grep -qx 'version = "0.1.0a3"' pyproject.toml
       - name: Install exact release tooling
         run: |
           python -m pip install --disable-pip-version-check -r requirements/release.txt
@@ -92,40 +92,40 @@ jobs:
           mkdir -p "$RUNNER_TEMP/a" "$RUNNER_TEMP/b" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/publish"
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/a"
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/b"
-          cmp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/b/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
-          python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --staged "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
-          cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"
+          cmp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/b/sigma_operator_stack-0.1.0a3-py3-none-any.whl"
+          python "$RUNNER_TEMP/routing/compare_wheel_payloads.py" --rebuilt "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a3-py3-none-any.whl" --staged "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a3-py3-none-any.whl"
+          cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/publish/"
       - name: Fresh installed-wheel qualification and SBOM
         run: |
           python -m venv "$RUNNER_TEMP/wheel-env"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --disable-pip-version-check -r requirements/release.txt
-          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl"
           cd "$RUNNER_TEMP"
           SOS_REQUIRE_INSTALLED=1 "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/tools/run_zero_skip_tests.py" --tests "$GITHUB_WORKSPACE/tests"
           cd "$GITHUB_WORKSPACE"
           python -m venv "$RUNNER_TEMP/sbom-env"
           "$RUNNER_TEMP/sbom-env/bin/python" -m pip install --disable-pip-version-check -r requirements/runtime.txt
-          "$RUNNER_TEMP/sbom-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
-          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --environment-python "$RUNNER_TEMP/sbom-env/bin/python" --output "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json"
-          python tools/check_dependency_licenses.py --repository . --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json"
-          python tools/finalize_release_bundle.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json" --output-dir "$RUNNER_TEMP/dist"
-          cp "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/dist/"
+          "$RUNNER_TEMP/sbom-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl"
+          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl" --environment-python "$RUNNER_TEMP/sbom-env/bin/python" --output "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a3.cdx.json"
+          python tools/check_dependency_licenses.py --repository . --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a3.cdx.json"
+          python tools/finalize_release_bundle.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl" --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a3.cdx.json" --output-dir "$RUNNER_TEMP/dist"
+          cp "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/dist/"
           cp "$RUNNER_TEMP/routing/current.json" "$RUNNER_TEMP/routing/sos-release-index-v1.json" "$RUNNER_TEMP/dist/"
           cd "$RUNNER_TEMP/dist"
           sha256sum -c SHA256SUMS
           PYTHONPATH="$GITHUB_WORKSPACE/tools" python -c "from pathlib import Path; from start_sos_alpha import verify_bundle; verify_bundle(Path('$RUNNER_TEMP/dist'), system='Source')"
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
-          subject-path: ${{ runner.temp }}/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl
+          subject-path: ${{ runner.temp }}/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl
       - name: Verify complete pre-staged draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
-          for name in SOS-Linux-0.1.0a2.zip SOS-macOS-0.1.0a2.tar.gz; do
+          for name in SOS-Linux-0.1.0a3.zip SOS-macOS-0.1.0a3.tar.gz; do
             test -f "$RUNNER_TEMP/existing/$name"
           done
-          for name in START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a2.cdx.json sigma_operator_stack-0.1.0a2-py3-none-any.whl start-sos-alpha; do
+          for name in START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a3.cdx.json sigma_operator_stack-0.1.0a3-py3-none-any.whl start-sos-alpha; do
             cmp "$RUNNER_TEMP/existing/$name" "$RUNNER_TEMP/dist/$name"
           done
           cd "$RUNNER_TEMP/existing"
@@ -134,7 +134,7 @@ jobs:
         id: pypi
         if: inputs.publish_pypi == true
         run: |
-          python tools/check_pypi_state.py --project sigma-operator-stack --version 0.1.0a2 --filename sigma_operator_stack-0.1.0a2-py3-none-any.whl --sha256 "$(sha256sum "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" | cut -d' ' -f1)" --github-output "$GITHUB_OUTPUT"
+          python tools/check_pypi_state.py --project sigma-operator-stack --version 0.1.0a3 --filename sigma_operator_stack-0.1.0a3-py3-none-any.whl --sha256 "$(sha256sum "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a3-py3-none-any.whl" | cut -d' ' -f1)" --github-output "$GITHUB_OUTPUT"
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
         if: inputs.publish_pypi == true && steps.pypi.outputs.publish_required == 'true'
         with:
@@ -143,4 +143,4 @@ jobs:
       - name: Publish verified GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit v0.1.0a2 --draft=false --prerelease --latest=false
+        run: gh release edit v0.1.0a3 --draft=false --prerelease --latest=false

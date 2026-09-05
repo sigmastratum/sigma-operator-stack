@@ -15,7 +15,7 @@ __all__ = [
     "inspect_repository",
     "recover_workspace",
 ]
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 _LAZY_EXPORTS = {
     "RepositoryInspection": ("sos.repository", "RepositoryInspection"),

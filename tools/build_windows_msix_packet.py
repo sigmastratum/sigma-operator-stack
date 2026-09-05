@@ -53,7 +53,7 @@ WHEELS = (
     "jsonschema_specifications-2025.9.1-py3-none-any.whl",
     "referencing-0.37.0-py3-none-any.whl",
     "rpds_py-2026.6.3-cp312-cp312-win_amd64.whl",
-    "sigma_operator_stack-0.1.0a2-py3-none-any.whl",
+    "sigma_operator_stack-0.1.0a3-py3-none-any.whl",
     "typing_extensions-4.16.0-py3-none-any.whl",
 )
 MAX_FILE_SIZE = 1024 * 1024 * 1024

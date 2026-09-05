@@ -803,7 +803,7 @@ func execute() *buildError {
 		return fail("SOS_MSIX_BUILD_ROOT_CLEANUP_FAILED", "The verified package was produced, but the marker-owned build root could not be removed safely.", err)
 	}
 	fmt.Println("SOS MSIX build passed.")
-	fmt.Println("Package: output/SigmaOperatorStack_1.0.6.0_x64.msix")
+	fmt.Println("Package: output/SigmaOperatorStack_1.0.7.0_x64.msix")
 	return nil
 }
 

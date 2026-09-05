@@ -43,7 +43,7 @@ var (
 		"wheelhouse/jsonschema_specifications-2025.9.1-py3-none-any.whl",
 		"wheelhouse/referencing-0.37.0-py3-none-any.whl",
 		"wheelhouse/rpds_py-2026.6.3-cp312-cp312-win_amd64.whl",
-		"wheelhouse/sigma_operator_stack-0.1.0a2-py3-none-any.whl",
+		"wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl",
 		"wheelhouse/typing_extensions-4.16.0-py3-none-any.whl",
 	}
 	windowsReservedNames = func() map[string]bool {

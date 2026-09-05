@@ -98,7 +98,7 @@ class PlatformAdmissionTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             exit_code = entrypoint.main(["--version"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue().strip(), "sos 0.1.0a2")
+        self.assertEqual(output.getvalue().strip(), "sos 0.1.0a3")
 
     def test_native_linux_filesystem_is_admitted(self) -> None:
         mountinfo = "36 25 0:32 / / rw,relatime - ext4 /dev/root rw\n"

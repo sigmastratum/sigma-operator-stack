@@ -126,7 +126,7 @@ class DependencyLicenseTests(unittest.TestCase):
                     "bom-ref": "root",
                     "licenses": [{"license": {"id": "Apache-2.0"}}],
                     "name": "sigma-operator-stack",
-                    "version": "0.1.0a2",
+                    "version": "0.1.0a3",
                 }
             },
         }
@@ -139,7 +139,7 @@ class DependencyLicenseTests(unittest.TestCase):
                 {
                     "sigma-operator-stack": {
                         "license_expression": "Apache-2.0",
-                        "version": "0.1.0a2",
+                        "version": "0.1.0a3",
                     }
                 },
                 failures,

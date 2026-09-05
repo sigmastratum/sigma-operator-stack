@@ -17,7 +17,7 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
         implementation = (ENTRYPOINT / "main_windows.go").read_text(encoding="utf-8")
         self.assertIn('productName = "Sigma Operator Stack"', model)
         self.assertIn('statusText  = "SOS is installed"', model)
-        self.assertIn('versionText = "Version 0.1.0a2"', model)
+        self.assertIn('versionText = "Version 0.1.0a3"', model)
         self.assertIn(INSTRUCTION, model)
         self.assertIn('createControl("BUTTON", "Copy instruction"', implementation)
         self.assertIn('createControl("BUTTON", "Close"', implementation)

@@ -166,8 +166,8 @@ def read_payload_manifest(
         record["contract"] != PAYLOAD_CONTRACT
         or record["candidate"] != candidate
         or record["tree"] != tree
-        or record["sos_version"] != "0.1.0a2"
-        or record["msix_version"] != "1.0.6.0"
+        or record["sos_version"] != "0.1.0a3"
+        or record["msix_version"] != "1.0.7.0"
         or record["platform"] != "windows-x86_64"
         or record["network_after_package_download"] is not False
         or record["executable_acquisition_after_install"] is not False
