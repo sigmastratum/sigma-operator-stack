@@ -139,6 +139,15 @@ def inspect(root: Path) -> dict[str, object]:
         if all_workflows.count(required) < 2:
             failures.append("SOS_DEPENDENCY_AUDIT_GATE_INCOMPLETE")
             break
+    for required in (
+        "tools/check_dependency_licenses.py --repository .",
+        "requirements/runtime.txt",
+        "--environment-python",
+        "--sbom",
+    ):
+        if all_workflows.count(required) < 2:
+            failures.append("SOS_DEPENDENCY_LICENSE_GATE_INCOMPLETE")
+            break
     return {
         "contract": "sos_workflow_contract_v1",
         "failures": sorted(set(failures)),

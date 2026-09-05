@@ -70,6 +70,7 @@ jobs:
         run: |
           PYTHONPATH=src python tools/run_zero_skip_tests.py
           python tools/check_public_release.py --repository .
+          python tools/check_dependency_licenses.py --repository .
           python tools/check_workflows.py --repository .
           mkdir -p "$RUNNER_TEMP/a" "$RUNNER_TEMP/b" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/publish"
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/a"
@@ -84,7 +85,11 @@ jobs:
           cd "$RUNNER_TEMP"
           SOS_REQUIRE_INSTALLED=1 "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/tools/run_zero_skip_tests.py" --tests "$GITHUB_WORKSPACE/tests"
           cd "$GITHUB_WORKSPACE"
-          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --output "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json"
+          python -m venv "$RUNNER_TEMP/sbom-env"
+          "$RUNNER_TEMP/sbom-env/bin/python" -m pip install --disable-pip-version-check -r requirements/runtime.txt
+          "$RUNNER_TEMP/sbom-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
+          "$RUNNER_TEMP/wheel-env/bin/python" tools/generate_release_sbom.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --environment-python "$RUNNER_TEMP/sbom-env/bin/python" --output "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json"
+          python tools/check_dependency_licenses.py --repository . --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json"
           python tools/finalize_release_bundle.py --candidate "${{ inputs.candidate }}" --wheel "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --sbom "$RUNNER_TEMP/dist/sigma-operator-stack-0.1.0a2.cdx.json" --output-dir "$RUNNER_TEMP/dist"
           cp "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/dist/"
           cp "$RUNNER_TEMP/routing/current.json" "$RUNNER_TEMP/routing/sos-release-index-v1.json" "$RUNNER_TEMP/dist/"

@@ -1,10 +1,14 @@
 # Security Policy
 
-## Supported release
+## Supported versions
 
-Security fixes are provided for the latest published `0.1.x` alpha only. The
-project is pre-1.0: compatibility may change, but security boundaries must fail
-closed rather than silently weaken.
+No installable public release exists yet. Security reports are accepted for
+the current public source preview, but that preview is not a supported binary
+release.
+
+After the first public release, security fixes will be provided for the latest
+published `0.1.x` alpha only. The project is pre-1.0: compatibility may change,
+but security boundaries must fail closed rather than silently weaken.
 
 ## Reporting a vulnerability
 

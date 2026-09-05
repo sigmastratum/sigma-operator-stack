@@ -17,13 +17,15 @@ next action.
 The [60-second narrated demo](demo/recovery-demo.mp4) and its
 [text transcript](demo/transcript.md) show initialization, separate
 qualification, fresh-session recovery, a source change, and the stale refusal.
-It is bound to exact product candidate `d234078` and demonstrates the product
-loop inside the admitted native-Linux profile. Platform-specific support
-remains bounded by the matrix below.
+It is verified predecessor evidence bound to product candidate `d234078` and
+demonstrates the product principle inside the admitted native-Linux profile.
+It is not evidence for the current source HEAD, URL-only installation, or
+release readiness. Platform-specific support remains bounded by the matrix
+below.
 
 ## Install with Codex
 
-No public release pointer is published yet. When one exists, give this
+Currently, no public release pointer is published yet. When one exists, give this
 repository URL to Codex and say:
 
 > **Install SOS in my current project. Show me the preview before changing it.**

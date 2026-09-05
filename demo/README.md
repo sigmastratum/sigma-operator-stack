@@ -16,6 +16,13 @@ generated from `terminal-frame.txt`. The local lifecycle is offline. Exactly
 one explicitly approved provider-backed Codex step is projected through
 `fresh-codex-receipt.json`; preparation failures are not release evidence.
 
+These checked-in assets are verified predecessor evidence for the product
+principle. They are not bound to the current source HEAD and do not prove the
+public URL-only installation route or release readiness. Their existing media,
+transcript, receipt and manifest bytes remain an internally consistent
+historical packet; launch media must be rebuilt from the final release
+candidate.
+
 The final cut opens with the product outcome in the first frame, then moves to
 the exact terminal sequence after two seconds. `voiceover.txt` is the canonical
 public narration. One separately approved TTS call generates `voiceover.mp3`;

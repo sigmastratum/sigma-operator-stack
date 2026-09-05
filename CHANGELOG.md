@@ -3,7 +3,7 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
-## [0.1.0a2] - Unreleased
+## Unreleased candidate: 0.1.0a2
 
 ### Added
 
@@ -41,4 +41,5 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Package replacement preserves immutable receipt history but fails stale until
   setup rebind, agent restart, and separate per-project qualification complete.
 
-[0.1.0a2]: https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a2
+The release date and immutable tag link are added only after the exact
+candidate is tagged. This source preview does not claim that tag exists.

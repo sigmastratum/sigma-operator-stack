@@ -1,0 +1,153 @@
+{
+  "contract": "sos_dependency_license_inventory_v1",
+  "external_platform_components": [
+    {
+      "license_expression": "PSF-2.0",
+      "name": "cpython",
+      "release_gate": "platform_artifact_attribution",
+      "version": "3.12.14"
+    },
+    {
+      "license_expression": "Apache-2.0 OR MIT",
+      "name": "uv",
+      "release_gate": "platform_artifact_attribution",
+      "version": "0.12.6"
+    }
+  ],
+  "notice": {
+    "root_notice_required": false,
+    "rationale": "No dependency NOTICE is redistributed by the source preview or SOS wheel; native artifact attribution is a later release gate."
+  },
+  "product": {
+    "license_expression": "Apache-2.0",
+    "license_files": [
+      "LICENSE"
+    ],
+    "name": "sigma-operator-stack",
+    "version": "0.1.0a2"
+  },
+  "release_tools": [
+    {
+      "license_expression": "Apache-2.0",
+      "license_files": [
+        "LICENSE",
+        "NOTICE"
+      ],
+      "name": "cyclonedx-bom",
+      "requirement_file": "requirements/release.txt",
+      "version": "7.3.1"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "COPYING"
+      ],
+      "name": "jsonschema",
+      "requirement_file": "requirements/release.txt",
+      "version": "4.25.1"
+    },
+    {
+      "license_expression": "Apache-2.0 OR BSD-2-Clause",
+      "license_files": [],
+      "name": "packaging",
+      "requirement_file": "requirements/release.txt",
+      "version": "24.2"
+    },
+    {
+      "license_expression": "MIT-CMU",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "Pillow",
+      "requirement_file": "requirements/release.txt",
+      "version": "12.3.0"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "PyYAML",
+      "requirement_file": "requirements/release.txt",
+      "version": "6.0.2"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "setuptools",
+      "requirement_file": "requirements/release.txt",
+      "version": "84.0.0"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "LICENSE.txt"
+      ],
+      "name": "wheel",
+      "requirement_file": "requirements/release.txt",
+      "version": "0.48.0"
+    },
+    {
+      "license_expression": "Apache-2.0",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "pip-audit",
+      "requirement_file": "requirements/audit.txt",
+      "version": "2.10.1"
+    }
+  ],
+  "runtime": [
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "attrs",
+      "version": "26.1.0"
+    },
+    {
+      "declared_requirement": "jsonschema>=4.10,<5",
+      "license_expression": "MIT",
+      "license_files": [
+        "COPYING"
+      ],
+      "name": "jsonschema",
+      "version": "4.26.0"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "COPYING"
+      ],
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "COPYING"
+      ],
+      "name": "referencing",
+      "version": "0.37.0"
+    },
+    {
+      "license_expression": "MIT",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "rpds-py",
+      "version": "2026.6.3"
+    },
+    {
+      "license_expression": "PSF-2.0",
+      "license_files": [
+        "LICENSE"
+      ],
+      "name": "typing-extensions",
+      "version": "4.16.0"
+    }
+  ]
+}

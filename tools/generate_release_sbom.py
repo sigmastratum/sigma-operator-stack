@@ -15,16 +15,27 @@ import uuid
 from pathlib import Path
 
 
-def generate(candidate: str, wheel: Path, pyproject: Path) -> dict[str, object]:
+def generate(
+    candidate: str,
+    wheel: Path,
+    pyproject: Path,
+    environment_python: Path | None = None,
+) -> dict[str, object]:
     if not re.fullmatch(r"[0-9a-f]{40}", candidate):
         raise ValueError("candidate must be an exact SHA-1 commit")
     wheel_bytes = wheel.resolve(strict=True).read_bytes()
     wheel_digest = hashlib.sha256(wheel_bytes).hexdigest()
     pyproject = pyproject.resolve(strict=True)
-    python = Path(sys.executable).absolute()
-    executable = python.with_name("cyclonedx-py")
+    tool_python = Path(sys.executable).absolute()
+    executable = tool_python.with_name("cyclonedx-py")
     if not executable.is_file():
         raise RuntimeError("cyclonedx-py is not installed in the exact wheel environment")
+    # Preserve the virtual-environment entry point.  Resolving this symlink
+    # selects the base interpreter and makes CycloneDX observe the host
+    # environment instead of the exact installed-wheel environment.
+    python = (environment_python or tool_python).absolute()
+    if not python.is_file():
+        raise RuntimeError("installed-wheel environment Python is unavailable")
     with tempfile.TemporaryDirectory(prefix="sos-cyclonedx-") as temporary:
         temporary_root = Path(temporary)
         raw_output = temporary_root / "raw.json"
@@ -83,9 +94,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
+    parser.add_argument("--environment-python", type=Path)
     arguments = parser.parse_args(argv)
     try:
-        document = generate(arguments.candidate, arguments.wheel, arguments.pyproject)
+        document = generate(
+            arguments.candidate,
+            arguments.wheel,
+            arguments.pyproject,
+            arguments.environment_python,
+        )
         encoded = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         output = arguments.output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)

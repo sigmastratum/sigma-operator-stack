@@ -22,21 +22,49 @@ the [public repository opening runbook](repository-opening-runbook.md).
 - Wiki: disabled
 - Private vulnerability reporting: required before public visibility
 
-## Publication gates
+## Gate 1: source preview opening
 
-- exact current candidate and clean source lineage;
-- green public CI for the published commit;
-- reproducible wheel, SBOM, provenance, and public-content scan;
-- current support matrix and regenerated demo media;
-- update/downgrade documentation and qualification claims bound to the exact
-  release candidate;
-- AF102 exact route projection and AF103 offline replay pass for the final
-  pointer/index bindings;
-- one Store-signed AF104 receipt passes all seven ordered steps with no manual
-  command, founder hint, admin session, PATH repair or security bypass;
-- no known release-blocking existing-stack or platform ambiguity;
-- separate approval for remote metadata, visibility, tag, release, and package
-  publication.
+- exact reviewed candidate, clean linear source lineage and full-history scan;
+- README states that no installable public release or release pointer exists;
+- `release/current.json`, public tag, GitHub Release and package publication
+  remain absent;
+- public metadata, community files, dependency/license inventory and links pass;
+- private vulnerability reporting is enabled before visibility changes;
+- push, remote settings and visibility each retain a separate approval.
+
+The predecessor demo may illustrate the product principle at this gate only
+when it is explicitly described as neither current-HEAD nor URL-only release
+evidence.
+
+## Gate 2: Linux/macOS installable release
+
+- one exact release candidate binds the wheel, Linux/macOS archives, SBOM,
+  checksums, provenance, dependency licenses and release index;
+- Linux lifecycle and admitted qualification pass on the exact artifact;
+- macOS lifecycle passes on a signed and notarized artifact while executable
+  qualification remains explicitly unsupported;
+- AF102/AF103 and fresh URL-only Codex drills pass for each claimed platform;
+- launch media is regenerated from that exact candidate;
+- tag, GitHub Release, PyPI and release-pointer activation remain separately
+  approved operations.
+
+## Gate 3: Windows Store admission
+
+- Microsoft certification is read back for the exact Store transport artifact;
+- Store-signed clean-user install, Start Menu, CLI alias, update and removal pass;
+- AF104 proves the sandbox-to-interactive-user handoff without admin, PATH
+  repair, dependency preparation or security bypass;
+- Windows is absent from the release index and support claim until those gates
+  and an independent review pass.
+
+## Gate 4: promotion
+
+- the exact public source and artifacts pass anonymous readback and public CI;
+- a 24--48 hour quiet observation window has no integrity or support blocker;
+- the alpha-scope issue is created from the checked-in draft and pinned;
+- D+2, D+7, D+14 and D+30 observations follow the public measurement contract;
+- promotion and adoption claims require separate approval and attributable
+  evidence.
 
 ## Source-publication boundary
 
@@ -69,3 +97,8 @@ Checked-in media becomes exact-candidate evidence only when its manifest binds
 the sole candidate, wheel, transcript, terminal frame and receipt-verified
 fresh-agent step. A documentation or candidate change invalidates the old
 media binding even when the commands remain visually identical.
+
+Dependency and license admission is defined in
+[dependency licenses](dependency-licenses.md). Launch observation ownership and
+the distinction between evidence and reach metrics are defined in
+[launch operations](launch-operations.md).

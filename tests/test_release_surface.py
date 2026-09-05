@@ -182,6 +182,41 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             " ".join(readme.split()),
         )
 
+    def test_source_opening_truth_and_launch_measurement_are_explicit(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        security = " ".join((root / "SECURITY.md").read_text(encoding="utf-8").split())
+        changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+        checklist = (root / "docs/publication-checklist.md").read_text(encoding="utf-8")
+        launch = (root / "docs/launch-operations.md").read_text(encoding="utf-8")
+        readme = " ".join((root / "README.md").read_text(encoding="utf-8").split())
+        demo = " ".join((root / "demo/README.md").read_text(encoding="utf-8").split())
+
+        self.assertIn("No installable public release exists yet", security)
+        self.assertIn("After the first public release", security)
+        self.assertNotIn("Security fixes are provided for the latest published", security)
+        self.assertIn("Unreleased candidate: 0.1.0a2", changelog)
+        self.assertNotIn("releases/tag/v0.1.0a2", changelog)
+        for heading in (
+            "## Gate 1: source preview opening",
+            "## Gate 2: Linux/macOS installable release",
+            "## Gate 3: Windows Store admission",
+            "## Gate 4: promotion",
+        ):
+            self.assertIn(heading, checklist)
+        for required in ("@sigmastratum", "D+2", "D+7", "D+14", "D+30", "not adoption"):
+            self.assertIn(required, launch)
+        for required in ("verified predecessor evidence", "not evidence for the current source HEAD"):
+            self.assertIn(required, readme)
+        self.assertIn("verified predecessor evidence for the product principle", demo)
+
+    def test_alpha_scope_issue_is_local_public_safe_draft(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs/alpha-scope-issue.md").read_text(encoding="utf-8")
+        self.assertIn("Community alpha scope and known limitations — 0.1.0a2", text)
+        self.assertIn("Do not create it remotely", text)
+        self.assertIn("Stars, clones, views, forks and", text)
+        self.assertIn("not adoption", text)
+
     def test_issue_forms_are_typed_and_public_safe(self) -> None:
         root = Path(__file__).resolve().parents[1]
         forms = sorted((root / ".github" / "ISSUE_TEMPLATE").glob("*.yml"))

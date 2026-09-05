@@ -62,6 +62,9 @@ REQUIRED_FILES = {
     "docs/alpha-feedback.md",
     "docs/agent-first-offline-replay.md",
     "docs/agent-first-public-drill.md",
+    "docs/alpha-scope-issue.md",
+    "docs/dependency-licenses.md",
+    "docs/launch-operations.md",
     "docs/publication-checklist.md",
     "docs/repository-opening-runbook.md",
     "docs/roadmap.md",
@@ -71,6 +74,8 @@ REQUIRED_FILES = {
     "examples/fresh-agent-recovery/expected.json",
     "pyproject.toml",
     "requirements/audit.txt",
+    "requirements/dependency-licenses.json",
+    "requirements/runtime.txt",
     "src/sos/schemas/sos-agent-first-route-projection-v1.schema.json",
     "src/sos/schemas/sos-agent-first-offline-replay-v1.schema.json",
     "src/sos/schemas/sos-agent-first-drill-receipt-v1.schema.json",
@@ -82,6 +87,7 @@ REQUIRED_FILES = {
     "tools/check_agent_first_drill.py",
     "tools/resolve_agent_first_route.py",
     "tools/check_public_release_pointer.py",
+    "tools/check_dependency_licenses.py",
 }
 REQUIRED_ISSUE_FORMS = {
     "bounded-feature-proposal.yml",
