@@ -94,6 +94,12 @@ are different commits and approvals. The current routing packet binds Linux
 and macOS only; Windows remains absent until Store certification and lifecycle
 evidence pass.
 
+Before the gated publication workflow runs, a separately approved operator
+creates the immutable tag and a draft GitHub Release containing the complete
+reviewed asset set. The workflow refuses an absent or non-draft release and
+checks both native archives against the release index before publication. It
+does not construct an incomplete release from generic wheel assets.
+
 The submitted Store MSIX was the correct reviewed artifact when uploaded. It
 is now classified as predecessor evidence because the later source successor
 adds schemas that are included in the release wheel. This is candidate drift,

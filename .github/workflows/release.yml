@@ -99,19 +99,20 @@ jobs:
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: ${{ runner.temp }}/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl
-      - name: Create or verify draft GitHub Release
+      - name: Verify complete pre-staged draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0a2 >/dev/null 2>&1; then
-            mkdir -p "$RUNNER_TEMP/existing"
-            gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
-            for name in SHA256SUMS START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a2.cdx.json sigma_operator_stack-0.1.0a2-py3-none-any.whl start-sos-alpha; do
-              cmp "$RUNNER_TEMP/existing/$name" "$RUNNER_TEMP/dist/$name"
-            done
-          else
-            gh release create v0.1.0a2 "$RUNNER_TEMP/dist/"* --draft --verify-tag --title 'Sigma Operator Stack 0.1.0a2' --notes-file CHANGELOG.md
-          fi
+          test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
+          mkdir -p "$RUNNER_TEMP/existing"
+          gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
+          python tools/check_native_release_assets.py --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
+          for name in SOS-Linux-0.1.0a2.zip SOS-macOS-0.1.0a2.tar.gz; do
+            test -f "$RUNNER_TEMP/existing/$name"
+          done
+          for name in SHA256SUMS START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a2.cdx.json sigma_operator_stack-0.1.0a2-py3-none-any.whl start-sos-alpha; do
+            cmp "$RUNNER_TEMP/existing/$name" "$RUNNER_TEMP/dist/$name"
+          done
       - name: Check immutable PyPI state
         id: pypi
         run: |

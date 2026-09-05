@@ -90,6 +90,19 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_workflows.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_release_workflow_requires_complete_pre_staged_native_assets(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        for required in (
+            "Verify complete pre-staged draft GitHub Release",
+            "check_native_release_assets.py --index",
+            "SOS-Linux-0.1.0a2.zip",
+            "SOS-macOS-0.1.0a2.tar.gz",
+            "--json isDraft",
+        ):
+            self.assertIn(required, workflow)
+        self.assertNotIn("gh release create", workflow)
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(

@@ -12,8 +12,9 @@ approval and an exact candidate/tree recorded immediately before execution.
 - the candidate is a linear descendant of the public product-only root;
 - the current-tree and full-history public scans pass;
 - independent review binds the exact candidate and tree;
-- `release/current.json`, public tags and GitHub Releases are absent;
-- README says source preview and makes no installable-release claim;
+- for the completed source-opening transaction, `release/current.json`, public
+  tags and GitHub Releases were absent;
+- the later routing successor does not retroactively broaden that transaction;
 - the private-vulnerability-reporting API is available for immediate activation
   after visibility changes; GitHub exposes that feature only for public
   repositories, so the exact rollback operation is ready in advance.
@@ -34,8 +35,8 @@ approval and an exact candidate/tree recorded immediately before execution.
    or readback fails, return the repository to private. Do not create a tag,
    Release, package, Store publication or release pointer in this transaction.
 5. Read the anonymous public repository back, verify the default candidate,
-   tree, README, license and absence of `release/current.json`, then observe
-   public Actions for that exact SHA.
+   tree, README and license, then observe public Actions for that exact SHA.
+   Record pointer presence or absence exactly as it existed at source opening.
 
 ## Stop conditions
 
@@ -62,7 +63,7 @@ The following are deliberately outside the source-opening transaction:
 - immutable release tag;
 - GitHub Release and release assets;
 - PyPI publication;
-- `release/current.json` activation;
+- `release/current.json` activation and its complete native asset set;
 - Microsoft Store publication;
 - macOS signed/notarized distribution;
 - promotion or adoption claims.

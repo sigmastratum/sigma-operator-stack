@@ -88,6 +88,7 @@ REQUIRED_FILES = {
     "tools/check_agent_first_drill.py",
     "tools/resolve_agent_first_route.py",
     "tools/check_public_release_pointer.py",
+    "tools/check_native_release_assets.py",
     "tools/check_dependency_licenses.py",
 }
 REQUIRED_ISSUE_FORMS = {

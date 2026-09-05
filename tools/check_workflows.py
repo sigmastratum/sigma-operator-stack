@@ -82,6 +82,18 @@ def inspect(root: Path) -> dict[str, object]:
         if required not in release_source:
             failures.append("SOS_RELEASE_POINTER_GATE_INCOMPLETE")
             break
+    for required in (
+        "Verify complete pre-staged draft GitHub Release",
+        "check_native_release_assets.py --index",
+        "SOS-Linux-0.1.0a2.zip",
+        "SOS-macOS-0.1.0a2.tar.gz",
+        "--json isDraft",
+    ):
+        if required not in release_source:
+            failures.append("SOS_RELEASE_NATIVE_ASSET_GATE_INCOMPLETE")
+            break
+    if "gh release create" in release_source:
+        failures.append("SOS_RELEASE_UNVERIFIED_ASSET_CREATION_FORBIDDEN")
     pointer_checker = (root / "tools/check_public_release_pointer.py").read_text(
         encoding="utf-8"
     )
