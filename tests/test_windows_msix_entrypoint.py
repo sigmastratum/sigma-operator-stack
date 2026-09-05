@@ -35,10 +35,16 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
     def test_clipboard_work_never_blocks_the_window_message_loop(self) -> None:
         implementation = (ENTRYPOINT / "main_windows.go").read_text(encoding="utf-8")
         for required in (
+            'runtime.LockOSThread()',
             'copyInProgress.CompareAndSwap(false, true)',
-            'go copyInstructionWorker(hwnd)',
+            'go copyInstructionWorker(hwnd, request)',
             'procPostMessage.Call(hwnd, wmClipboardComplete',
             'case wmClipboardComplete:',
+            'case wmTimer:',
+            'clipboardTimeoutMillis  = 1500',
+            'procSetTimer.Call(hwnd, clipboardTimerID',
+            'procKillTimer.Call(hwnd, clipboardTimerID)',
+            '"Copy unavailable"',
             'procEnableWindow.Call(copyButtonHandle, 0)',
             'procEnableWindow.Call(copyButtonHandle, 1)',
             'clipboardOpenAttempts',
@@ -52,7 +58,9 @@ class WindowsMSIXEntrypointTests(unittest.TestCase):
         self.assertIn('runtime.LockOSThread()', worker)
         self.assertIn('defer runtime.UnlockOSThread()', worker)
         run = implementation.split('func run()', 1)[1]
-        self.assertNotIn('runtime.LockOSThread()', run)
+        self.assertIn('runtime.LockOSThread()', run)
+        self.assertIn('procGetCurrentThread.Call()', run)
+        self.assertIn('procGetWindowThread.Call(hwnd, 0)', run)
         command_case = implementation.split('case buttonCopy:', 1)[1].split(
             'case buttonClose:', 1
         )[0]

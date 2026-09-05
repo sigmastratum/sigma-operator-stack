@@ -15,9 +15,12 @@ const (
 	cfUnicodeText           = 13
 	gmMoveable              = 0x0002
 	wmCommand               = 0x0111
+	wmTimer                 = 0x0113
 	wmClose                 = 0x0010
 	wmDestroy               = 0x0002
 	wmClipboardComplete     = 0x8001
+	clipboardTimerID        = 1
+	clipboardTimeoutMillis  = 1500
 	clipboardOpenAttempts   = 5
 	clipboardOpenRetryDelay = 20 * time.Millisecond
 	wsCaption               = 0x00C00000
@@ -76,8 +79,11 @@ var (
 	procUpdateWindow     = user32.NewProc("UpdateWindow")
 	procLoadCursor       = user32.NewProc("LoadCursorW")
 	procPostMessage      = user32.NewProc("PostMessageW")
+	procSetTimer         = user32.NewProc("SetTimer")
+	procKillTimer        = user32.NewProc("KillTimer")
 	procEnableWindow     = user32.NewProc("EnableWindow")
 	procSetWindowText    = user32.NewProc("SetWindowTextW")
+	procGetWindowThread  = user32.NewProc("GetWindowThreadProcessId")
 	procOpenClipboard    = user32.NewProc("OpenClipboard")
 	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
 	procSetClipboardData = user32.NewProc("SetClipboardData")
@@ -87,8 +93,12 @@ var (
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
+	procGetCurrentThread = kernel32.NewProc("GetCurrentThreadId")
 	copyButtonHandle     uintptr
 	copyInProgress       atomic.Bool
+	copyRequestSequence  atomic.Uint32
+	activeCopyRequest    uint32
+	uiThreadID           uint32
 )
 
 func utf16(value string) *uint16 { return syscall.StringToUTF16Ptr(value) }
@@ -142,7 +152,7 @@ func setControlText(hwnd uintptr, value string) {
 	procSetWindowText.Call(hwnd, uintptr(unsafe.Pointer(utf16(value))))
 }
 
-func copyInstructionWorker(hwnd uintptr) {
+func copyInstructionWorker(hwnd uintptr, request uint32) {
 	// The clipboard is thread-affine. Keep OpenClipboard through CloseClipboard
 	// on one locked worker thread so the window message loop remains responsive.
 	runtime.LockOSThread()
@@ -152,19 +162,37 @@ func copyInstructionWorker(hwnd uintptr) {
 	if copied {
 		result = 1
 	}
-	procPostMessage.Call(hwnd, wmClipboardComplete, result, 0)
+	procPostMessage.Call(hwnd, wmClipboardComplete, result, uintptr(request))
 }
 
 func beginInstructionCopy(hwnd uintptr) {
 	if !copyInProgress.CompareAndSwap(false, true) {
 		return
 	}
+	request := copyRequestSequence.Add(1)
+	if request == 0 {
+		request = copyRequestSequence.Add(1)
+	}
+	activeCopyRequest = request
 	procEnableWindow.Call(copyButtonHandle, 0)
 	setControlText(copyButtonHandle, "Copying...")
-	go copyInstructionWorker(hwnd)
+	timer, _, _ := procSetTimer.Call(hwnd, clipboardTimerID, clipboardTimeoutMillis, 0)
+	if timer == 0 {
+		activeCopyRequest = 0
+		copyInProgress.Store(false)
+		setControlText(copyButtonHandle, "Try copy again")
+		procEnableWindow.Call(copyButtonHandle, 1)
+		return
+	}
+	go copyInstructionWorker(hwnd, request)
 }
 
-func finishInstructionCopy(copied bool) {
+func finishInstructionCopy(hwnd uintptr, request uint32, copied bool) {
+	if request == 0 || request != activeCopyRequest || !copyInProgress.Load() {
+		return
+	}
+	procKillTimer.Call(hwnd, clipboardTimerID)
+	activeCopyRequest = 0
 	if copied {
 		setControlText(copyButtonHandle, "Copied")
 	} else {
@@ -172,6 +200,16 @@ func finishInstructionCopy(copied bool) {
 	}
 	procEnableWindow.Call(copyButtonHandle, 1)
 	copyInProgress.Store(false)
+}
+
+func timeOutInstructionCopy(hwnd uintptr) {
+	if activeCopyRequest == 0 || !copyInProgress.Load() {
+		return
+	}
+	procKillTimer.Call(hwnd, clipboardTimerID)
+	activeCopyRequest = 0
+	copyInProgress.Store(false)
+	setControlText(copyButtonHandle, "Copy unavailable")
 }
 
 func windowProcedure(hwnd uintptr, event uint32, wParam, lParam uintptr) uintptr {
@@ -186,12 +224,20 @@ func windowProcedure(hwnd uintptr, event uint32, wParam, lParam uintptr) uintptr
 			return 0
 		}
 	case wmClipboardComplete:
-		finishInstructionCopy(wParam == 1)
+		finishInstructionCopy(hwnd, uint32(lParam), wParam == 1)
+		return 0
+	case wmTimer:
+		if wParam == clipboardTimerID {
+			timeOutInstructionCopy(hwnd)
+		}
 		return 0
 	case wmClose:
 		procDestroyWindow.Call(hwnd)
 		return 0
 	case wmDestroy:
+		procKillTimer.Call(hwnd, clipboardTimerID)
+		activeCopyRequest = 0
+		copyInProgress.Store(false)
 		procPostQuitMessage.Call(0)
 		return 0
 	}
@@ -212,6 +258,12 @@ func createControl(class, text string, style uintptr, x, y, width, height int32,
 }
 
 func run() int {
+	// Win32 binds a window and its message queue to the creating OS thread.
+	// Keep creation, dispatch, control updates, and destruction on that thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	currentThread, _, _ := procGetCurrentThread.Call()
+	uiThreadID = uint32(currentThread)
 	if candidate == "unbound" {
 		return 2
 	}
@@ -240,6 +292,11 @@ func run() int {
 	if hwnd == 0 {
 		return 2
 	}
+	windowThread, _, _ := procGetWindowThread.Call(hwnd, 0)
+	if uint32(windowThread) != uiThreadID {
+		procDestroyWindow.Call(hwnd)
+		return 2
+	}
 	copyButtonHandle = createControl("BUTTON", "Copy instruction", wsChild|wsVisible|bsPushButton, 280, 215, 150, 34, hwnd, buttonCopy, instance)
 	if createControl("STATIC", statusText, wsChild|wsVisible|ssLeft, 28, 24, 540, 28, hwnd, 0, instance) == 0 ||
 		createControl("STATIC", versionText, wsChild|wsVisible|ssLeft, 28, 58, 540, 22, hwnd, 0, instance) == 0 ||
@@ -254,6 +311,11 @@ func run() int {
 	procUpdateWindow.Call(hwnd)
 	var current message
 	for {
+		thread, _, _ := procGetCurrentThread.Call()
+		if uint32(thread) != uiThreadID {
+			procDestroyWindow.Call(hwnd)
+			return 2
+		}
 		result, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&current)), 0, 0, 0)
 		if int32(result) == idError {
 			return 2
