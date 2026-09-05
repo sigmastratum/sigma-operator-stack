@@ -42,3 +42,14 @@ class WheelPayloadComparisonTests(unittest.TestCase):
             code, result = self._run(root / "a.whl", root / "b.whl")
             self.assertEqual(code, 2)
             self.assertEqual(result["reason"], "SOS_WHEEL_PAYLOAD_MISMATCH")
+
+    def test_noncanonical_logical_duplicate_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("a.whl", "b.whl"):
+                with zipfile.ZipFile(root / name, "w") as archive:
+                    archive.writestr("pkg/module.py", b"value = 1\n")
+                    archive.writestr("pkg//module.py", b"value = 1\n")
+            code, result = self._run(root / "a.whl", root / "b.whl")
+            self.assertEqual(code, 2)
+            self.assertEqual(result["reason"], "SOS_WHEEL_PAYLOAD_MISMATCH")

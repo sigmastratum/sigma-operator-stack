@@ -20,6 +20,7 @@ def _payload(path: Path) -> tuple[str, dict[str, bytes]]:
                 info.is_dir()
                 or name in entries
                 or pure.is_absolute()
+                or pure.as_posix() != name
                 or ".." in pure.parts
                 or "\\" in name
             ):
