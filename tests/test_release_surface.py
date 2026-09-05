@@ -140,6 +140,17 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             result = module.inspect(repository)
             self.assertIn("SOS_RELEASE_PYPI_AUTHORITY_NOT_SEPARATED", result["failures"])
 
+    def test_pointer_dependencies_are_installed_before_pointer_verification(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        dependency_step = workflow.index("Install exact pointer verification dependencies")
+        pointer_step = workflow.index("Verify routing pointer and preserve it")
+        self.assertLess(dependency_step, pointer_step)
+        self.assertIn(
+            "python -m pip install --disable-pip-version-check -r requirements/runtime.txt",
+            workflow[dependency_step:pointer_step],
+        )
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(

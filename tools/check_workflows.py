@@ -76,12 +76,17 @@ def inspect(root: Path) -> dict[str, object]:
     for required in (
         "test -f release/current.json",
         "test -f release/sos-release-index-v1.json",
+        "Install exact pointer verification dependencies",
         "check_public_release_pointer.py --repository . --require-public",
         "Check out immutable release candidate",
     ):
         if required not in release_source:
             failures.append("SOS_RELEASE_POINTER_GATE_INCOMPLETE")
             break
+    dependency_position = release_source.find("Install exact pointer verification dependencies")
+    pointer_position = release_source.find("Verify routing pointer and preserve it")
+    if dependency_position < 0 or pointer_position < 0 or dependency_position > pointer_position:
+        failures.append("SOS_RELEASE_POINTER_DEPENDENCY_ORDER_INVALID")
     for required in (
         "Verify complete pre-staged draft GitHub Release",
         "check_native_release_assets.py --index",
