@@ -15,7 +15,7 @@ SCHEMAS = ROOT / "src/sos/schemas"
 FIXTURES = ROOT / "tests/fixtures/agent-first-release"
 POINTER_URL = (
     "https://raw.githubusercontent.com/sigmastratum/"
-    "sigma-operator-stack/release/0.1.0a2/release/current.json"
+    "sigma-operator-stack/release/0.1.0a3/release/current.json"
 )
 
 
@@ -113,8 +113,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
     def test_checked_in_release_routes_linux_and_macos_without_external_actions(self) -> None:
         tool = ROOT / "tools" / "resolve_agent_first_route.py"
         for system, architecture, filename in (
-            ("linux", "x86_64", "SOS-Linux-0.1.0a2.zip"),
-            ("darwin", "arm64", "SOS-macOS-0.1.0a2.tar.gz"),
+            ("linux", "x86_64", "SOS-Linux-0.1.0a3.zip"),
+            ("darwin", "arm64", "SOS-macOS-0.1.0a3.tar.gz"),
         ):
             with self.subTest(system=system):
                 completed = subprocess.run(

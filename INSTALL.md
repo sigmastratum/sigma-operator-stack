@@ -8,7 +8,7 @@ It does not authorize project mutation.
 Fetch this exact URL directly, without using GitHub search, an indexed snippet,
 or a cached repository-page rendering:
 
-<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a2/release/current.json>
+<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a3/release/current.json>
 
 Classify the result as follows:
 

@@ -3,7 +3,7 @@
 **Project state for coding agents.**
 
 > **Agent installation entrypoint:** open [`INSTALL.md`](INSTALL.md), then fetch
-> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a2/release/current.json)
+> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a3/release/current.json)
 > directly. GitHub search, snippets and cached repository pages are not release
 > authority and cannot prove that the pointer is absent.
 
