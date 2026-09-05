@@ -223,7 +223,7 @@ def smoke(project: Path, uv: Path) -> dict[str, object]:
         observations.append(_validate_observation(name, exit_code, payload))
     material = json.dumps(observations, sort_keys=True, separators=(",", ":")).encode()
     return {
-        "contract": "sos_native_private_alpha_smoke_v1",
+        "contract": "sos_native_alpha_smoke_v1",
         "system": platform.system().lower(),
         "architecture": platform.machine().lower(),
         "observations": observations,
@@ -243,7 +243,7 @@ def main() -> int:
         report = smoke(args.project, args.uv)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         report = {
-            "contract": "sos_native_private_alpha_smoke_v1",
+            "contract": "sos_native_alpha_smoke_v1",
             "status": "failed",
             "reason": str(error),
             "absolute_paths_serialized": False,

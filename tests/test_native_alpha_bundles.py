@@ -241,6 +241,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
         documentation = (ROOT / "docs/native-public-alpha.md").read_text(
             encoding="utf-8"
         )
+        smoke_source = (ROOT / "tools/native_alpha_smoke.py").read_text(
+            encoding="utf-8"
+        )
         for required in (
             '"sos_native_public_alpha_bundle_v1"',
             '"sos_native_public_alpha_build_v1"',
@@ -255,6 +258,8 @@ class NativeAlphaBundleTests(unittest.TestCase):
         self.assertIn("does not modify system Python, PATH", documentation)
         self.assertIn("Do not use `sudo`", documentation)
         self.assertIn("`.sigma` records", documentation)
+        self.assertIn('"sos_native_alpha_smoke_v1"', smoke_source)
+        self.assertNotIn("sos_native_private_alpha_smoke_v1", smoke_source)
 
     def test_windows_acquisition_keeps_tls_verification_and_typed_failures(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(
