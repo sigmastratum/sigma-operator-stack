@@ -7,8 +7,10 @@ check, or the wrong local instructions. SOS records accepted project state in
 the repository, detects when it is no longer current, and returns one safe
 next action.
 
-> **Community alpha · source preview.** The source is available for audit and
-> contribution preparation. No installable public release is published yet.
+> **Community alpha · Linux and macOS release route.** The checked-in release
+> pointer selects one exact tagged artifact for each admitted platform. If the
+> tag or any bound asset is unavailable, Codex stops without substituting a
+> branch, source archive, or private bundle.
 
 ## See the recovery loop
 
@@ -25,8 +27,7 @@ below.
 
 ## Install with Codex
 
-Currently, no public release pointer is published yet. When one exists, give this
-repository URL to Codex and say:
+Give this repository URL to Codex and say:
 
 > **Install SOS in my current project. Show me the preview before changing it.**
 
@@ -53,12 +54,11 @@ unverified work, and receive one safe next action without relying on the
 previous chat. Unsupported, ambiguous, `not_configured` and `not_verified`
 states are never presented as green.
 
-> **Source preview:** no public release pointer is published yet. You may read,
-> audit, and contribute to this repository, but the URL-only installation claim
-> is not active. Until `release/current.json` exists in a tagged release and
-> passes the exact-candidate drill, do not install from a branch tip, GitHub
-> source archive, issue command, or private test bundle. Current platform
-> evidence is summarized below.
+> **Release activation is fail closed.** `release/current.json` is the only
+> installation authority, but its presence alone is not enough: its immutable
+> tag, index, artifact size, digest, inner manifest and checksums must all be
+> available and agree. Otherwise stop. Never install from a branch tip, GitHub
+> source archive, issue command, raw installer file, or private test bundle.
 
 Sigma Operator Stack is the formal project name. SOS does not replace your
 repository, issue tracker, existing `AGENTS.md`, or governance framework. It
@@ -80,7 +80,7 @@ The recording combines the offline local lifecycle with one explicitly
 approved, receipt-verified ephemeral Codex recovery. No raw task, response,
 tool result, session identifier, account data, or host path is retained.
 
-There is one planned public installation route. The released platform launcher
+There is one public installation route. The released platform launcher
 owns its declared Python, `uv`, and package dependencies; the developer does
 not repair PATH or install them manually.
 
@@ -137,8 +137,8 @@ expands the claim.
 
 | Environment | Observed | Release claim | Current result |
 | --- | --- | --- | --- |
-| Native Linux x86_64 on a local filesystem, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Independent native lifecycle and qualification controls passed | Control plane plus registered Python qualification | Candidate evidence exists; public artifact not released |
-| macOS 14+ Apple Silicon on local APFS | Native install, smoke, same-version update, and removal passed; `.sigma` preserved | Unsigned/not-notarized control-plane alpha; one `Open Anyway` approval may be required | Executable project qualification remains unsupported; no Gatekeeper-clean claim |
+| Native Linux x86_64 on a local filesystem, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Independent native lifecycle and qualification controls passed | Control plane plus registered Python qualification | Admitted only through the exact tagged archive selected by the release pointer |
+| macOS 14+ Apple Silicon on local APFS | Native install, smoke, same-version update, and removal passed; `.sigma` preserved | Unsigned/not-notarized control-plane alpha; one `Open Anyway` approval may be required | Admitted only through the exact tagged archive; executable qualification remains unsupported |
 | Windows 11 x86_64 on local NTFS, UAC enabled, ordinary Medium Integrity user | Exact MSIX content built and accepted into Microsoft Store certification | Pending | Store-signed install/update/remove and clean-user lifecycle are not yet proven |
 | Windows with UAC disabled, elevated execution, non-owner profile storage, shared/network filesystem, or sandbox identity targeting another profile | Typed refusals observed | Unsupported | SOS stops before project mutation |
 | Docker Desktop on a WSL2 kernel exposing Landlock ABI 1 | Capability diagnostic recorded | Control plane only | Executable unittest is unsupported and fails closed |

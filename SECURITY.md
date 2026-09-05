@@ -2,12 +2,13 @@
 
 ## Supported versions
 
-No installable public release exists yet. Security reports are accepted for
-the current public source preview, but that preview is not a supported binary
-release.
+Security reports are accepted for both the public source and the exact alpha
+artifacts selected by `release/current.json`. A checked-in pointer is not proof
+that a release is available: the immutable tag, index and digest-bound assets
+must also be public and mutually consistent.
 
-After the first public release, security fixes will be provided for the latest
-published `0.1.x` alpha only. The project is pre-1.0: compatibility may change,
+Security fixes are provided for the latest published `0.1.x` alpha only. The
+project is pre-1.0: compatibility may change,
 but security boundaries must fail closed rather than silently weaken.
 
 ## Reporting a vulnerability

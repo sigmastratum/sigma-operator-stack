@@ -125,11 +125,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
                 "SOS_GENERIC_RELEASE_BUNDLE_GATE_INCOMPLETE", result["failures"]
             )
 
-    def test_public_release_pointer_is_absent_and_fail_closed(self) -> None:
+    def test_public_release_pointer_is_present_and_candidate_bound(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = self.run_tool(root, "check_public_release_pointer.py")
-        self.assertEqual(result["status"], "not_published", result)
-        self.assertFalse((root / "release" / "current.json").exists())
+        self.assertEqual(result["status"], "passed", result)
+        self.assertTrue((root / "release" / "current.json").is_file())
 
     def test_installers_directory_is_clearly_build_source_only(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -139,8 +139,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         for required in (
             "These files are not a public SOS installer",
             "Do not download or run an individual script",
-            "There is currently no installable public SOS release",
-            "not a supported installation route",
+            "Public availability is determined only",
+            "never a supported installation route",
             "canonical install-with-Codex route",
             "not standalone end-user assets",
         ):
@@ -247,9 +247,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         readme = " ".join((root / "README.md").read_text(encoding="utf-8").split())
         demo = " ".join((root / "demo/README.md").read_text(encoding="utf-8").split())
 
-        self.assertIn("No installable public release exists yet", security)
-        self.assertIn("After the first public release", security)
-        self.assertNotIn("Security fixes are provided for the latest published", security)
+        self.assertIn("exact alpha artifacts selected by `release/current.json`", security)
+        self.assertIn("Security fixes are provided for the latest published", security)
         self.assertIn("Unreleased candidate: 0.1.0a2", changelog)
         self.assertNotIn("releases/tag/v0.1.0a2", changelog)
         for heading in (

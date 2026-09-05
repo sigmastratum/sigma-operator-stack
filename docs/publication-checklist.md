@@ -1,7 +1,7 @@
 # Repository publication checklist
 
-This file records public repository metadata and reversible settings for a
-future publication operation. It grants no remote mutation or release
+This file records the independent gates for source opening, artifact release,
+Windows admission and promotion. It grants no remote mutation or release
 authority.
 
 The exact ordered transaction, readback and rollback boundary are defined in
@@ -34,6 +34,9 @@ the [public repository opening runbook](repository-opening-runbook.md).
   form one rollback-bound transaction; activation failure returns the
   repository to private;
 - push, remote settings and visibility each retain a separate approval.
+
+This gate precedes an installable release. A later reviewed routing successor
+may add `release/current.json` without changing the frozen product candidate.
 
 The predecessor demo may illustrate the product principle at this gate only
 when it is explicitly described as neither current-HEAD nor URL-only release
@@ -86,9 +89,10 @@ The repository may become public before an installable release only when:
 - no tag, GitHub Release, PyPI upload, Store publication, or promotion is
   implied by the visibility change.
 
-Current preparation state: source-publication candidate in progress. Microsoft
-Store certification is external and pending; Windows Store lifecycle evidence
-does not yet exist.
+The source-only opening transaction and the later release-routing transaction
+are different commits and approvals. The current routing packet binds Linux
+and macOS only; Windows remains absent until Store certification and lifecycle
+evidence pass.
 
 The submitted Store MSIX was the correct reviewed artifact when uploaded. It
 is now classified as predecessor evidence because the later source successor

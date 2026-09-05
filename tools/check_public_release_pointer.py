@@ -87,11 +87,15 @@ def inspect(repository: Path, *, require_public: bool = False) -> dict[str, obje
         if pointer["tree"] != candidate_tree:
             failures.append("SOS_PUBLIC_RELEASE_SOURCE_BINDING_MISMATCH")
         if require_public:
-            tag_candidate = _git(
-                repository, "rev-parse", f"{pointer['release_tag']}^{{commit}}"
-            )
-            if tag_candidate != candidate:
-                failures.append("SOS_PUBLIC_RELEASE_TAG_BINDING_MISMATCH")
+            try:
+                tag_candidate = _git(
+                    repository, "rev-parse", f"{pointer['release_tag']}^{{commit}}"
+                )
+            except subprocess.CalledProcessError:
+                failures.append("SOS_PUBLIC_RELEASE_TAG_UNAVAILABLE")
+            else:
+                if tag_candidate != candidate:
+                    failures.append("SOS_PUBLIC_RELEASE_TAG_BINDING_MISMATCH")
     return {
         "contract": "sos_public_release_pointer_check_v1",
         "failures": sorted(set(failures)),

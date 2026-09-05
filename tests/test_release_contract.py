@@ -73,7 +73,8 @@ class PublicReleaseContractTests(unittest.TestCase):
         self.assertIn("Cross-server qualification is specific to the exact release artifact", public_text)
         self.assertNotIn("sigma-operator-stack==0.1.0a1", public_text)
         self.assertIn("docs/install-with-codex.md", public_text)
-        self.assertIn("no public release pointer is published yet", public_text)
+        self.assertIn("release/current.json", public_text)
+        self.assertIn("tag, index, artifact size", public_text)
 
 
 if __name__ == "__main__":

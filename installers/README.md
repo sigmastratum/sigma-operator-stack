@@ -8,11 +8,12 @@ used to build the platform release packages. Files such as
 inside a complete, digest-verified release bundle with its pinned `uv`, SOS
 wheel, dependency wheelhouse, manifest, and checksums.
 
-There is currently no installable public SOS release. Cloning a branch,
-downloading GitHub's automatic source archive, or running a raw file from this
-directory is not a supported installation route.
+Public availability is determined only by a valid `release/current.json` whose
+immutable tag, release index and digest-bound assets are all reachable.
+Cloning a branch, downloading GitHub's automatic source archive, or running a
+raw file from this directory is never a supported installation route.
 
-When a release becomes available:
+To install a release:
 
 1. return to the [repository README](../README.md);
 2. follow the [canonical install-with-Codex route](../docs/install-with-codex.md);

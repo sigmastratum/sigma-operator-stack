@@ -27,8 +27,9 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
   lifecycle with repository-owned `.sigma` preservation.
 - Per-user Windows 11 x86_64 MSIX packaging, exact Microsoft Store identity,
   offline payload, and semantic content reproducibility gates.
-- Agent-first release pointer and index contracts. No public pointer is
-  published by this source candidate.
+- Agent-first release pointer and index contracts with exact Linux and macOS
+  archive bindings. Availability still requires the immutable tag and all
+  declared GitHub Release assets.
 
 ### Security
 
@@ -42,4 +43,5 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
   setup rebind, agent restart, and separate per-project qualification complete.
 
 The release date and immutable tag link are added only after the exact
-candidate is tagged. This source preview does not claim that tag exists.
+candidate is tagged. Checked-in routing metadata alone does not claim that the
+tag or its assets are already public.

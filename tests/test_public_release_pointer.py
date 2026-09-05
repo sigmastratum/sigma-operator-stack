@@ -21,14 +21,12 @@ SPEC.loader.exec_module(checker)
 
 
 class PublicReleasePointerTests(unittest.TestCase):
-    def test_absence_is_safe_for_source_preview(self) -> None:
+    def test_checked_in_pointer_is_bound_but_not_tag_authority(self) -> None:
         result = checker.inspect(ROOT)
-        self.assertEqual(result["status"], "not_published")
+        self.assertEqual(result["status"], "passed", result)
         required = checker.inspect(ROOT, require_public=True)
         self.assertEqual(required["status"], "failed")
-        self.assertEqual(
-            required["failures"], ["SOS_PUBLIC_RELEASE_POINTER_REQUIRED"]
-        )
+        self.assertEqual(required["failures"], ["SOS_PUBLIC_RELEASE_TAG_UNAVAILABLE"])
 
     def test_routing_pointer_is_bound_to_immutable_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

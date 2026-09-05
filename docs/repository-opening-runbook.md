@@ -1,6 +1,8 @@
 # Public repository opening runbook
 
-This runbook separates publication of auditable source from package release.
+This runbook records the already separate source-opening transaction and must
+not be reused as package-release authority. It separates publication of
+auditable source from package release.
 It grants no remote mutation authority. Every phase requires its own owner
 approval and an exact candidate/tree recorded immediately before execution.
 

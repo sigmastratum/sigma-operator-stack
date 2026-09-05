@@ -79,6 +79,26 @@ class AgentFirstOfflineReplayTests(unittest.TestCase):
         )
         Draft202012Validator(schema).validate(first)
 
+    def test_checked_in_linux_macos_release_matrix_passes_offline(self) -> None:
+        arguments = {
+            "matrix": self.load("linux-macos-release-matrix.json"),
+            "pointer": json.loads((ROOT / "release" / "current.json").read_text()),
+            "index": json.loads(
+                (ROOT / "release" / "sos-release-index-v1.json").read_text()
+            ),
+            "schema_root": SCHEMAS,
+        }
+        first = MODULE.replay(**arguments)
+        second = MODULE.replay(**arguments)
+        self.assertEqual(first, second)
+        self.assertEqual(first["status"], "passed", first)
+        self.assertEqual(first["case_count"], 11)
+        self.assertEqual(first["provider_calls"], 0)
+        self.assertFalse(first["network_performed"])
+        self.assertFalse(first["mutations_performed"])
+        self.assertFalse(first["simulated_fresh_session"])
+        self.assertFalse(first["simulated_store_success"])
+
     def test_cli_receipt_has_zero_external_actions(self) -> None:
         completed = subprocess.run(
             [

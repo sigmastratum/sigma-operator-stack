@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -25,7 +27,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
             first_viewport,
         )
         self.assertIn("docs/install-with-codex.md", first_viewport)
-        self.assertIn("no public release pointer is published yet", first_viewport)
+        self.assertIn("checked-in release", first_viewport)
+        self.assertIn("Release activation is fail closed", readme)
         self.assertLess(
             first_viewport.index("demo/recovery-demo.mp4"),
             first_viewport.index("Install SOS in my current project"),
@@ -73,6 +76,43 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
             linux["invocation"],
             ["Install-SOS.command", "install", "{project}"],
         )
+
+    def test_checked_in_release_routes_linux_and_macos_without_external_actions(self) -> None:
+        tool = ROOT / "tools" / "resolve_agent_first_route.py"
+        for system, architecture, filename in (
+            ("linux", "x86_64", "SOS-Linux-0.1.0a2.zip"),
+            ("darwin", "arm64", "SOS-macOS-0.1.0a2.tar.gz"),
+        ):
+            with self.subTest(system=system):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(tool),
+                        "--pointer",
+                        str(ROOT / "release" / "current.json"),
+                        "--index",
+                        str(ROOT / "release" / "sos-release-index-v1.json"),
+                        "--schemas",
+                        str(SCHEMAS),
+                        "--system",
+                        system,
+                        "--architecture",
+                        architecture,
+                    ],
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                projection = json.loads(completed.stdout)
+                self.assertEqual(projection["status"], "ready")
+                self.assertEqual(projection["action"]["kind"], "download_archive")
+                self.assertEqual(projection["action"]["archive_filename"], filename)
+                self.assertFalse(projection["network_performed"])
+                self.assertFalse(projection["mutations_performed"])
+                self.assertEqual(projection["provider_calls"], 0)
 
     def test_invalid_or_ambiguous_release_surfaces_fail_schema(self) -> None:
         schema = json.loads(

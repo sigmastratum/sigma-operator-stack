@@ -1,0 +1,16 @@
+{
+  "contract": "sos_agent_first_offline_replay_matrix_v1",
+  "cases": [
+    {"case_id":"release.pointer-absent","kind":"route","mutation":"pointer_absent","system":"linux","architecture":"x86_64","expected_status":"blocked","expected_reason":"SOS_PUBLIC_RELEASE_NOT_AVAILABLE","expected_action":"none"},
+    {"case_id":"release.pointer-malformed","kind":"route","mutation":"pointer_malformed","system":"linux","architecture":"x86_64","expected_status":"invalid","expected_reason":"SOS_PUBLIC_RELEASE_METADATA_INVALID","expected_action":"none"},
+    {"case_id":"release.pointer-withheld","kind":"route","mutation":"pointer_withheld","system":"linux","architecture":"x86_64","expected_status":"blocked","expected_reason":"SOS_PUBLIC_RELEASE_WITHHELD","expected_action":"none"},
+    {"case_id":"release.index-digest-mismatch","kind":"route","mutation":"index_digest_mismatch","system":"linux","architecture":"x86_64","expected_status":"invalid","expected_reason":"SOS_PUBLIC_RELEASE_INDEX_DIGEST_MISMATCH","expected_action":"none"},
+    {"case_id":"release.index-binding-mismatch","kind":"route","mutation":"index_binding_mismatch","system":"linux","architecture":"x86_64","expected_status":"invalid","expected_reason":"SOS_PUBLIC_RELEASE_BINDING_MISMATCH","expected_action":"none"},
+    {"case_id":"release.platform-ambiguous","kind":"route","mutation":"platform_ambiguous","system":"linux","architecture":"x86_64","expected_status":"blocked","expected_reason":"SOS_PUBLIC_RELEASE_PLATFORM_AMBIGUOUS","expected_action":"none"},
+    {"case_id":"release.windows-unsupported","kind":"route","mutation":"none","system":"windows","architecture":"x86_64","expected_status":"unsupported","expected_reason":"SOS_PUBLIC_RELEASE_PLATFORM_UNSUPPORTED","expected_action":"none"},
+    {"case_id":"release.linux-ready","kind":"route","mutation":"none","system":"linux","architecture":"x86_64","expected_status":"ready","expected_reason":"SOS_AGENT_FIRST_ARCHIVE_READY","expected_action":"download_archive"},
+    {"case_id":"release.macos-ready","kind":"route","mutation":"none","system":"darwin","architecture":"arm64","expected_status":"ready","expected_reason":"SOS_AGENT_FIRST_ARCHIVE_READY","expected_action":"download_archive"},
+    {"case_id":"release.terminal-not-configured","kind":"terminal","snapshot":{"contract":"sos_agent_first_terminal_snapshot_v1","authority_state":"accepted","configured_family_count":0,"qualification_state":"not_run","setup_state":"success","workspace_state":"current"},"expected_status":"not_configured","expected_reason":"SOS_CHECK_NOT_CONFIGURED","expected_action":"configure_check_family"},
+    {"case_id":"release.terminal-not-verified","kind":"terminal","snapshot":{"contract":"sos_agent_first_terminal_snapshot_v1","authority_state":"accepted","configured_family_count":1,"qualification_state":"not_run","setup_state":"success","workspace_state":"current"},"expected_status":"not_verified","expected_reason":"SOS_QUALIFICATION_NOT_RUN","expected_action":"run_qualification"}
+  ]
+}
