@@ -43,6 +43,8 @@ jobs:
       - name: Install exact pointer verification dependencies
         run: python -m pip install --disable-pip-version-check -r requirements/runtime.txt
       - name: Verify routing pointer and preserve it
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           test "$(git rev-parse HEAD)" = "${{ inputs.routing_commit }}"
           test -z "$(git status --short)"
@@ -53,6 +55,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/routing"
           cp release/current.json release/sos-release-index-v1.json "$RUNNER_TEMP/routing/"
           cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"
+          test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
+          mkdir -p "$RUNNER_TEMP/existing"
+          gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
+          python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
+          cd "$RUNNER_TEMP/existing"
+          sha256sum -c SHA256SUMS
       - name: Check out immutable release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -84,7 +92,8 @@ jobs:
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/a"
           python tools/build_release_wheel.py --candidate "${{ inputs.candidate }}" --output-dir "$RUNNER_TEMP/b"
           cmp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/b/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
-          cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"
+          python tools/compare_wheel_payloads.py --rebuilt "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" --staged "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl"
+          cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"
       - name: Fresh installed-wheel qualification and SBOM
         run: |
           python -m venv "$RUNNER_TEMP/wheel-env"
@@ -111,9 +120,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
-          mkdir -p "$RUNNER_TEMP/existing"
-          gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
           python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
           for name in SOS-Linux-0.1.0a2.zip SOS-macOS-0.1.0a2.tar.gz; do
             test -f "$RUNNER_TEMP/existing/$name"

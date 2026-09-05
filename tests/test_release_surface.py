@@ -112,11 +112,16 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         preserve = workflow.index('cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"')
         checkout = workflow.index("Check out immutable release candidate")
-        execute = workflow.index(
+        initial_execute = workflow.index(
+            'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index'
+        )
+        final_execute = workflow.rindex(
             'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index'
         )
         self.assertLess(preserve, checkout)
-        self.assertLess(checkout, execute)
+        self.assertLess(preserve, initial_execute)
+        self.assertLess(initial_execute, checkout)
+        self.assertLess(checkout, final_execute)
         self.assertNotIn("python tools/check_native_release_assets.py --index", workflow)
 
     def test_pypi_publication_requires_a_separate_explicit_gate(self) -> None:
@@ -172,6 +177,19 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn('python-version: "3.12.3"', workflow)
         self.assertNotIn('python-version: "3.12"', workflow)
+
+    def test_release_qualifies_the_exact_staged_wheel(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("compare_wheel_payloads.py --rebuilt", workflow)
+        self.assertIn(
+            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            workflow,
+        )
+        self.assertNotIn(
+            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            workflow,
+        )
 
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
