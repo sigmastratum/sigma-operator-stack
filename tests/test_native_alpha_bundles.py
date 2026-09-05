@@ -234,6 +234,28 @@ class NativeAlphaBundleTests(unittest.TestCase):
         self.assertIn('"SOS-Installer.exe"', bundle_builder)
         self.assertIn("candidate.encode", bundle_builder)
 
+    def test_public_native_builder_is_platform_scoped_and_license_bound(self) -> None:
+        builder = (ROOT / "tools/build_native_alpha_bundles.py").read_text(
+            encoding="utf-8"
+        )
+        documentation = (ROOT / "docs/native-public-alpha.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            '"sos_native_public_alpha_bundle_v1"',
+            '"sos_native_public_alpha_build_v1"',
+            '"LICENSE-CPYTHON.txt"',
+            '"LICENSE-UV-APACHE"',
+            '"LICENSE-UV-MIT"',
+            'if public and "windows" in selected',
+            'parser.add_argument("--platform"',
+        ):
+            self.assertIn(required, builder)
+        self.assertIn("release/current.json", documentation)
+        self.assertIn("does not modify system Python, PATH", documentation)
+        self.assertIn("Do not use `sudo`", documentation)
+        self.assertIn("`.sigma` records", documentation)
+
     def test_windows_acquisition_keeps_tls_verification_and_typed_failures(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(
             encoding="utf-8"

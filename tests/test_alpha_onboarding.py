@@ -21,7 +21,9 @@ SPEC.loader.exec_module(alpha)
 
 
 class AlphaOnboardingTests(unittest.TestCase):
-    def make_bundle(self, root: Path, *, system: str = "Linux") -> Path:
+    def make_bundle(
+        self, root: Path, *, system: str = "Linux", public: bool = False
+    ) -> Path:
         bundle = root / "bundle"
         bundle.mkdir(parents=True)
         payloads = {
@@ -36,6 +38,10 @@ class AlphaOnboardingTests(unittest.TestCase):
         for name in alpha.NATIVE_FILES.get(system, frozenset()):
             payloads[name] = b"native-private-alpha\n"
             (bundle / name).write_bytes(payloads[name])
+        if public:
+            for name in alpha.PUBLIC_LICENSE_FILES:
+                payloads[name] = f"synthetic license: {name}\n".encode()
+                (bundle / name).write_bytes(payloads[name])
         media_types = {
             "START-HERE.md": "text/markdown",
             "alpha-feedback.md": "text/markdown",
@@ -49,6 +55,9 @@ class AlphaOnboardingTests(unittest.TestCase):
             "native-smoke": "text/x-python",
             "uv": "application/octet-stream",
             "uv.exe": "application/vnd.microsoft.portable-executable",
+            "LICENSE-CPYTHON.txt": "text/plain",
+            "LICENSE-UV-APACHE": "text/plain",
+            "LICENSE-UV-MIT": "text/plain",
             **{name: "application/zip" for name in alpha.UNIVERSAL_WHEELS},
             **{
                 name: "application/zip"
@@ -78,7 +87,9 @@ class AlphaOnboardingTests(unittest.TestCase):
             ),
             "candidate": "a" * 40,
             "contract": (
-                "sos_native_private_alpha_bundle_v2"
+                "sos_native_public_alpha_bundle_v1"
+                if public
+                else "sos_native_private_alpha_bundle_v2"
                 if system in alpha.NATIVE_FILES
                 else "sos_public_release_manifest_v1"
             ),
@@ -91,7 +102,11 @@ class AlphaOnboardingTests(unittest.TestCase):
         )
         sums = {
             name: hashlib.sha256((bundle / name).read_bytes()).hexdigest()
-            for name in alpha._expected_files(system)
+            for name in (
+                alpha._expected_files(system) | alpha.PUBLIC_LICENSE_FILES
+                if public
+                else alpha._expected_files(system)
+            )
         }
         (bundle / "SHA256SUMS").write_text(
             "".join(f"{digest}  {name}\n" for name, digest in sorted(sums.items())),
@@ -132,6 +147,18 @@ class AlphaOnboardingTests(unittest.TestCase):
             with self.assertRaises(alpha.StartError) as raised:
                 alpha.verify_bundle(windows, system="Darwin")
             self.assertEqual(raised.exception.code, "SOS_ALPHA_BUNDLE_INCOMPLETE")
+
+    def test_public_native_bundle_requires_exact_attribution_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = self.make_bundle(Path(temporary), public=True)
+            self.assertEqual(
+                alpha.verify_bundle(bundle, system="Linux")["contract"],
+                "sos_native_public_alpha_bundle_v1",
+            )
+            (bundle / "LICENSE-UV-MIT").unlink()
+            with self.assertRaises(alpha.StartError) as raised:
+                alpha.verify_bundle(bundle, system="Linux")
+            self.assertEqual(raised.exception.code, "SOS_ALPHA_BUNDLE_FILE_INVALID")
 
     def test_checked_launcher_installs_exact_wheel_then_only_runs_init(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

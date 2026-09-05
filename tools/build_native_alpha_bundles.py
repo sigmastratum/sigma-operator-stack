@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build deterministic checksum-bound Windows and macOS private-alpha ZIPs."""
+"""Build deterministic checksum-bound native alpha archives."""
 
 from __future__ import annotations
 
@@ -25,6 +25,21 @@ COMMON = {
     "docs/alpha-feedback.md": ("alpha-feedback.md", "text/markdown", 0o644),
     "tools/start_sos_alpha.py": ("start-sos-alpha", "text/x-python", 0o755),
     "tools/native_alpha_smoke.py": ("native-smoke", "text/x-python", 0o755),
+}
+PUBLIC_START = "docs/native-public-alpha.md"
+PUBLIC_LICENSES = {
+    "cpython": (
+        "LICENSE-CPYTHON.txt",
+        "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf",
+    ),
+    "uv_apache": (
+        "LICENSE-UV-APACHE",
+        "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    ),
+    "uv_mit": (
+        "LICENSE-UV-MIT",
+        "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",
+    ),
 }
 PLATFORMS = {
     "linux": {
@@ -120,7 +135,10 @@ def build(
     *,
     uv_binaries: dict[str, Path],
     wheelhouses: dict[str, Path],
-    windows_installer: Path,
+    windows_installer: Path | None,
+    selected_platforms: set[str] | None = None,
+    public: bool = False,
+    public_licenses: dict[str, Path] | None = None,
 ) -> dict[str, object]:
     repository = repository.resolve(strict=True)
     output = output.resolve()
@@ -133,27 +151,51 @@ def build(
     epoch = int(_git(repository, "show", "-s", "--format=%ct", candidate))
     if wheel.name != WHEEL or not wheel.is_file() or not sbom.is_file():
         raise ValueError("wheel or SBOM does not match the frozen private alpha")
-    if windows_installer.is_symlink() or not windows_installer.is_file():
-        raise ValueError("Windows installer must be one regular PE file")
-    installer_payload = windows_installer.read_bytes()
-    if (
-        not installer_payload.startswith(b"MZ")
-        or len(installer_payload) > 8 * 1024 * 1024
-        or candidate.encode("ascii") not in installer_payload
-    ):
-        raise ValueError("Windows installer is not bound to the exact candidate")
-    if set(uv_binaries) != set(PLATFORMS) or set(wheelhouses) != set(PLATFORMS):
-        raise ValueError("exact uv and wheelhouse inputs are required for every platform")
+    selected = selected_platforms or set(PLATFORMS)
+    if not selected or not selected.issubset(PLATFORMS):
+        raise ValueError("at least one known platform must be selected")
+    if public and "windows" in selected:
+        raise ValueError("public Windows delivery uses Microsoft Store, not a native ZIP")
+    installer_payload = b""
+    if "windows" in selected:
+        if windows_installer is None or windows_installer.is_symlink() or not windows_installer.is_file():
+            raise ValueError("Windows installer must be one regular PE file")
+        installer_payload = windows_installer.read_bytes()
+        if (
+            not installer_payload.startswith(b"MZ")
+            or len(installer_payload) > 8 * 1024 * 1024
+            or candidate.encode("ascii") not in installer_payload
+        ):
+            raise ValueError("Windows installer is not bound to the exact candidate")
+    if set(uv_binaries) != selected or set(wheelhouses) != selected:
+        raise ValueError("exact uv and wheelhouse inputs are required for selected platforms")
+    license_payloads: dict[str, tuple[str, bytes]] = {}
+    if public:
+        if public_licenses is None or set(public_licenses) != set(PUBLIC_LICENSES):
+            raise ValueError("exact CPython and uv licenses are required for public archives")
+        for key, (filename, expected_digest) in PUBLIC_LICENSES.items():
+            provided = public_licenses[key]
+            if not isinstance(provided, Path):
+                raise ValueError(f"public license input missing: {key}")
+            source = provided.resolve(strict=True)
+            if source.is_symlink() or not source.is_file() or _sha256(source) != expected_digest:
+                raise ValueError(f"public license input mismatch: {key}")
+            license_payloads[key] = (filename, source.read_bytes())
     output.mkdir(parents=True, exist_ok=True)
     results: dict[str, object] = {}
-    for platform_name, platform_files in PLATFORMS.items():
+    for platform_name in sorted(selected):
+        platform_files = PLATFORMS[platform_name]
         display_name = DISPLAY_NAMES[platform_name]
         root = output / f"SOS-{display_name}-{VERSION}"
         if root.exists():
             raise FileExistsError(f"output directory already exists: {root.name}")
         root.mkdir()
         media: dict[str, str] = {}
-        for source, (name, media_type, mode) in {**COMMON, **platform_files}.items():
+        common = dict(COMMON)
+        if public:
+            common.pop("docs/native-private-alpha.md")
+            common[PUBLIC_START] = ("START-HERE.md", "text/markdown", 0o644)
+        for source, (name, media_type, mode) in {**common, **platform_files}.items():
             payload = (
                 installer_payload
                 if source == "@windows-installer"
@@ -161,6 +203,9 @@ def build(
             )
             _write(root / name, payload, mode)
             media[name] = media_type
+        for filename, payload in license_payloads.values():
+            _write(root / filename, payload, 0o644)
+            media[filename] = "text/plain"
         shutil.copyfile(wheel, root / WHEEL)
         shutil.copyfile(sbom, root / SBOM)
         media[WHEEL] = "application/zip"
@@ -205,7 +250,11 @@ def build(
                 "wheel_builds_equal": True,
             },
             "candidate": candidate,
-            "contract": "sos_native_private_alpha_bundle_v2",
+            "contract": (
+                "sos_native_public_alpha_bundle_v1"
+                if public
+                else "sos_native_private_alpha_bundle_v2"
+            ),
             "platform": platform_name,
             "tree": tree,
             "version": VERSION,
@@ -227,7 +276,17 @@ def build(
             "archive_sha256": _sha256(archive),
             "file_count": len(tuple(root.iterdir())),
         }
-    return {"candidate": candidate, "contract": "sos_native_private_alpha_build_v2", "platforms": results, "tree": tree, "version": VERSION}
+    return {
+        "candidate": candidate,
+        "contract": (
+            "sos_native_public_alpha_build_v1"
+            if public
+            else "sos_native_private_alpha_build_v2"
+        ),
+        "platforms": results,
+        "tree": tree,
+        "version": VERSION,
+    }
 
 
 def main() -> int:
@@ -237,13 +296,18 @@ def main() -> int:
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--sbom", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--uv-linux", required=True, type=Path)
-    parser.add_argument("--uv-windows", required=True, type=Path)
-    parser.add_argument("--uv-macos", required=True, type=Path)
-    parser.add_argument("--wheelhouse-windows", required=True, type=Path)
-    parser.add_argument("--wheelhouse-macos", required=True, type=Path)
-    parser.add_argument("--wheelhouse-linux", required=True, type=Path)
-    parser.add_argument("--windows-installer", required=True, type=Path)
+    parser.add_argument("--uv-linux", type=Path)
+    parser.add_argument("--uv-windows", type=Path)
+    parser.add_argument("--uv-macos", type=Path)
+    parser.add_argument("--wheelhouse-windows", type=Path)
+    parser.add_argument("--wheelhouse-macos", type=Path)
+    parser.add_argument("--wheelhouse-linux", type=Path)
+    parser.add_argument("--windows-installer", type=Path)
+    parser.add_argument("--platform", action="append", choices=sorted(PLATFORMS))
+    parser.add_argument("--public", action="store_true")
+    parser.add_argument("--cpython-license", type=Path)
+    parser.add_argument("--uv-license-apache", type=Path)
+    parser.add_argument("--uv-license-mit", type=Path)
     args = parser.parse_args()
     try:
         result = build(
@@ -252,17 +316,32 @@ def main() -> int:
             args.wheel,
             args.sbom,
             args.output_dir,
-            uv_binaries={
+            uv_binaries={key: value for key, value in {
                 "linux": args.uv_linux,
                 "windows": args.uv_windows,
                 "macos": args.uv_macos,
-            },
-            wheelhouses={
+            }.items() if value is not None and (args.platform is None or key in args.platform)},
+            wheelhouses={key: value for key, value in {
                 "linux": args.wheelhouse_linux,
                 "windows": args.wheelhouse_windows,
                 "macos": args.wheelhouse_macos,
-            },
-            windows_installer=args.windows_installer.resolve(strict=True),
+            }.items() if value is not None and (args.platform is None or key in args.platform)},
+            windows_installer=(
+                args.windows_installer.resolve(strict=True)
+                if args.windows_installer is not None
+                else None
+            ),
+            selected_platforms=set(args.platform) if args.platform else None,
+            public=args.public,
+            public_licenses=(
+                {
+                    "cpython": args.cpython_license,
+                    "uv_apache": args.uv_license_apache,
+                    "uv_mit": args.uv_license_mit,
+                }
+                if args.public
+                else None
+            ),
         )
     except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         print(json.dumps({"contract": "sos_native_private_alpha_build_v2", "status": "failed", "reason": str(error)}, sort_keys=True, separators=(",", ":")))

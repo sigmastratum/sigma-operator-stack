@@ -49,6 +49,9 @@ EXPECTED_FILES = frozenset(
         WHEEL,
     }
 )
+PUBLIC_LICENSE_FILES = frozenset(
+    {"LICENSE-CPYTHON.txt", "LICENSE-UV-APACHE", "LICENSE-UV-MIT"}
+)
 NATIVE_FILES = {
     "Linux": frozenset({"Install-SOS.command", "Test-SOS.command", "native-smoke", "uv"})
     | UNIVERSAL_WHEELS
@@ -74,6 +77,9 @@ MAX_FILE_BYTES = {
     "native-smoke": 1024 * 1024,
     "uv": 64 * 1024 * 1024,
     "uv.exe": 64 * 1024 * 1024,
+    "LICENSE-CPYTHON.txt": 256 * 1024,
+    "LICENSE-UV-APACHE": 256 * 1024,
+    "LICENSE-UV-MIT": 256 * 1024,
     **{name: 64 * 1024 * 1024 for name in UNIVERSAL_WHEELS},
     **{
         name: 64 * 1024 * 1024
@@ -282,7 +288,9 @@ def _expected_files(system: str) -> frozenset[str]:
     return EXPECTED_FILES | NATIVE_FILES.get(system, frozenset())
 
 
-def _read_checksums(path: Path, expected_files: frozenset[str]) -> dict[str, str]:
+def _read_checksums(
+    path: Path, expected_file_sets: tuple[frozenset[str], ...]
+) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -301,7 +309,7 @@ def _read_checksums(path: Path, expected_files: frozenset[str]) -> dict[str, str
                 "Download or copy the complete alpha bundle again.",
             )
         values[parts[1]] = parts[0]
-    if set(values) != expected_files:
+    if not any(set(values) == expected for expected in expected_file_sets):
         raise _fail(
             "SOS_ALPHA_BUNDLE_INCOMPLETE",
             "The bundle file inventory does not match this alpha.",
@@ -319,8 +327,13 @@ def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str,
             "The alpha bundle directory is missing or unreadable.",
             "Download or copy the complete alpha bundle again.",
         ) from error
-    expected_files = _expected_files(system)
-    checksums = _read_checksums(bundle / "SHA256SUMS", expected_files)
+    private_files = _expected_files(system)
+    public_files = private_files | PUBLIC_LICENSE_FILES
+    checksums = _read_checksums(
+        bundle / "SHA256SUMS", (private_files, public_files)
+    )
+    expected_files = frozenset(checksums)
+    public_bundle = expected_files == public_files
     for filename in sorted(expected_files):
         path = bundle / filename
         try:
@@ -388,6 +401,9 @@ def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str,
         "native-smoke": "text/x-python",
         "uv": "application/octet-stream",
         "uv.exe": "application/vnd.microsoft.portable-executable",
+        "LICENSE-CPYTHON.txt": "text/plain",
+        "LICENSE-UV-APACHE": "text/plain",
+        "LICENSE-UV-MIT": "text/plain",
         **{name: "application/zip" for name in UNIVERSAL_WHEELS},
         **{
             name: "application/zip"
@@ -396,9 +412,13 @@ def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str,
         },
     }
     expected_contract = (
-        "sos_native_private_alpha_bundle_v2"
-        if system in NATIVE_FILES
-        else "sos_public_release_manifest_v1"
+        "sos_native_public_alpha_bundle_v1"
+        if public_bundle
+        else (
+            "sos_native_private_alpha_bundle_v2"
+            if system in NATIVE_FILES
+            else "sos_public_release_manifest_v1"
+        )
     )
     build = manifest.get("build", {})
     build_valid = (
