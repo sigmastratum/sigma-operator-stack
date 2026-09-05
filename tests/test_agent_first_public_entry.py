@@ -13,6 +13,10 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "src/sos/schemas"
 FIXTURES = ROOT / "tests/fixtures/agent-first-release"
+POINTER_URL = (
+    "https://raw.githubusercontent.com/sigmastratum/"
+    "sigma-operator-stack/release/0.1.0a2/release/current.json"
+)
 
 
 class AgentFirstPublicEntryTests(unittest.TestCase):
@@ -27,6 +31,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
             first_viewport,
         )
         self.assertIn("docs/install-with-codex.md", first_viewport)
+        self.assertIn("INSTALL.md", first_viewport)
+        self.assertIn(POINTER_URL, first_viewport)
         self.assertIn("checked-in release", first_viewport)
         self.assertIn("Release activation is fail closed", readme)
         self.assertLess(
@@ -36,6 +42,18 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertGreaterEqual(readme.count("docs/install-with-codex.md"), 1)
         self.assertNotIn("uv tool install", readme)
         self.assertNotIn("preinstalled `uv`", readme)
+
+    def test_direct_discovery_contract_never_infers_absence_from_search(self) -> None:
+        entry = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+        route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
+        for text in (entry, route):
+            self.assertIn(POINTER_URL, text)
+            self.assertIn("404", text)
+            self.assertIn("410", text)
+            self.assertIn("SOS_PUBLIC_RELEASE_DISCOVERY_BLOCKED", text)
+            self.assertIn("SOS_PUBLIC_RELEASE_METADATA_INVALID", text)
+        self.assertIn("Never infer pointer absence from search results", entry)
+        self.assertIn("Only a direct HTTP `404` or `410`", route)
 
     def test_historical_quickstart_is_not_install_authority(self) -> None:
         historical = (ROOT / "docs/alpha-quickstart.md").read_text(encoding="utf-8")

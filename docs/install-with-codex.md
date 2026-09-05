@@ -8,17 +8,26 @@ Give the public repository URL to a genuinely fresh Codex task and say:
 
 ## Release gate
 
-Codex must first read `release/current.json` from this repository. If that file
-is absent, malformed, marked non-public, or fails its schema, **stop**. No
-public SOS release is available. Do not substitute a branch archive, source
-checkout, private bundle, issue command, PyPI search result, or GitHub “latest
-source” archive.
+Codex must start at the root [`INSTALL.md`](../INSTALL.md) and issue a direct
+request for the canonical raw pointer:
+
+<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a2/release/current.json>
+
+Only a direct HTTP `404` or `410` proves that no public pointer is available.
+A search result, cached GitHub page, missing directory-listing link, timeout,
+rate limit, permission refusal or other transport failure does not. Those
+failures return `SOS_PUBLIC_RELEASE_DISCOVERY_BLOCKED`. A malformed or
+schema-invalid response returns `SOS_PUBLIC_RELEASE_METADATA_INVALID`.
+
+Do not substitute a branch archive, source checkout, private bundle, issue
+command, PyPI search result, or GitHub “latest source” archive.
 
 ## Deterministic agent procedure
 
 When a public pointer exists, Codex must:
 
-1. validate it against `sos-public-release-pointer-v1.schema.json`;
+1. validate the directly fetched bytes against
+   `sos-public-release-pointer-v1.schema.json`;
 2. download its exact release index from the declared immutable release tag;
 3. verify the index SHA-256 before parsing it;
 4. validate it against `sos-public-release-index-v1.schema.json`;

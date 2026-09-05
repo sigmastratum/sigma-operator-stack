@@ -2,6 +2,11 @@
 
 **Project state for coding agents.**
 
+> **Agent installation entrypoint:** open [`INSTALL.md`](INSTALL.md), then fetch
+> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a2/release/current.json)
+> directly. GitHub search, snippets and cached repository pages are not release
+> authority and cannot prove that the pointer is absent.
+
 Fresh coding-agent sessions often resume from stale chat context, an old green
 check, or the wrong local instructions. SOS records accepted project state in
 the repository, detects when it is no longer current, and returns one safe

@@ -38,6 +38,7 @@ REQUIRED_FILES = {
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "LICENSE",
+    "INSTALL.md",
     "README.md",
     "SECURITY.md",
     "SUPPORT.md",
