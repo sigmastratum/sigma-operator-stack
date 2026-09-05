@@ -91,6 +91,8 @@ def inspect(root: Path) -> dict[str, object]:
         "Verify complete pre-staged draft GitHub Release",
         'cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"',
         'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
+        'cd "$RUNNER_TEMP/existing"',
+        "sha256sum -c SHA256SUMS",
         "SOS-Linux-0.1.0a2.zip",
         "SOS-macOS-0.1.0a2.tar.gz",
         "--json isDraft",
@@ -100,6 +102,18 @@ def inspect(root: Path) -> dict[str, object]:
             break
     if "gh release create" in release_source:
         failures.append("SOS_RELEASE_UNVERIFIED_ASSET_CREATION_FORBIDDEN")
+    draft_step = next(
+        (
+            step
+            for step in publish.get("steps", [])
+            if isinstance(step, dict)
+            and step.get("name") == "Verify complete pre-staged draft GitHub Release"
+        ),
+        {},
+    )
+    draft_run = str(draft_step.get("run", ""))
+    if 'cmp "$RUNNER_TEMP/existing/SHA256SUMS"' in draft_run:
+        failures.append("SOS_RELEASE_COMBINED_CHECKSUM_MUST_NOT_MATCH_SOURCE_ONLY")
     dispatch_inputs = triggers.get("workflow_dispatch", {}).get("inputs", {})
     pypi_input = dispatch_inputs.get("publish_pypi", {})
     steps = publish.get("steps", [])

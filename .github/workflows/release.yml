@@ -118,9 +118,11 @@ jobs:
           for name in SOS-Linux-0.1.0a2.zip SOS-macOS-0.1.0a2.tar.gz; do
             test -f "$RUNNER_TEMP/existing/$name"
           done
-          for name in SHA256SUMS START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a2.cdx.json sigma_operator_stack-0.1.0a2-py3-none-any.whl start-sos-alpha; do
+          for name in START-HERE.md alpha-feedback.md current.json release-manifest.json sos-release-index-v1.json sigma-operator-stack-0.1.0a2.cdx.json sigma_operator_stack-0.1.0a2-py3-none-any.whl start-sos-alpha; do
             cmp "$RUNNER_TEMP/existing/$name" "$RUNNER_TEMP/dist/$name"
           done
+          cd "$RUNNER_TEMP/existing"
+          sha256sum -c SHA256SUMS
       - name: Check immutable PyPI state
         id: pypi
         if: inputs.publish_pypi == true

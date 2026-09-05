@@ -97,12 +97,15 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             "Verify complete pre-staged draft GitHub Release",
             'cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"',
             'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
+            'cd "$RUNNER_TEMP/existing"',
+            "sha256sum -c SHA256SUMS",
             "SOS-Linux-0.1.0a2.zip",
             "SOS-macOS-0.1.0a2.tar.gz",
             "--json isDraft",
         ):
             self.assertIn(required, workflow)
         self.assertNotIn("gh release create", workflow)
+        self.assertNotIn('cmp "$RUNNER_TEMP/existing/SHA256SUMS"', workflow)
 
     def test_native_asset_verifier_survives_candidate_checkout(self) -> None:
         root = Path(__file__).resolve().parents[1]
