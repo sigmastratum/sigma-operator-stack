@@ -41,6 +41,7 @@ REQUIRED_FILES = {
     "README.md",
     "SECURITY.md",
     "SUPPORT.md",
+    "installers/README.md",
     "demo/README.md",
     "demo/capture.sh",
     "demo/capture_fresh_codex.py",

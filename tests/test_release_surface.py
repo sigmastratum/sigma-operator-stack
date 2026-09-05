@@ -131,6 +131,21 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_published", result)
         self.assertFalse((root / "release" / "current.json").exists())
 
+    def test_installers_directory_is_clearly_build_source_only(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = " ".join(
+            (root / "installers" / "README.md").read_text(encoding="utf-8").split()
+        )
+        for required in (
+            "These files are not a public SOS installer",
+            "Do not download or run an individual script",
+            "There is currently no installable public SOS release",
+            "not a supported installation route",
+            "canonical install-with-Codex route",
+            "not standalone end-user assets",
+        ):
+            self.assertIn(required, text)
+
     def test_repository_opening_runbook_separates_remote_gates(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs" / "repository-opening-runbook.md").read_text(
