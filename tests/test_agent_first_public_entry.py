@@ -71,6 +71,21 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("does not install those dependencies or\nrepair `PATH` manually", lifecycle)
         self.assertNotIn("`uv` and package acquisition are prerequisites", lifecycle)
 
+    def test_installation_maintenance_is_not_blocked_by_unverified_qualification(self) -> None:
+        route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
+        update = (ROOT / "docs/version-update.md").read_text(encoding="utf-8")
+        for text in (route, update):
+            normalized = " ".join(text.split())
+            self.assertIn("same-version update", normalized)
+            self.assertIn("public smoke test", normalized)
+            self.assertIn("removal preview", normalized)
+            self.assertIn("not_verified", text)
+            self.assertIn("exact", text)
+        self.assertIn("not an SOS MCP mutation tool", route)
+        self.assertIn("even when the MCP surface is read-only", route)
+        self.assertIn("grants no arbitrary shell authority", " ".join(route.split()))
+        self.assertIn("Invalid control-plane integrity", route)
+
     def test_release_pointer_and_index_are_schema_valid_and_bound(self) -> None:
         pointer_schema = json.loads(
             (SCHEMAS / "sos-public-release-pointer-v1.schema.json").read_text()

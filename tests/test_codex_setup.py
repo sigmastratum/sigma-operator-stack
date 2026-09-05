@@ -221,6 +221,36 @@ print(json.dumps(result.to_dict(), sort_keys=True))
         self.assertEqual(current.status, "stale")
         self.assertIn("SOS_SOURCE_STATUS_CHANGED", current.reasons)
 
+    def test_managed_instructions_separate_maintenance_from_project_work(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        self.assertEqual(self.install(root).status, "success")
+
+        instructions = (root / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "Before application or governance work in this repository",
+            instructions,
+        )
+        self.assertIn(
+            "not-verified results as stop conditions for application work, "
+            "qualification claims and external actions",
+            instructions,
+        )
+        self.assertIn(
+            "not-verified qualification alone do not block exact-release status, "
+            "same-version update, public smoke test or removal preview",
+            instructions,
+        )
+        self.assertIn("never use sos mcp tools for mutation", instructions.lower())
+        self.assertIn("even though the MCP surface is read-only", instructions)
+        self.assertIn("grants no arbitrary shell authority", instructions)
+        self.assertIn("never confirm repository mutation or removal for the owner", instructions)
+        self.assertIn(
+            "Invalid control-plane integrity, required recovery, managed-file drift "
+            "or an unverified launcher still blocks maintenance",
+            instructions,
+        )
+
     def test_fresh_process_install_status_and_remove_share_one_batch(self) -> None:
         temporary, root = self.make_project(config=b'model = "synthetic"\n')
         self.addCleanup(temporary.cleanup)

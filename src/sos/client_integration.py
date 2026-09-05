@@ -70,10 +70,18 @@ _INSTRUCTION_END = "<!-- <<< SOS managed project recovery (sos_codex_first_v1) -
 _INSTRUCTION_BLOCK = (
     _INSTRUCTION_BEGIN
     + "\n# SOS project recovery\n\n"
-    + "Before changing this repository, use only these enabled project-local SOS MCP tools: "
+    + "Before application or governance work in this repository, use only these enabled project-local SOS MCP tools: "
     + ", ".join(f"`{tool}`" for tool in _TOOLS)
     + ". Use them to read current authority, work, boundaries, checks and recovery state. Treat stale, "
-    + "blocked, invalid, unsupported and not-verified results as stop conditions. "
+    + "blocked, invalid, unsupported and not-verified results as stop conditions for application work, "
+    + "qualification claims and external actions. An owner-requested SOS installation-maintenance action "
+    + "is separate: missing current work, not-configured checks or not-verified qualification alone do not "
+    + "block exact-release status, same-version update, public smoke test or removal preview. The owner's explicit "
+    + "maintenance request authorizes invocation of only the platform launcher and public smoke launcher bound by "
+    + "the verified release, even though the MCP surface is read-only; it grants no arbitrary shell authority. "
+    + "Never use SOS MCP tools for "
+    + "mutation, and never confirm repository mutation or removal for the owner. Invalid control-plane "
+    + "integrity, required recovery, managed-file drift or an unverified launcher still blocks maintenance. "
     + "SOS tools do not grant acceptance, shell, commit, push, deploy or production authority.\n"
     + _INSTRUCTION_END
     + "\n"

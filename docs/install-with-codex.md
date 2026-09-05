@@ -55,6 +55,23 @@ not answer the SOS mutation prompt, select project authority, change PATH or a
 shell profile, install undeclared host dependencies, weaken TLS/platform
 security, run qualification automatically, commit, push or deploy.
 
+### Installation maintenance is not project qualification
+
+After recovery, `owner_required` current work, `not_configured` checks or
+`not_verified` qualification do not by themselves prohibit an explicit
+owner-requested status check, same-version update, public smoke test or removal
+preview. Those operations are installation maintenance, not a claim that the
+project is qualified. Codex must use the exact platform launcher selected by
+the verified release index, not an SOS MCP mutation tool. The owner's explicit
+maintenance request authorizes only that launcher and the bound public smoke
+launcher even when the MCP surface is read-only; it grants no arbitrary shell
+authority. Codex must stop for any launcher confirmation.
+
+Invalid control-plane integrity, required recovery, managed-file drift or an
+unverified launcher still blocks maintenance. This exception never permits
+application edits, qualification claims, commit, push, deploy or external
+actions.
+
 The repository-owned route projection uses five states: `ready`,
 `user_action_required`, `unsupported`, `blocked` and `invalid`. Only `ready`
 permits automatic continuation. `user_action_required` is a typed stop, not a

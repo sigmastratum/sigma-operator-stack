@@ -4,6 +4,15 @@ SOS Community alpha uses an explicit, pinned and local-first update contract.
 SOS never checks for updates, downloads a package, runs qualification or
 activates a capability automatically.
 
+Installation maintenance remains available when current work is absent or
+qualification is `not_configured` or `not_verified`. Those states block green
+qualification claims and project work; they are not prerequisites for an
+owner-requested status check, same-version update, public smoke test or removal
+preview. Maintenance must use the exact release-bound platform launcher and
+must preserve its human confirmation boundary. Invalid control-plane
+integrity, required recovery, managed-file drift or an unverified launcher
+continues to fail closed.
+
 ## Alpha contract
 
 Before updating, retain the exact predecessor release identity and its
