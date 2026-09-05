@@ -21,12 +21,11 @@ SPEC.loader.exec_module(checker)
 
 
 class PublicReleasePointerTests(unittest.TestCase):
-    def test_checked_in_pointer_is_bound_but_not_tag_authority(self) -> None:
+    def test_checked_in_pointer_is_bound_to_published_tag_authority(self) -> None:
         result = checker.inspect(ROOT)
         self.assertEqual(result["status"], "passed", result)
         required = checker.inspect(ROOT, require_public=True)
-        self.assertEqual(required["status"], "failed")
-        self.assertEqual(required["failures"], ["SOS_PUBLIC_RELEASE_TAG_UNAVAILABLE"])
+        self.assertEqual(required["status"], "passed", required)
 
     def test_routing_pointer_is_bound_to_immutable_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -100,6 +99,9 @@ class PublicReleasePointerTests(unittest.TestCase):
             ).stdout.strip()
             self.assertNotEqual(routing_head, head)
             self.assertEqual(checker.inspect(repository)["status"], "passed")
+            unavailable = checker.inspect(repository, require_public=True)
+            self.assertEqual(unavailable["status"], "failed")
+            self.assertEqual(unavailable["failures"], ["SOS_PUBLIC_RELEASE_TAG_UNAVAILABLE"])
             pointer["index_sha256"] = "0" * 64
             (release / "current.json").write_text(json.dumps(pointer), encoding="utf-8")
             self.assertIn(

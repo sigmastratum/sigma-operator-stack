@@ -89,7 +89,8 @@ def inspect(root: Path) -> dict[str, object]:
         failures.append("SOS_RELEASE_POINTER_DEPENDENCY_ORDER_INVALID")
     for required in (
         "Verify complete pre-staged draft GitHub Release",
-        "check_native_release_assets.py --index",
+        'cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"',
+        'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
         "SOS-Linux-0.1.0a2.zip",
         "SOS-macOS-0.1.0a2.tar.gz",
         "--json isDraft",

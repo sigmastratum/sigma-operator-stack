@@ -52,6 +52,7 @@ jobs:
           test "$(python -c 'import json; print(json.load(open("release/current.json"))["candidate"])')" = "${{ inputs.candidate }}"
           mkdir -p "$RUNNER_TEMP/routing"
           cp release/current.json release/sos-release-index-v1.json "$RUNNER_TEMP/routing/"
+          cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"
       - name: Check out immutable release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -113,7 +114,7 @@ jobs:
           test "$(gh release view v0.1.0a2 --json isDraft --jq .isDraft)" = "true"
           mkdir -p "$RUNNER_TEMP/existing"
           gh release download v0.1.0a2 --dir "$RUNNER_TEMP/existing"
-          python tools/check_native_release_assets.py --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
+          python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index "$RUNNER_TEMP/routing/sos-release-index-v1.json" --asset-dir "$RUNNER_TEMP/existing"
           for name in SOS-Linux-0.1.0a2.zip SOS-macOS-0.1.0a2.tar.gz; do
             test -f "$RUNNER_TEMP/existing/$name"
           done

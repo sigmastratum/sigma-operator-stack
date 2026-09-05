@@ -95,13 +95,26 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         for required in (
             "Verify complete pre-staged draft GitHub Release",
-            "check_native_release_assets.py --index",
+            'cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"',
+            'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
             "SOS-Linux-0.1.0a2.zip",
             "SOS-macOS-0.1.0a2.tar.gz",
             "--json isDraft",
         ):
             self.assertIn(required, workflow)
         self.assertNotIn("gh release create", workflow)
+
+    def test_native_asset_verifier_survives_candidate_checkout(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        preserve = workflow.index('cp tools/check_native_release_assets.py "$RUNNER_TEMP/routing/"')
+        checkout = workflow.index("Check out immutable release candidate")
+        execute = workflow.index(
+            'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index'
+        )
+        self.assertLess(preserve, checkout)
+        self.assertLess(checkout, execute)
+        self.assertNotIn("python tools/check_native_release_assets.py --index", workflow)
 
     def test_pypi_publication_requires_a_separate_explicit_gate(self) -> None:
         root = Path(__file__).resolve().parents[1]
