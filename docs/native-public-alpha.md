@@ -25,12 +25,17 @@ session.
 - Linux x86_64 on a local native filesystem. Executable qualification also
   requires the admitted Landlock ABI 3+ and seccomp profile.
 - macOS 14 or newer on Apple Silicon and local APFS. Control-plane lifecycle is
-  supported; executable project qualification remains unsupported in this
-  alpha and must return a typed refusal.
+  supported through an **unsigned and not notarized Community Alpha** archive;
+  executable project qualification remains unsupported and must return a typed
+  refusal. macOS may require one explicit human approval in System Settings.
 
-Do not use `sudo`, remove quarantine attributes, bypass Gatekeeper, weaken TLS
-verification or disable endpoint security. A platform refusal is a terminal
-result, not a request to weaken the host.
+Do not use `sudo`, remove quarantine attributes, disable Gatekeeper, weaken TLS
+verification or disable endpoint security. If macOS blocks the checked
+`Install-SOS.command`, open **System Settings → Privacy & Security**, review the
+named SOS refusal, choose **Open Anyway**, authenticate if macOS requests it,
+and retry the same launcher. This is a human trust decision: Codex must report
+`user_action_required` and cannot approve it. Any other platform refusal is a
+terminal result, not a request to weaken the host.
 
 ## Direct invocation
 
@@ -47,6 +52,12 @@ Installation shows one aggregate preview and the human confirms the project
 mutation. Qualification remains a separate action. Removal deletes only the
 SOS-managed Codex integration and SOS-owned environment; `.sigma` records and
 unrelated user files are preserved.
+
+The macOS public artifact is distributed as `.tar.gz`. Extract it with Finder
+or the system `tar` utility into a new directory. Its inner
+`release-manifest.json` explicitly records that signing and notarization are
+absent; a manifest that hides or changes that status is invalid. Signed and
+notarized distribution is deferred until Developer ID funding is available.
 
 ## Included attribution
 

@@ -429,6 +429,13 @@ def verify_bundle(bundle: Path, *, system: str = platform.system()) -> dict[str,
         if system in NATIVE_FILES
         else build.get("network_allowed") is False
     )
+    if public_bundle and system == "Darwin":
+        build_valid = build_valid and build.get("distribution_trust") == {
+            "artifact_signed": False,
+            "gatekeeper_user_action": "open_anyway_may_be_required",
+            "notarized": False,
+            "security_bypass_allowed": False,
+        }
     if (
         manifest.get("contract") != expected_contract
         or manifest.get("version") != VERSION

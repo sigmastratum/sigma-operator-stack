@@ -264,6 +264,10 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         for required in ("verified predecessor evidence", "not evidence for the current source HEAD"):
             self.assertIn(required, readme)
         self.assertIn("verified predecessor evidence for the product principle", demo)
+        self.assertIn("unsigned/not-notarized", readme.lower())
+        self.assertIn("accepted Community Alpha defer", checklist)
+        for forbidden in ("xattr -d", "spctl --master-disable"):
+            self.assertNotIn(forbidden, readme + checklist)
 
     def test_alpha_scope_issue_is_local_public_safe_draft(self) -> None:
         root = Path(__file__).resolve().parents[1]

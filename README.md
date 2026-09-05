@@ -138,7 +138,7 @@ expands the claim.
 | Environment | Observed | Release claim | Current result |
 | --- | --- | --- | --- |
 | Native Linux x86_64 on a local filesystem, Python 3.11/3.12, Landlock ABI >= 3 and required seccomp | Independent native lifecycle and qualification controls passed | Control plane plus registered Python qualification | Candidate evidence exists; public artifact not released |
-| macOS 14+ Apple Silicon on local APFS | Native install, smoke, same-version update, and removal passed; `.sigma` preserved | Control plane only | Executable project qualification remains unsupported; public artifact not released |
+| macOS 14+ Apple Silicon on local APFS | Native install, smoke, same-version update, and removal passed; `.sigma` preserved | Unsigned/not-notarized control-plane alpha; one `Open Anyway` approval may be required | Executable project qualification remains unsupported; no Gatekeeper-clean claim |
 | Windows 11 x86_64 on local NTFS, UAC enabled, ordinary Medium Integrity user | Exact MSIX content built and accepted into Microsoft Store certification | Pending | Store-signed install/update/remove and clean-user lifecycle are not yet proven |
 | Windows with UAC disabled, elevated execution, non-owner profile storage, shared/network filesystem, or sandbox identity targeting another profile | Typed refusals observed | Unsupported | SOS stops before project mutation |
 | Docker Desktop on a WSL2 kernel exposing Landlock ABI 1 | Capability diagnostic recorded | Control plane only | Executable unittest is unsupported and fails closed |

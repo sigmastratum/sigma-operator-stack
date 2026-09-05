@@ -7,6 +7,7 @@ import os
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -252,14 +253,43 @@ class NativeAlphaBundleTests(unittest.TestCase):
             '"LICENSE-UV-MIT"',
             'if public and "windows" in selected',
             'parser.add_argument("--platform"',
+            '"open_anyway_may_be_required"',
+            'archive_suffix = ".tar.gz" if public and platform_name == "macos"',
         ):
             self.assertIn(required, builder)
         self.assertIn("release/current.json", documentation)
         self.assertIn("does not modify system Python, PATH", documentation)
         self.assertIn("Do not use `sudo`", documentation)
+        self.assertIn("System Settings → Privacy & Security", documentation)
+        self.assertIn("`user_action_required`", documentation)
+        self.assertNotIn("`xattr", documentation)
         self.assertIn("`.sigma` records", documentation)
         self.assertIn('"sos_native_alpha_smoke_v1"', smoke_source)
         self.assertNotIn("sos_native_private_alpha_smoke_v1", smoke_source)
+
+    def test_public_macos_archive_is_deterministic_tar_with_explicit_unsigned_trust(self) -> None:
+        builder = _load(
+            "sos_native_alpha_bundle_builder",
+            ROOT / "tools/build_native_alpha_bundles.py",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "SOS-macOS-0.1.0a2"
+            source.mkdir()
+            (source / "Install-SOS.command").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source / "Install-SOS.command").chmod(0o755)
+            first = root / "first.tar.gz"
+            second = root / "second.tar.gz"
+            builder._tar_gz_tree(source, first, 1_700_000_000)
+            builder._tar_gz_tree(source, second, 1_700_000_000)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with tarfile.open(first, "r:gz") as archive:
+                members = archive.getmembers()
+                self.assertEqual(
+                    [member.name for member in members],
+                    ["SOS-macOS-0.1.0a2", "SOS-macOS-0.1.0a2/Install-SOS.command"],
+                )
+                self.assertTrue(all(member.uid == member.gid == 0 for member in members))
 
     def test_windows_acquisition_keeps_tls_verification_and_typed_failures(self) -> None:
         source = (ROOT / "installers/windows-installer/main.go").read_text(

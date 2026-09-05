@@ -44,12 +44,18 @@ evidence.
 - one exact release candidate binds the wheel, Linux/macOS archives, SBOM,
   checksums, provenance, dependency licenses and release index;
 - Linux lifecycle and admitted qualification pass on the exact artifact;
-- macOS lifecycle passes on a signed and notarized artifact while executable
-  qualification remains explicitly unsupported;
+- macOS lifecycle passes from the exact unsigned/not-notarized `.tar.gz` after
+  the documented system `Open Anyway` approval; no Gatekeeper-clean claim is
+  made, and executable qualification remains explicitly unsupported;
 - AF102/AF103 and fresh URL-only Codex drills pass for each claimed platform;
 - launch media is regenerated from that exact candidate;
 - tag, GitHub Release, PyPI and release-pointer activation remain separately
   approved operations.
+
+Developer ID signing and notarization remain a required beta/stable gate, but
+are an explicitly accepted Community Alpha defer. The release must never
+recommend `xattr`, Gatekeeper disablement, administrator execution or another
+security bypass.
 
 ## Gate 3: Windows Store admission
 

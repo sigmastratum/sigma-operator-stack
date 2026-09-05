@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -124,6 +126,29 @@ def _zip_tree(source: Path, destination: Path, epoch: int) -> None:
             mode = stat.S_IMODE(path.stat().st_mode)
             info.external_attr = (stat.S_IFREG | mode) << 16
             archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+
+
+def _tar_gz_tree(source: Path, destination: Path, epoch: int) -> None:
+    root_name = source.name
+    with destination.open("xb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=epoch) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                directory = tarfile.TarInfo(root_name)
+                directory.type = tarfile.DIRTYPE
+                directory.mode = 0o755
+                directory.mtime = epoch
+                directory.uid = directory.gid = 0
+                directory.uname = directory.gname = ""
+                archive.addfile(directory)
+                for path in sorted(source.iterdir(), key=lambda item: item.name):
+                    info = tarfile.TarInfo(f"{root_name}/{path.name}")
+                    payload = path.read_bytes()
+                    info.size = len(payload)
+                    info.mode = stat.S_IMODE(path.stat().st_mode)
+                    info.mtime = epoch
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = ""
+                    archive.addfile(info, __import__("io").BytesIO(payload))
 
 
 def build(
@@ -259,6 +284,13 @@ def build(
             "tree": tree,
             "version": VERSION,
         }
+        if public and platform_name == "macos":
+            manifest["build"]["distribution_trust"] = {
+                "artifact_signed": False,
+                "gatekeeper_user_action": "open_anyway_may_be_required",
+                "notarized": False,
+                "security_bypass_allowed": False,
+            }
         _write(
             root / "release-manifest.json",
             (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode(),
@@ -267,10 +299,14 @@ def build(
         names = [*media, "release-manifest.json"]
         sums = "".join(f"{_sha256(root / name)}  {name}\n" for name in sorted(names))
         _write(root / "SHA256SUMS", sums.encode(), 0o644)
-        archive = output / f"SOS-{display_name}-{VERSION}.zip"
+        archive_suffix = ".tar.gz" if public and platform_name == "macos" else ".zip"
+        archive = output / f"SOS-{display_name}-{VERSION}{archive_suffix}"
         if archive.exists():
             raise FileExistsError(f"output archive already exists: {archive.name}")
-        _zip_tree(root, archive, epoch)
+        if archive_suffix == ".tar.gz":
+            _tar_gz_tree(root, archive, epoch)
+        else:
+            _zip_tree(root, archive, epoch)
         results[platform_name] = {
             "archive": archive.name,
             "archive_sha256": _sha256(archive),
