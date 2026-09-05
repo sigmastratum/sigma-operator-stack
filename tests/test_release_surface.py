@@ -167,6 +167,12 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             workflow[dependency_step:pointer_step],
         )
 
+    def test_release_build_python_is_exactly_bound(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn('python-version: "3.12.3"', workflow)
+        self.assertNotIn('python-version: "3.12"', workflow)
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(

@@ -73,6 +73,17 @@ def inspect(root: Path) -> dict[str, object]:
             break
     ci_source = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     release_source = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    release_setup = next(
+        (
+            step
+            for step in publish.get("steps", [])
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/setup-python@")
+        ),
+        {},
+    )
+    if str(release_setup.get("with", {}).get("python-version", "")) != "3.12.3":
+        failures.append("SOS_RELEASE_BUILD_PYTHON_NOT_EXACT")
     for required in (
         "test -f release/current.json",
         "test -f release/sos-release-index-v1.json",
