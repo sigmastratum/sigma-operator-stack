@@ -20,7 +20,8 @@ the [public repository opening runbook](repository-opening-runbook.md).
 - Issues: enabled
 - Discussions: disabled
 - Wiki: disabled
-- Private vulnerability reporting: required before public visibility
+- Private vulnerability reporting: enable and confirm immediately after public
+  visibility; GitHub does not expose it for private repositories
 
 ## Gate 1: source preview opening
 
@@ -29,7 +30,9 @@ the [public repository opening runbook](repository-opening-runbook.md).
 - `release/current.json`, public tag, GitHub Release and package publication
   remain absent;
 - public metadata, community files, dependency/license inventory and links pass;
-- private vulnerability reporting is enabled before visibility changes;
+- visibility change, private-vulnerability-reporting activation and readback
+  form one rollback-bound transaction; activation failure returns the
+  repository to private;
 - push, remote settings and visibility each retain a separate approval.
 
 The predecessor demo may illustrate the product principle at this gate only

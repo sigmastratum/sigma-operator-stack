@@ -4,6 +4,7 @@ import json
 import importlib.util
 import io
 import hashlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,41 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         result = self.run_tool(root, "check_workflows.py")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        specification = importlib.util.spec_from_file_location(
+            "sos_workflow_contract", root / "tools" / "check_workflows.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        for workflow_name in ("ci.yml", "release.yml"):
+            workflow = (root / ".github" / "workflows" / workflow_name).read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("verify_bundle", workflow)
+            self.assertIn("system='Source'", workflow)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary).resolve()
+            shutil.copytree(root / ".github", repository / ".github")
+            (repository / "tools").mkdir()
+            shutil.copy2(
+                root / "tools" / "check_public_release_pointer.py",
+                repository / "tools" / "check_public_release_pointer.py",
+            )
+            workflow_path = repository / ".github" / "workflows" / "ci.yml"
+            workflow_path.write_text(
+                workflow_path.read_text(encoding="utf-8").replace(
+                    ", system='Source'", "", 1
+                ),
+                encoding="utf-8",
+            )
+            result = module.inspect(repository)
+            self.assertIn(
+                "SOS_GENERIC_RELEASE_BUNDLE_GATE_INCOMPLETE", result["failures"]
+            )
+
     def test_public_release_pointer_is_absent_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = self.run_tool(root, "check_public_release_pointer.py")
@@ -103,7 +139,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         for required in (
             "full-history public scans",
             "private vulnerability reporting",
-            "change only repository visibility",
+            "immediately enable private vulnerability reporting",
+            "rollback-bound transaction",
             "Do not create a tag",
             "return the repository to private",
             "Public exposure cannot be",
@@ -112,6 +149,10 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             "Microsoft Store publication",
         ):
             self.assertIn(required, text)
+        self.assertNotIn(
+            "private vulnerability reporting can be enabled before visibility changes",
+            text,
+        )
 
     def test_windows_signing_is_oidc_only_and_digest_bound(self) -> None:
         root = Path(__file__).resolve().parents[1]

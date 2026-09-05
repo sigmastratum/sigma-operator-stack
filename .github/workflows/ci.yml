@@ -90,7 +90,7 @@ jobs:
           cp "$RUNNER_TEMP/wheel-a/sigma_operator_stack-0.1.0a2-py3-none-any.whl" "$RUNNER_TEMP/bundle/"
           cd "$RUNNER_TEMP/bundle"
           sha256sum -c SHA256SUMS
-          PYTHONPATH="$GITHUB_WORKSPACE/tools" python -c "from pathlib import Path; from start_sos_alpha import verify_bundle; verify_bundle(Path('$RUNNER_TEMP/bundle'))"
+          PYTHONPATH="$GITHUB_WORKSPACE/tools" python -c "from pathlib import Path; from start_sos_alpha import verify_bundle; verify_bundle(Path('$RUNNER_TEMP/bundle'), system='Source')"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: sigma-operator-stack-${{ github.sha }}

@@ -12,7 +12,9 @@ approval and an exact candidate/tree recorded immediately before execution.
 - independent review binds the exact candidate and tree;
 - `release/current.json`, public tags and GitHub Releases are absent;
 - README says source preview and makes no installable-release claim;
-- private vulnerability reporting can be enabled before visibility changes.
+- the private-vulnerability-reporting API is available for immediate activation
+  after visibility changes; GitHub exposes that feature only for public
+  repositories, so the exact rollback operation is ready in advance.
 
 ## Transaction
 
@@ -20,12 +22,15 @@ approval and an exact candidate/tree recorded immediately before execution.
    release-candidate branch while the repository remains private.
 2. Read the remote branch back and require the exact candidate/tree. Stop on
    any drift; do not merge, force-push or rewrite history.
-3. With separate settings approval, set the reviewed branch as default, apply
-   the checked About/topics/features metadata and enable private vulnerability
-   reporting. Read every setting back.
+3. With separate settings approval, set the reviewed branch as default and
+   apply the checked About/topics/features metadata. Read every available
+   setting back. Do not treat private vulnerability reporting as configurable
+   while the repository is private.
 4. With separate visibility approval, change only repository visibility to
-   public. Do not create a tag, Release, package, Store publication or release
-   pointer in this transaction.
+   public, immediately enable private vulnerability reporting and read it
+   back. These operations form one rollback-bound transaction: if activation
+   or readback fails, return the repository to private. Do not create a tag,
+   Release, package, Store publication or release pointer in this transaction.
 5. Read the anonymous public repository back, verify the default candidate,
    tree, README, license and absence of `release/current.json`, then observe
    public Actions for that exact SHA.
@@ -33,10 +38,12 @@ approval and an exact candidate/tree recorded immediately before execution.
 ## Stop conditions
 
 Stop before visibility on candidate/tree drift, a dirty worktree, history-scan
-failure, missing vulnerability reporting, wrong default branch, broken links,
-private content or any unsupported package-availability claim.
+failure, an unavailable vulnerability-reporting activation or rollback route,
+wrong default branch, broken links, private content or any unsupported
+package-availability claim.
 
-After visibility, immediately return the repository to private if the public
+After visibility, immediately return the repository to private if private
+vulnerability reporting cannot be enabled and confirmed, or if the public
 readback exposes the wrong source, private content, credentials, an unexpected
 release pointer or a materially broader claim. Public exposure cannot be
 undone historically, so retain the incident record privately and rotate any

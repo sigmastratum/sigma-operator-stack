@@ -71,6 +71,7 @@ def inspect(root: Path) -> dict[str, object]:
         if required not in condition:
             failures.append("SOS_RELEASE_CANDIDATE_GATE_INCOMPLETE")
             break
+    ci_source = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     release_source = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
     for required in (
         "test -f release/current.json",
@@ -148,6 +149,11 @@ def inspect(root: Path) -> dict[str, object]:
         if all_workflows.count(required) < 2:
             failures.append("SOS_DEPENDENCY_LICENSE_GATE_INCOMPLETE")
             break
+    if any(
+        "verify_bundle" not in source or "system='Source'" not in source
+        for source in (ci_source, release_source)
+    ):
+        failures.append("SOS_GENERIC_RELEASE_BUNDLE_GATE_INCOMPLETE")
     return {
         "contract": "sos_workflow_contract_v1",
         "failures": sorted(set(failures)),
