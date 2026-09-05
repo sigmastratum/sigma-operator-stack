@@ -94,6 +94,30 @@ def inspect(root: Path) -> dict[str, object]:
             break
     if "gh release create" in release_source:
         failures.append("SOS_RELEASE_UNVERIFIED_ASSET_CREATION_FORBIDDEN")
+    dispatch_inputs = triggers.get("workflow_dispatch", {}).get("inputs", {})
+    pypi_input = dispatch_inputs.get("publish_pypi", {})
+    steps = publish.get("steps", [])
+    state_step = next(
+        (step for step in steps if isinstance(step, dict) and step.get("id") == "pypi"),
+        {},
+    )
+    publish_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("pypa/gh-action-pypi-publish@")
+        ),
+        {},
+    )
+    if (
+        pypi_input.get("default") != "false"
+        or pypi_input.get("type") != "boolean"
+        or state_step.get("if") != "inputs.publish_pypi == true"
+        or publish_step.get("if")
+        != "inputs.publish_pypi == true && steps.pypi.outputs.publish_required == 'true'"
+    ):
+        failures.append("SOS_RELEASE_PYPI_AUTHORITY_NOT_SEPARATED")
     pointer_checker = (root / "tools/check_public_release_pointer.py").read_text(
         encoding="utf-8"
     )

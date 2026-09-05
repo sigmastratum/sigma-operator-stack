@@ -11,6 +11,11 @@ on:
         description: Exact qualified 40-character candidate SHA
         required: true
         type: string
+      publish_pypi:
+        description: Separately approved PyPI publication (false for GitHub-only activation)
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   publish:
@@ -115,10 +120,11 @@ jobs:
           done
       - name: Check immutable PyPI state
         id: pypi
+        if: inputs.publish_pypi == true
         run: |
           python tools/check_pypi_state.py --project sigma-operator-stack --version 0.1.0a2 --filename sigma_operator_stack-0.1.0a2-py3-none-any.whl --sha256 "$(sha256sum "$RUNNER_TEMP/publish/sigma_operator_stack-0.1.0a2-py3-none-any.whl" | cut -d' ' -f1)" --github-output "$GITHUB_OUTPUT"
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
-        if: steps.pypi.outputs.publish_required == 'true'
+        if: inputs.publish_pypi == true && steps.pypi.outputs.publish_required == 'true'
         with:
           packages-dir: ${{ runner.temp }}/publish
           attestations: true

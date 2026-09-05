@@ -103,6 +103,43 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             self.assertIn(required, workflow)
         self.assertNotIn("gh release create", workflow)
 
+    def test_pypi_publication_requires_a_separate_explicit_gate(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("publish_pypi:", workflow)
+        self.assertIn("default: false", workflow)
+        self.assertIn("if: inputs.publish_pypi == true", workflow)
+        self.assertIn(
+            "if: inputs.publish_pypi == true && steps.pypi.outputs.publish_required == 'true'",
+            workflow,
+        )
+        specification = importlib.util.spec_from_file_location(
+            "sos_workflow_pypi_gate", root / "tools" / "check_workflows.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            shutil.copytree(root / ".github", repository / ".github")
+            (repository / "tools").mkdir()
+            shutil.copy2(
+                root / "tools" / "check_public_release_pointer.py",
+                repository / "tools" / "check_public_release_pointer.py",
+            )
+            release = repository / ".github/workflows/release.yml"
+            release.write_text(
+                release.read_text(encoding="utf-8").replace(
+                    "        if: inputs.publish_pypi == true\n        run: |",
+                    "        run: |",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = module.inspect(repository)
+            self.assertIn("SOS_RELEASE_PYPI_AUTHORITY_NOT_SEPARATED", result["failures"])
+
     def test_generic_release_bundle_verification_is_explicit_and_fail_closed(self) -> None:
         root = Path(__file__).resolve().parents[1]
         specification = importlib.util.spec_from_file_location(

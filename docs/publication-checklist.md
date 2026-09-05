@@ -100,6 +100,10 @@ reviewed asset set. The workflow refuses an absent or non-draft release and
 checks both native archives against the release index before publication. It
 does not construct an incomplete release from generic wheel assets.
 
+GitHub Release activation and PyPI publication are separate authorities. The
+manual workflow defaults `publish_pypi` to false; PyPI remains skipped unless a
+later approval explicitly sets that input to true.
+
 The submitted Store MSIX was the correct reviewed artifact when uploaded. It
 is now classified as predecessor evidence because the later source successor
 adds schemas that are included in the release wheel. This is candidate drift,
