@@ -465,7 +465,11 @@ class NativeAlphaBundleTests(unittest.TestCase):
             self.assertIn("--no-python-downloads", launcher)
         self.assertIn("--primary-authority EXACT_ID", shell)
         self.assertIn('set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"', shell)
-        self.assertIn('if [ "$MODE" != "install" ]', shell)
+        self.assertIn('[ "$MODE" != "install" ]', shell)
+        self.assertLess(
+            shell.index('[ -n "$PRIMARY_AUTHORITY" ] && [ "$MODE" != "install" ]'),
+            shell.index('/bin/mkdir -p "$RUNTIME_ROOT/bootstrap"'),
+        )
 
     def test_checked_uv_must_match_manifest_digest_and_exact_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

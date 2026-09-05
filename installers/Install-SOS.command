@@ -28,6 +28,10 @@ case "$MODE" in
     exit 2
     ;;
 esac
+if [ -n "$PRIMARY_AUTHORITY" ] && [ "$MODE" != "install" ]; then
+  echo "SOS_ALPHA_ARGUMENTS_INVALID: --primary-authority is valid only with install." >&2
+  exit 2
+fi
 
 if [ ! -f "$UV_SOURCE" ] || [ -L "$UV_SOURCE" ]; then
   echo "SOS_ALPHA_UV_BUNDLE_INVALID: the checked uv bootstrap binary is missing." >&2
@@ -69,10 +73,6 @@ fi
 
 set -- "$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE"
 if [ -n "$PRIMARY_AUTHORITY" ]; then
-  if [ "$MODE" != "install" ]; then
-    echo "SOS_ALPHA_ARGUMENTS_INVALID: --primary-authority is valid only with install." >&2
-    exit 2
-  fi
   set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"
 fi
 set -- "$@" "$PROJECT"
