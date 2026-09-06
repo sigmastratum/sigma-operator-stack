@@ -1,4 +1,4 @@
-# Community alpha scope and known limitations — 0.1.0a3
+# Community alpha scope and known limitations — 0.1.0a4
 
 This is the canonical draft for the issue that will be pinned after the
 repository becomes public. Do not create it remotely from a source-preview

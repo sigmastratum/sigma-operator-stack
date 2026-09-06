@@ -381,7 +381,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertIn("exact alpha artifacts selected by `release/current.json`", security)
         self.assertIn("Security fixes are provided for the latest published", security)
         self.assertIn("## 0.1.0a3 — 2026-09-05", changelog)
-        self.assertNotIn("releases/tag/v0.1.0a3", changelog)
+        self.assertNotIn("releases/tag/v0.1.0a4", changelog)
         for heading in (
             "## Gate 1: source preview opening",
             "## Gate 2: Linux/macOS installable release",
@@ -402,7 +402,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
     def test_alpha_scope_issue_is_local_public_safe_draft(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs/alpha-scope-issue.md").read_text(encoding="utf-8")
-        self.assertIn("Community alpha scope and known limitations — 0.1.0a3", text)
+        self.assertIn("Community alpha scope and known limitations — 0.1.0a4", text)
         self.assertIn("Do not create it remotely", text)
         self.assertIn("Stars, clones, views, forks and", text)
         self.assertIn("not adoption", text)

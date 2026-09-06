@@ -34,7 +34,7 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("INSTALL.md", first_viewport)
         self.assertIn(POINTER_URL, first_viewport)
         self.assertIn(
-            "Current installable Community alpha: `0.1.0a3`", first_viewport
+            "Current installable Community alpha: `0.1.0a4`", first_viewport
         )
         self.assertNotIn("/release/0.1.0a3/release/current.json", first_viewport)
         self.assertIn("checked-in release", first_viewport)
@@ -128,8 +128,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
     def test_checked_in_release_routes_linux_and_macos_without_external_actions(self) -> None:
         tool = ROOT / "tools" / "resolve_agent_first_route.py"
         for system, architecture, filename in (
-            ("linux", "x86_64", "SOS-Linux-0.1.0a3.zip"),
-            ("darwin", "arm64", "SOS-macOS-0.1.0a3.tar.gz"),
+            ("linux", "x86_64", "SOS-Linux-0.1.0a4.zip"),
+            ("darwin", "arm64", "SOS-macOS-0.1.0a4.tar.gz"),
         ):
             with self.subTest(system=system):
                 completed = subprocess.run(

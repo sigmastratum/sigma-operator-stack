@@ -7,7 +7,7 @@
 > directly. GitHub search, snippets and cached repository pages are not release
 > authority and cannot prove that the pointer is absent.
 
-**Current installable Community alpha: `0.1.0a3`.** Older releases remain
+**Current installable Community alpha: `0.1.0a4`.** Older releases remain
 available as history but are not current installation authority.
 
 Fresh coding-agent sessions often resume from stale chat context, an old green
