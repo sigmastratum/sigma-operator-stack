@@ -253,9 +253,16 @@ def inspect(repository: Path, wheelhouses: list[Path], sbom: Path | None) -> dic
     if locked_runtime != expected_runtime:
         failures.append("SOS_DEPENDENCY_RUNTIME_REQUIREMENT_MISMATCH")
     observed_runtime = {_wheel_identity(name) for name in native_wheels | windows_wheels}
-    product_identity = next(iter((name, str(item["version"])) for name, item in product.items()), None)
-    if product_identity is not None:
-        observed_runtime.discard(product_identity)
+    # Platform packages can intentionally lag the source candidate while a
+    # Store or notarization gate is still in progress.  Their SOS wheel is the
+    # product itself, not a third-party runtime dependency; product-version
+    # equality is enforced by each artifact builder and its release binding.
+    # Remove every product-name entry here so the license gate compares only
+    # the closed third-party runtime dependency set.
+    for product_name in product:
+        observed_runtime = {
+            identity for identity in observed_runtime if identity[0] != product_name
+        }
     if observed_runtime != expected_runtime:
         failures.append("SOS_DEPENDENCY_BUILDER_INVENTORY_MISMATCH")
 

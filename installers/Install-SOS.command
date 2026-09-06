@@ -5,6 +5,8 @@ MODE="${1:-install}"
 PROJECT="${2:-$(pwd)}"
 PRIMARY_AUTHORITY=""
 MAINTENANCE_BINDING=""
+RESUME_CONFIRMATION_SEED=""
+EXPECTED_PLAN_DIGEST=""
 if [ "$#" -ge 2 ]; then shift 2; else shift "$#"; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -24,8 +26,24 @@ while [ "$#" -gt 0 ]; do
       MAINTENANCE_BINDING="$2"
       shift 2
       ;;
+    --resume-confirmation-seed)
+      [ "$#" -ge 2 ] && [ -z "$RESUME_CONFIRMATION_SEED" ] && [ -n "$2" ] || {
+        echo "SOS_ALPHA_ARGUMENTS_INVALID: invalid --resume-confirmation-seed." >&2
+        exit 2
+      }
+      RESUME_CONFIRMATION_SEED="$2"
+      shift 2
+      ;;
+    --expected-plan-digest)
+      [ "$#" -ge 2 ] && [ -z "$EXPECTED_PLAN_DIGEST" ] && [ -n "$2" ] || {
+        echo "SOS_ALPHA_ARGUMENTS_INVALID: invalid --expected-plan-digest." >&2
+        exit 2
+      }
+      EXPECTED_PLAN_DIGEST="$2"
+      shift 2
+      ;;
     *)
-      echo "SOS_ALPHA_ARGUMENTS_INVALID: use Install-SOS.command install PROJECT [--primary-authority EXACT_ID] --maintenance-release-binding-json EXACT_JSON from the public release index." >&2
+      echo "SOS_ALPHA_ARGUMENTS_INVALID: use the exact arguments from the verified public release route." >&2
       exit 2
       ;;
   esac
@@ -49,6 +67,15 @@ case "$MODE" in
 esac
 if [ -n "$PRIMARY_AUTHORITY" ] && [ "$MODE" != "install" ]; then
   echo "SOS_ALPHA_ARGUMENTS_INVALID: --primary-authority is valid only with install." >&2
+  exit 2
+fi
+if { [ -n "$RESUME_CONFIRMATION_SEED" ] && [ -z "$EXPECTED_PLAN_DIGEST" ]; } ||
+   { [ -z "$RESUME_CONFIRMATION_SEED" ] && [ -n "$EXPECTED_PLAN_DIGEST" ]; }; then
+  echo "SOS_ALPHA_CONFIRMATION_HANDOFF_INVALID: use the seed and plan digest from the same preview." >&2
+  exit 2
+fi
+if [ -n "$RESUME_CONFIRMATION_SEED" ] && [ "$MODE" != "install" ]; then
+  echo "SOS_ALPHA_CONFIRMATION_HANDOFF_INVALID: confirmation resume is valid only for install." >&2
   exit 2
 fi
 
@@ -96,6 +123,12 @@ if [ -n "$MAINTENANCE_BINDING" ]; then
 fi
 if [ -n "$PRIMARY_AUTHORITY" ]; then
   set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"
+fi
+if [ -n "$RESUME_CONFIRMATION_SEED" ]; then
+  set -- "$@" --resume-confirmation-seed "$RESUME_CONFIRMATION_SEED"
+fi
+if [ -n "$EXPECTED_PLAN_DIGEST" ]; then
+  set -- "$@" --expected-plan-digest "$EXPECTED_PLAN_DIGEST"
 fi
 set -- "$@" "$PROJECT"
 

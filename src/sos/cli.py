@@ -37,6 +37,7 @@ from .maintenance_binding import MaintenanceBindingError, MaintenanceLauncherBin
 from .qualification_contracts import QualificationContractError
 from .platform_admission import admit_project_filesystem
 from .repository import RepositoryError
+from .result import Status, TerminalResult
 from .validation import validate_repository
 from .workspace import (
     WorkspaceError,
@@ -90,6 +91,8 @@ def _parser() -> argparse.ArgumentParser:
             subparser.add_argument("--with-codex", action="store_true")
             subparser.add_argument("--primary-authority")
             subparser.add_argument("--maintenance-release-binding-json")
+            subparser.add_argument("--resume-confirmation-seed")
+            subparser.add_argument("--expected-plan-digest")
     qualify = subparsers.add_parser("qualify")
     qualify.add_argument("path", nargs="?", default=".")
     qualify.add_argument("--family")
@@ -248,9 +251,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
+        confirmation_resume_requested = (
+            args.resume_confirmation_seed is not None
+            or args.expected_plan_digest is not None
+        )
         if (
             args.primary_authority is not None
             or args.maintenance_release_binding_json is not None
+            or confirmation_resume_requested
         ) and not args.with_codex:
             payload = {
                 "contract": "sos_init_result_v1",
@@ -258,12 +266,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "reasons": [
                     "SOS_PRIMARY_AUTHORITY_WITHOUT_CODEX_INIT"
                     if args.primary_authority is not None
-                    else "SOS_MAINTENANCE_BINDING_WITHOUT_CODEX_INIT"
+                    else (
+                        "SOS_MAINTENANCE_BINDING_WITHOUT_CODEX_INIT"
+                        if args.maintenance_release_binding_json is not None
+                        else "SOS_P106_CONFIRMATION_WITHOUT_CODEX_INIT"
+                    )
                 ],
             }
             _print(payload, args.as_json)
             return 2
         if args.with_codex:
+            if (args.resume_confirmation_seed is None) != (
+                args.expected_plan_digest is None
+            ):
+                payload = {
+                    "contract": "sos_p106_init_result_v1",
+                    "status": "invalid",
+                    "reasons": ["SOS_P106_CONFIRMATION_HANDOFF_INVALID"],
+                }
+                _print(payload, args.as_json)
+                return 2
+            if confirmation_resume_requested and args.yes:
+                payload = {
+                    "contract": "sos_p106_init_result_v1",
+                    "status": "invalid",
+                    "reasons": ["SOS_P106_CONFIRMATION_HANDOFF_INVALID"],
+                }
+                _print(payload, args.as_json)
+                return 2
             maintenance_binding = None
             if args.maintenance_release_binding_json is not None:
                 try:
@@ -284,6 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.path,
                     primary_authority_id=args.primary_authority,
                     maintenance_binding=maintenance_binding,
+                    confirmation_seed=args.resume_confirmation_seed,
                 )
             except LifecycleError as exc:
                 if exc.reason == "SOS_P106_RECOVERY_REQUIRED":
@@ -297,20 +328,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.path,
                         primary_authority_id=args.primary_authority,
                         maintenance_binding=maintenance_binding,
+                        confirmation_seed=args.resume_confirmation_seed,
                     )
                 else:
                     result = preview_one_command_init(
                         args.path,
                         primary_authority_id=args.primary_authority,
                         maintenance_binding=maintenance_binding,
+                        confirmation_seed=args.resume_confirmation_seed,
                     )
                     payload = result.to_dict()
                     _print(payload, args.as_json)
                     return 0 if result.status == "success" else 2
-            preview = one_command_plan.preview()
-            _print(preview.to_dict(), args.as_json)
+            if args.expected_plan_digest is not None:
+                if one_command_plan.aggregate_plan_digest != args.expected_plan_digest:
+                    result = TerminalResult(
+                        "sos_p106_init_result_v1",
+                        Status.STALE,
+                        ("SOS_P106_CONFIRMATION_BINDING_MISMATCH",),
+                        {
+                            "expected_plan_digest": args.expected_plan_digest,
+                            "observed_plan_digest": one_command_plan.aggregate_plan_digest,
+                        },
+                    )
+                    _print(result.to_dict(), args.as_json)
+                    return 2
+            else:
+                preview = one_command_plan.preview()
+                _print(preview.to_dict(), args.as_json)
             confirmed = args.yes or _ask_confirmation(
-                "Apply the exact SOS bootstrap and Codex integration plan?"
+                "Apply the exact SOS bootstrap and Codex integration plan"
+                + (
+                    f" {one_command_plan.aggregate_plan_digest}?"
+                    if args.expected_plan_digest is not None
+                    else "?"
+                )
             )
             result = execute_one_command_init(
                 one_command_plan,

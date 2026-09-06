@@ -53,6 +53,16 @@ class DependencyLicenseTests(unittest.TestCase):
         self.assertEqual(result["runtime_component_count"], 7)
         self.assertFalse(result["notice_required"])
 
+    def test_platform_product_wheel_may_lag_without_becoming_a_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self._repository(Path(temporary))
+            inventory_path = repository / "requirements/dependency-licenses.json"
+            value = json.loads(inventory_path.read_text(encoding="utf-8"))
+            value["product"]["version"] = "9.9.9"
+            inventory_path.write_text(json.dumps(value), encoding="utf-8")
+            result = CHECKER.inspect(repository, [], None)
+            self.assertEqual(result["status"], "passed", result)
+
     def test_missing_extra_duplicate_and_unknown_license_fail_closed(self) -> None:
         mutations = {
             "missing": lambda value: value["runtime"].pop(),

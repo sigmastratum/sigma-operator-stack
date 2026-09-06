@@ -3,6 +3,16 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
+## 0.1.0a5 — Unreleased
+
+### Fixed
+
+- Bind a resumed agent-first installation confirmation to the exact plan shown
+  before a Codex process boundary. Any seed, digest, repository state or
+  launcher drift now fails before the mutation prompt.
+- Treat project trust and sandbox execution failures as explicit interactive
+  handoffs instead of silently overriding Codex security state.
+
 ## 0.1.0a4 — 2026-09-06
 
 ### Fixed

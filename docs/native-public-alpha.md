@@ -1,6 +1,6 @@
 # SOS Community alpha for Linux and macOS
 
-This archive is an exact, checksum-bound SOS `0.1.0a4` release artifact. The
+This archive is an exact, checksum-bound SOS `0.1.0a5` release artifact. The
 canonical route starts at the repository's `release/current.json`; do not use
 an archive copied from a branch, source snapshot or third-party mirror.
 

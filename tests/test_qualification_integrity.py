@@ -118,7 +118,7 @@ class QualificationIntegrityTests(unittest.TestCase):
     def test_executor_identity_binds_package_version_and_executable_bytes(self) -> None:
         self.assertEqual(PACKAGE_EXECUTION_IDENTITY["contract"], "sos_package_execution_identity_v1")
         self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package"], "sigma-operator-stack")
-        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package_version"], "0.1.0a4")
+        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package_version"], "0.1.0a5")
         self.assertGreater(PACKAGE_EXECUTION_IDENTITY["file_count"], 1)
         self.assertRegex(PACKAGE_EXECUTION_IDENTITY["content_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertRegex(EXECUTOR_DIGEST, r"^sha256:[0-9a-f]{64}$")

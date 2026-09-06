@@ -59,6 +59,7 @@ _PENDING = "lifecycle/p106-pending.json"
 _RECEIPT = "lifecycle/p106-install.json"
 _MAX_PENDING_BYTES = 1024 * 1024
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CONFIRMATION_SEED = re.compile(r"^[0-9a-f]{64}$")
 
 
 class LifecycleError(RuntimeError):
@@ -77,6 +78,7 @@ class LifecycleError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class OneCommandPlan:
     root: Path
+    confirmation_seed: str
     transaction_id: str
     bootstrap_intent_id: str
     bootstrap_plan_id: str
@@ -118,6 +120,11 @@ class OneCommandPlan:
     def preview(self) -> TerminalResult:
         details = {
             "aggregate_plan_digest": self.aggregate_plan_digest,
+            "confirmation_handoff": {
+                "contract": "sos_p106_confirmation_handoff_v1",
+                "seed": self.confirmation_seed,
+                "plan_digest": self.aggregate_plan_digest,
+            },
             "canonical_bootstrap_plan_digest": digest_value(
                 {
                     "transaction_id": self.transaction_id,
@@ -165,6 +172,7 @@ def prepare_one_command_init(
     launcher: LauncherBinding | None = None,
     primary_authority_id: str | None = None,
     maintenance_binding: MaintenanceLauncherBinding | None = None,
+    confirmation_seed: str | None = None,
 ) -> OneCommandPlan:
     root = discover_repository_root(path)
     admission = admit_project_filesystem(root)
@@ -181,11 +189,23 @@ def prepare_one_command_init(
         raise LifecycleError("SOS_P106_RECOVERY_REQUIRED", Status.BLOCKED)
     if preliminary.head is None:
         raise LifecycleError("SOS_REPOSITORY_UNBORN", Status.NOT_VERIFIED)
-    transaction_id = secrets.token_hex(32)
-    bootstrap_intent_id = "sha256:" + secrets.token_hex(32)
-    bootstrap_plan_id = "sha256:" + secrets.token_hex(32)
+    if confirmation_seed is None:
+        confirmation_seed = secrets.token_hex(32)
+    if _CONFIRMATION_SEED.fullmatch(confirmation_seed) is None:
+        raise LifecycleError("SOS_P106_CONFIRMATION_SEED_INVALID")
+    transaction_id = _confirmation_value(confirmation_seed, "transaction", 64)
+    bootstrap_intent_id = "sha256:" + _confirmation_value(
+        confirmation_seed, "bootstrap-intent", 64
+    )
+    bootstrap_plan_id = "sha256:" + _confirmation_value(
+        confirmation_seed, "bootstrap-plan", 64
+    )
     provisional = repository_identity_contract(root)
-    local_nonce = secrets.token_hex(16) if provisional.identity_mode == "local_nonce_bound" else None
+    local_nonce = (
+        _confirmation_value(confirmation_seed, "repository-nonce", 32)
+        if provisional.identity_mode == "local_nonce_bound"
+        else None
+    )
     identity = repository_identity_contract(root, local_repository_nonce=local_nonce)
     compatibility = discover_compatibility(
         root, primary_authority_id=primary_authority_id
@@ -237,6 +257,7 @@ def prepare_one_command_init(
     }
     return OneCommandPlan(
         root,
+        confirmation_seed,
         transaction_id,
         bootstrap_intent_id,
         bootstrap_plan_id,
@@ -257,6 +278,7 @@ def preview_one_command_init(
     launcher: LauncherBinding | None = None,
     primary_authority_id: str | None = None,
     maintenance_binding: MaintenanceLauncherBinding | None = None,
+    confirmation_seed: str | None = None,
 ) -> TerminalResult:
     try:
         return prepare_one_command_init(
@@ -264,6 +286,7 @@ def preview_one_command_init(
             launcher=launcher,
             primary_authority_id=primary_authority_id,
             maintenance_binding=maintenance_binding,
+            confirmation_seed=confirmation_seed,
         ).preview()
     except LifecycleError as exc:
         if exc.reason == "SOS_ALREADY_INITIALIZED":
@@ -618,6 +641,16 @@ def _json_bytes(value: dict[str, Any]) -> bytes:
     if len(payload) > _MAX_PENDING_BYTES:
         raise LifecycleError("SOS_P106_PENDING_LIMIT_EXCEEDED", Status.UNSUPPORTED)
     return payload
+
+
+def _confirmation_value(seed: str, label: str, length: int) -> str:
+    payload = (
+        b"sos-p106-confirmation-v1\0"
+        + label.encode("ascii")
+        + b"\0"
+        + seed.encode("ascii")
+    )
+    return hashlib.sha256(payload).hexdigest()[:length]
 
 
 def _call_fault(fault: Callable[[str], None] | None, boundary: str) -> None:

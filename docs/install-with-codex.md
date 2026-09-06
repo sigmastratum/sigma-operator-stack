@@ -62,10 +62,35 @@ the existing launcher prompt only after the user's single confirmation. A
 second paraphrased preview, approval to start the launcher, or confirmation
 layer is a failed onboarding replay.
 
+If the Codex execution transport cannot keep that exact process attached
+across the user's reply, it must not apply the reply to a newly generated
+plan. The preview includes a `sos_p106_confirmation_handoff_v1` seed and plan
+digest. Codex may restart only the same verified launcher with both
+`--resume-confirmation-seed` and `--expected-plan-digest`. SOS deterministically
+rebuilds and revalidates the plan, refuses any digest drift before prompting,
+and does not print a replacement preview. Codex may answer that resumed prompt
+only after the user approved the matching digest. The seed is not project
+authority and cannot bypass the controlling-terminal requirement. The resumed
+route rejects `--yes`; it must receive the human answer through its live TTY.
+
 Codex may request ordinary network or command-execution permission. It must
 not answer the SOS mutation prompt, select project authority, change PATH or a
 shell profile, install undeclared host dependencies, weaken TLS/platform
 security, run qualification automatically, commit, push or deploy.
+
+After installation, loading the project-local `.codex/config.toml` is a
+separate Codex trust decision. SOS must not edit Codex's user trust registry or
+silently mark the project trusted. If a fresh task cannot load the eight SOS
+tools because project trust or the ordinary interactive session is missing,
+return `SOS_INTERACTIVE_USER_HANDOFF_REQUIRED` and ask the user to complete
+Codex's normal trust action. Do not inject a global trust override, weaken the
+sandbox or claim recovery success without the tools.
+
+If Codex's sandbox itself cannot start an otherwise admitted command, report
+the sandbox diagnostic as an execution-environment blocker. Do not retry with
+Administrator, an approval bypass, disabled sandboxing or altered host
+security. This does not invalidate a separately successful SOS lifecycle, but
+it prevents a strict agent-first drill pass.
 
 ### Installation maintenance is not project qualification
 

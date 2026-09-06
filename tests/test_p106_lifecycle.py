@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sos import cli as sos_cli
 from sos.agent_api import project_tool
 from sos.client_integration import (
     LauncherBinding,
@@ -22,6 +23,7 @@ from sos.contracts import exclusion_policy_digest
 from sos.dirty import observe_application
 from sos.isolation import isolation_limits
 from sos.lifecycle import (
+    LifecycleError,
     execute_one_command_init,
     prepare_one_command_init,
     preview_one_command_init,
@@ -145,6 +147,172 @@ class P106LifecycleTests(unittest.TestCase):
         self.assertEqual(setup_status.status, "success")
         self.assertEqual(setup_status.details["workspace_currentness_authority"], "sos_status")
         self.assertNotIn("currentness_after_install", setup_status.details)
+
+    def test_confirmation_handoff_rebuilds_exact_plan_across_process_boundary(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        seed = "a" * 64
+
+        first = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed=seed
+        )
+        preview = first.preview()
+        rebuilt = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed=seed
+        )
+
+        self.assertEqual(first.aggregate_plan_digest, rebuilt.aggregate_plan_digest)
+        self.assertEqual(first.transaction_id, rebuilt.transaction_id)
+        self.assertEqual(first.repository_id, rebuilt.repository_id)
+        self.assertEqual(
+            preview.details["confirmation_handoff"],
+            {
+                "contract": "sos_p106_confirmation_handoff_v1",
+                "seed": seed,
+                "plan_digest": first.aggregate_plan_digest,
+            },
+        )
+        installed = execute_one_command_init(
+            rebuilt, confirmed=True, controlling_tty_observed=True
+        )
+        self.assertEqual(installed.status, "success", installed.to_dict())
+        self.assertEqual(
+            installed.details["aggregate_plan_digest"], first.aggregate_plan_digest
+        )
+
+    def test_confirmation_handoff_seed_is_bounded_and_changes_plan_identity(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        first = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed="a" * 64
+        )
+        second = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed="b" * 64
+        )
+        self.assertNotEqual(first.aggregate_plan_digest, second.aggregate_plan_digest)
+        self.assertNotEqual(first.transaction_id, second.transaction_id)
+        self.assertNotEqual(first.repository_id, second.repository_id)
+        with self.assertRaises(LifecycleError) as invalid:
+            prepare_one_command_init(
+                str(root), launcher=self.binding(), confirmation_seed="not-a-seed"
+            )
+        self.assertEqual(invalid.exception.reason, "SOS_P106_CONFIRMATION_SEED_INVALID")
+
+    def test_confirmation_handoff_binds_repository_state(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        seed = "a" * 64
+        first = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed=seed
+        )
+        (root / "README.md").write_text("Changed after preview.\n", encoding="utf-8")
+        rebuilt = prepare_one_command_init(
+            str(root), launcher=self.binding(), confirmation_seed=seed
+        )
+        self.assertNotEqual(first.aggregate_plan_digest, rebuilt.aggregate_plan_digest)
+
+    def test_cli_confirmation_resume_rejects_noninteractive_yes(self) -> None:
+        printed: list[dict[str, object]] = []
+        with (
+            mock.patch.object(sos_cli, "_filesystem_admission_for_command", return_value=None),
+            mock.patch.object(sos_cli, "prepare_one_command_init") as prepare,
+            mock.patch.object(
+                sos_cli,
+                "_print",
+                side_effect=lambda payload, _as_json: printed.append(payload),
+            ),
+        ):
+            exit_code = sos_cli.main(
+                [
+                    "init",
+                    "--with-codex",
+                    "--yes",
+                    "--resume-confirmation-seed",
+                    "a" * 64,
+                    "--expected-plan-digest",
+                    "sha256:" + "1" * 64,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(
+            printed[-1]["reasons"], ["SOS_P106_CONFIRMATION_HANDOFF_INVALID"]
+        )
+        prepare.assert_not_called()
+
+    def test_cli_confirmation_resume_refuses_digest_drift_before_prompt(self) -> None:
+        plan = mock.Mock(aggregate_plan_digest="sha256:" + "1" * 64)
+        printed: list[dict[str, object]] = []
+        with (
+            mock.patch.object(sos_cli, "_filesystem_admission_for_command", return_value=None),
+            mock.patch.object(sos_cli, "prepare_one_command_init", return_value=plan),
+            mock.patch.object(sos_cli, "execute_one_command_init") as execute,
+            mock.patch.object(sos_cli, "_ask_confirmation") as confirm,
+            mock.patch.object(
+                sos_cli,
+                "_print",
+                side_effect=lambda payload, _as_json: printed.append(payload),
+            ),
+        ):
+            exit_code = sos_cli.main(
+                [
+                    "init",
+                    "--with-codex",
+                    "--resume-confirmation-seed",
+                    "a" * 64,
+                    "--expected-plan-digest",
+                    "sha256:" + "2" * 64,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(
+            printed[-1]["reasons"], ["SOS_P106_CONFIRMATION_BINDING_MISMATCH"]
+        )
+        confirm.assert_not_called()
+        execute.assert_not_called()
+
+    def test_cli_confirmation_resume_prompts_for_exact_rebuilt_digest(self) -> None:
+        digest = "sha256:" + "1" * 64
+        plan = mock.Mock(aggregate_plan_digest=digest)
+        installed = TerminalResult(
+            "sos_p106_init_result_v1", Status.SUCCESS, ("SOS_P106_INSTALLED",), {}
+        )
+        printed: list[dict[str, object]] = []
+        with (
+            mock.patch.object(sos_cli, "_filesystem_admission_for_command", return_value=None),
+            mock.patch.object(sos_cli, "prepare_one_command_init", return_value=plan),
+            mock.patch.object(
+                sos_cli, "execute_one_command_init", return_value=installed
+            ) as execute,
+            mock.patch.object(sos_cli, "_ask_confirmation", return_value=True) as confirm,
+            mock.patch.object(sos_cli.sys.stdin, "isatty", return_value=True),
+            mock.patch.object(
+                sos_cli,
+                "_print",
+                side_effect=lambda payload, _as_json: printed.append(payload),
+            ),
+        ):
+            exit_code = sos_cli.main(
+                [
+                    "init",
+                    "--with-codex",
+                    "--resume-confirmation-seed",
+                    "a" * 64,
+                    "--expected-plan-digest",
+                    digest,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        confirm.assert_called_once_with(
+            f"Apply the exact SOS bootstrap and Codex integration plan {digest}?"
+        )
+        execute.assert_called_once_with(
+            plan, confirmed=True, controlling_tty_observed=True
+        )
+        self.assertEqual(len(printed), 1)
+        self.assertEqual(printed[0]["status"], "success")
 
     def test_fresh_install_is_atomic_idempotent_and_preflight_stays_not_verified(self) -> None:
         temporary, root = self.make_project(agents=None, config=None)

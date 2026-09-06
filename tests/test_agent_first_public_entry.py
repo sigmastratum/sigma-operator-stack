@@ -69,6 +69,26 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("user's single confirmation", normalized)
         self.assertIn("answers the existing launcher prompt", normalized)
         self.assertIn("confirmation layer is a failed onboarding replay", normalized)
+        self.assertIn("sos_p106_confirmation_handoff_v1", route)
+        self.assertIn("--resume-confirmation-seed", route)
+        self.assertIn("--expected-plan-digest", route)
+        self.assertIn("refuses any digest drift before prompting", normalized)
+        self.assertIn("cannot bypass the controlling-terminal requirement", normalized)
+        self.assertIn("resumed route rejects `--yes`", normalized)
+
+    def test_project_trust_and_sandbox_handoffs_remain_fail_closed(self) -> None:
+        route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
+        drill = (ROOT / "docs/agent-first-public-drill.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (route, drill):
+            self.assertIn("SOS_INTERACTIVE_USER_HANDOFF_REQUIRED", text)
+            self.assertIn("sandbox", text.lower())
+        self.assertIn("must not edit Codex's user trust registry", route)
+        self.assertIn("Do not inject a global trust override", route)
+        self.assertIn("disabled sandboxing", route)
+        self.assertIn("Archive delivery on Linux/macOS", " ".join(drill.split()))
+        self.assertIn("regenerated unbound plan", drill)
 
     def test_historical_quickstart_is_not_install_authority(self) -> None:
         historical = (ROOT / "docs/alpha-quickstart.md").read_text(encoding="utf-8")

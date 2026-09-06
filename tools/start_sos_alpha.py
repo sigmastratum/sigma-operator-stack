@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.0a4"
+VERSION = "0.1.0a5"
 UV_VERSION = "0.12.6"
 PYTHON_VERSION = "3.12.14"
 WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"
@@ -640,6 +640,8 @@ def run_onboarding(
     *,
     primary_authority_id: str | None = None,
     maintenance_handoff_json: str | None = None,
+    resume_confirmation_seed: str | None = None,
+    expected_plan_digest: str | None = None,
     uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
@@ -752,6 +754,10 @@ def run_onboarding(
         )
     if primary_authority_id is not None:
         init_command.extend(["--primary-authority", primary_authority_id])
+    if resume_confirmation_seed is not None:
+        init_command.extend(["--resume-confirmation-seed", resume_confirmation_seed])
+    if expected_plan_digest is not None:
+        init_command.extend(["--expected-plan-digest", expected_plan_digest])
     init_command.append(os.fspath(root))
     initialized = runner(init_command, check=False)
     if initialized.returncode != 0:
@@ -861,10 +867,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--primary-authority")
     parser.add_argument("--uv")
     parser.add_argument("--maintenance-release-binding-json")
+    parser.add_argument("--resume-confirmation-seed")
+    parser.add_argument("--expected-plan-digest")
     parser.add_argument("--mode", choices=("install", "update", "remove"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
     try:
+        confirmation_resume_requested = (
+            arguments.resume_confirmation_seed is not None
+            or arguments.expected_plan_digest is not None
+        )
+        if confirmation_resume_requested and arguments.mode != "install":
+            raise _fail(
+                "SOS_ALPHA_CONFIRMATION_HANDOFF_INVALID",
+                "Confirmation resume is valid only for project installation.",
+                "Rediscover the exact install preview and use both bound resume values.",
+            )
+        if (arguments.resume_confirmation_seed is None) != (
+            arguments.expected_plan_digest is None
+        ):
+            raise _fail(
+                "SOS_ALPHA_CONFIRMATION_HANDOFF_INVALID",
+                "The confirmation handoff is incomplete.",
+                "Use both the seed and exact plan digest from the same SOS preview.",
+            )
         if launcher.is_symlink():
             raise _fail(
                 "SOS_ALPHA_LAUNCHER_SYMLINK_FORBIDDEN",
@@ -884,6 +910,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 primary_authority_id=arguments.primary_authority,
                 uv_path=arguments.uv,
                 maintenance_handoff_json=arguments.maintenance_release_binding_json,
+                resume_confirmation_seed=arguments.resume_confirmation_seed,
+                expected_plan_digest=arguments.expected_plan_digest,
             )
         elif arguments.mode == "update":
             run_update(

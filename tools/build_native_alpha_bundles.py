@@ -17,7 +17,7 @@ import zipfile
 from pathlib import Path
 
 
-VERSION = "0.1.0a4"
+VERSION = "0.1.0a5"
 UV_VERSION = "0.12.6"
 PYTHON_VERSION = "3.12.14"
 WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"

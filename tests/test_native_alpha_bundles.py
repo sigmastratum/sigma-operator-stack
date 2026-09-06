@@ -274,7 +274,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "SOS-macOS-0.1.0a4"
+            source = root / f"SOS-macOS-{builder.VERSION}"
             source.mkdir()
             (source / "Install-SOS.command").write_text("#!/bin/sh\n", encoding="utf-8")
             (source / "Install-SOS.command").chmod(0o755)
@@ -287,7 +287,10 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 members = archive.getmembers()
                 self.assertEqual(
                     [member.name for member in members],
-                    ["SOS-macOS-0.1.0a4", "SOS-macOS-0.1.0a4/Install-SOS.command"],
+                    [
+                        f"SOS-macOS-{builder.VERSION}",
+                        f"SOS-macOS-{builder.VERSION}/Install-SOS.command",
+                    ],
                 )
                 self.assertTrue(all(member.uid == member.gid == 0 for member in members))
 
@@ -493,8 +496,18 @@ class NativeAlphaBundleTests(unittest.TestCase):
         for launcher in (shell, powershell):
             self.assertIn("removal cannot acquire a runtime from the network", launcher)
             self.assertIn("--no-python-downloads", launcher)
-        self.assertIn("--primary-authority EXACT_ID", shell)
+        self.assertIn("invalid --primary-authority", shell)
         self.assertIn('set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"', shell)
+        self.assertIn("--resume-confirmation-seed", shell)
+        self.assertIn("--expected-plan-digest", shell)
+        self.assertIn(
+            'set -- "$@" --resume-confirmation-seed "$RESUME_CONFIRMATION_SEED"',
+            shell,
+        )
+        self.assertIn(
+            'set -- "$@" --expected-plan-digest "$EXPECTED_PLAN_DIGEST"', shell
+        )
+        self.assertIn("SOS_ALPHA_CONFIRMATION_HANDOFF_INVALID", shell)
         self.assertIn('[ "$MODE" != "install" ]', shell)
         self.assertLess(
             shell.index('[ -n "$PRIMARY_AUTHORITY" ] && [ "$MODE" != "install" ]'),
@@ -701,7 +714,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         tool_bin: Path,
         payloads: dict[str, dict[str, object]],
         *,
-        version: str = "sos 0.1.0a4",
+        version: str = f"sos {smoke.VERSION}",
     ):
         def completed(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             if arguments[1:] == ["tool", "dir", "--bin"]:
@@ -752,7 +765,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 "status": "stale",
                 "reasons": ["SOS_SOURCE_STATUS_CHANGED"],
             }
-            invalid_cases.append((stale, "sos 0.1.0a4"))
+            invalid_cases.append((stale, f"sos {smoke.VERSION}"))
             executable = self.smoke_payloads()
             executable["check"]["families"][1] = {
                 "family_id": "python.stdlib-unittest",
@@ -761,7 +774,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 "isolation": "unexpected",
                 "reasons": ["SOS_CHECK_CONFIGURED"],
             }
-            invalid_cases.append((executable, "sos 0.1.0a4"))
+            invalid_cases.append((executable, f"sos {smoke.VERSION}"))
             invalid_cases.append((self.smoke_payloads(), "sos 0.1.0a1"))
             for invalid_payloads, version in invalid_cases:
                 with (

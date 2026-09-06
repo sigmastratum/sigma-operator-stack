@@ -22,6 +22,26 @@ SPEC.loader.exec_module(alpha)
 
 
 class AlphaOnboardingTests(unittest.TestCase):
+    def test_confirmation_handoff_arguments_fail_before_launcher_work(self) -> None:
+        with mock.patch.object(alpha, "run_onboarding") as onboarding:
+            incomplete = alpha.main(
+                ["--resume-confirmation-seed", "a" * 64, "/synthetic/project"]
+            )
+            wrong_mode = alpha.main(
+                [
+                    "--mode",
+                    "update",
+                    "--resume-confirmation-seed",
+                    "a" * 64,
+                    "--expected-plan-digest",
+                    "sha256:" + "b" * 64,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(incomplete, 2)
+        self.assertEqual(wrong_mode, 2)
+        onboarding.assert_not_called()
+
     def make_bundle(
         self, root: Path, *, system: str = "Linux", public: bool = False
     ) -> Path:
@@ -263,7 +283,14 @@ class AlphaOnboardingTests(unittest.TestCase):
                     return subprocess.CompletedProcess(arguments, 0, "", "")
                 raise AssertionError(arguments)
 
-            observed = alpha.run_onboarding(bundle, project, which=which, runner=runner)
+            observed = alpha.run_onboarding(
+                bundle,
+                project,
+                resume_confirmation_seed="a" * 64,
+                expected_plan_digest="sha256:" + "b" * 64,
+                which=which,
+                runner=runner,
+            )
 
             self.assertEqual(observed, project)
             commands = [arguments for arguments, _ in calls]
@@ -284,7 +311,19 @@ class AlphaOnboardingTests(unittest.TestCase):
                     "--json",
                 ],
             )
-            self.assertEqual(commands[-1], [os.fspath(tool_bin / "sos"), "init", "--with-codex", os.fspath(project)])
+            self.assertEqual(
+                commands[-1],
+                [
+                    os.fspath(tool_bin / "sos"),
+                    "init",
+                    "--with-codex",
+                    "--resume-confirmation-seed",
+                    "a" * 64,
+                    "--expected-plan-digest",
+                    "sha256:" + "b" * 64,
+                    os.fspath(project),
+                ],
+            )
             self.assertFalse(any("qualify" in arguments for arguments in commands))
             self.assertFalse(any(kwargs.get("shell") for _, kwargs in calls))
 
