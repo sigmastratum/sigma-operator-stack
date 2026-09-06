@@ -8,7 +8,7 @@ body:
       value: "Use only a synthetic reproducer. Do not include secrets, private source, prompts, raw .sigma data, filesystem paths, hostnames, or customer data."
   - type: input
     id: version
-    attributes: {label: SOS version, placeholder: "sos 0.1.0a4"}
+    attributes: {label: SOS version, placeholder: "sos 0.1.0a5"}
     validations: {required: true}
   - type: input
     id: os_profile
