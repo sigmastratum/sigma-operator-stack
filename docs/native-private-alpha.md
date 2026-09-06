@@ -1,4 +1,4 @@
-# SOS native private-alpha evidence route 0.1.0a3
+# SOS native private-alpha evidence route 0.1.0a4
 
 This is a historical invited-test route, not the public installation path.
 Public agents must follow [`install-with-codex.md`](install-with-codex.md) and
@@ -36,10 +36,10 @@ require an Execution Policy change, `Bypass`, Administrator access or UAC
 elevation. Windows UAC must remain enabled:
 
 ```bat
-"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a3\SOS-Installer.exe" install "C:\Users\Example\source\example-project"
-"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a3\SOS-Installer.exe" test "C:\Users\Example\source\example-project"
-"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a3\SOS-Installer.exe" update "C:\Users\Example\source\example-project"
-"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a3\SOS-Installer.exe" remove "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a4\SOS-Installer.exe" install "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a4\SOS-Installer.exe" test "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a4\SOS-Installer.exe" update "C:\Users\Example\source\example-project"
+"%USERPROFILE%\Downloads\SOS-Windows-0.1.0a4\SOS-Installer.exe" remove "C:\Users\Example\source\example-project"
 ```
 
 Replace the quoted example project path with the real path. Do not type angle

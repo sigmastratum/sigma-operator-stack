@@ -33,6 +33,7 @@ from .lifecycle import (
     preview_one_command_init,
     recover_one_command_init,
 )
+from .maintenance_binding import MaintenanceBindingError, MaintenanceLauncherBinding
 from .qualification_contracts import QualificationContractError
 from .platform_admission import admit_project_filesystem
 from .repository import RepositoryError
@@ -88,6 +89,7 @@ def _parser() -> argparse.ArgumentParser:
         if command == "init":
             subparser.add_argument("--with-codex", action="store_true")
             subparser.add_argument("--primary-authority")
+            subparser.add_argument("--maintenance-release-binding-json")
     qualify = subparsers.add_parser("qualify")
     qualify.add_argument("path", nargs="?", default=".")
     qualify.add_argument("--family")
@@ -246,19 +248,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
-        if args.primary_authority is not None and not args.with_codex:
+        if (
+            args.primary_authority is not None
+            or args.maintenance_release_binding_json is not None
+        ) and not args.with_codex:
             payload = {
                 "contract": "sos_init_result_v1",
                 "status": "invalid",
-                "reasons": ["SOS_PRIMARY_AUTHORITY_WITHOUT_CODEX_INIT"],
+                "reasons": [
+                    "SOS_PRIMARY_AUTHORITY_WITHOUT_CODEX_INIT"
+                    if args.primary_authority is not None
+                    else "SOS_MAINTENANCE_BINDING_WITHOUT_CODEX_INIT"
+                ],
             }
             _print(payload, args.as_json)
             return 2
         if args.with_codex:
+            maintenance_binding = None
+            if args.maintenance_release_binding_json is not None:
+                try:
+                    maintenance_binding = MaintenanceLauncherBinding.from_payload(
+                        json.loads(args.maintenance_release_binding_json)
+                    )
+                except (json.JSONDecodeError, MaintenanceBindingError) as exc:
+                    reason = getattr(exc, "reason", "SOS_MAINTENANCE_RELEASE_BINDING_INVALID")
+                    payload = {
+                        "contract": "sos_p106_init_result_v1",
+                        "status": "invalid",
+                        "reasons": [reason],
+                    }
+                    _print(payload, args.as_json)
+                    return 2
             try:
                 one_command_plan = prepare_one_command_init(
                     args.path,
                     primary_authority_id=args.primary_authority,
+                    maintenance_binding=maintenance_binding,
                 )
             except LifecycleError as exc:
                 if exc.reason == "SOS_P106_RECOVERY_REQUIRED":
@@ -271,11 +296,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     one_command_plan = prepare_one_command_init(
                         args.path,
                         primary_authority_id=args.primary_authority,
+                        maintenance_binding=maintenance_binding,
                     )
                 else:
                     result = preview_one_command_init(
                         args.path,
                         primary_authority_id=args.primary_authority,
+                        maintenance_binding=maintenance_binding,
                     )
                     payload = result.to_dict()
                     _print(payload, args.as_json)

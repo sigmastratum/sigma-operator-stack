@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.0a3"
+VERSION = "0.1.0a4"
 UV_VERSION = "0.12.6"
 PYTHON_VERSION = "3.12.14"
 WHEEL = f"sigma_operator_stack-{VERSION}-py3-none-any.whl"
@@ -111,6 +111,137 @@ def _sha256(path: Path) -> str:
 
 def _fail(code: str, problem: str, correction: str) -> StartError:
     return StartError(code, problem, correction)
+
+
+def _maintenance_binding(
+    bundle: Path,
+    manifest: dict[str, object],
+    handoff_json: str,
+) -> dict[str, object]:
+    """Bind the verified outer release route without confusing it with MCP Python."""
+    try:
+        handoff = json.loads(handoff_json)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_INVALID",
+            "The public release maintenance binding is malformed.",
+            "Rediscover the canonical release and use its exact binding.",
+        ) from error
+    required = {
+        "contract",
+        "version",
+        "release_tag",
+        "candidate",
+        "tree",
+        "archive_filename",
+        "archive_sha256",
+        "inner_manifest_sha256",
+        "system",
+        "architecture",
+        "profile_id",
+        "platform_launcher",
+    }
+    if not isinstance(handoff, dict) or set(handoff) != required:
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_INVALID",
+            "The public release maintenance binding has an unexpected shape.",
+            "Rediscover the canonical release and use its exact binding.",
+        )
+    strings = {name: handoff.get(name) for name in required}
+    if any(not isinstance(value, str) for value in strings.values()):
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_INVALID",
+            "The public release maintenance binding contains an invalid value.",
+            "Rediscover the canonical release and use its exact binding.",
+        )
+    observed_system = {"Darwin": "darwin", "Linux": "linux", "Windows": "windows"}.get(
+        platform.system(), "unknown"
+    )
+    observed_architecture = platform.machine().lower()
+    if observed_architecture in {"amd64", "x86_64"}:
+        observed_architecture = "x86_64"
+    elif observed_architecture in {"arm64", "aarch64"}:
+        observed_architecture = "arm64"
+    manifest_path = bundle / "release-manifest.json"
+    launcher_name = str(handoff["platform_launcher"])
+    launcher_path = bundle / launcher_name
+    artifacts = {
+        item.get("filename"): item.get("sha256")
+        for item in manifest.get("artifacts", [])
+        if isinstance(item, dict)
+    }
+    exact = (
+        handoff["contract"] == "sos_public_maintenance_handoff_v1"
+        and handoff["version"] == manifest.get("version")
+        and handoff["release_tag"] == f"v{manifest.get('version')}"
+        and handoff["candidate"] == manifest.get("candidate")
+        and handoff["tree"] == manifest.get("tree")
+        and handoff["system"] == observed_system
+        and handoff["architecture"] == observed_architecture
+        and handoff["platform_launcher"] == "Install-SOS.command"
+        and SHA256.fullmatch(str(handoff["archive_sha256"])) is not None
+        and SHA256.fullmatch(str(handoff["inner_manifest_sha256"])) is not None
+        and _sha256(manifest_path) == handoff["inner_manifest_sha256"]
+        and launcher_path.is_file()
+        and not launcher_path.is_symlink()
+        and artifacts.get(launcher_name) == _sha256(launcher_path)
+    )
+    if not exact:
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_MISMATCH",
+            "The public release route does not match this exact checked bundle.",
+            "Discard the extraction, rediscover the canonical release, and download it again.",
+        )
+    binding = {
+        "contract": "sos_maintenance_launcher_binding_v1",
+        "version": handoff["version"],
+        "release_tag": handoff["release_tag"],
+        "candidate": handoff["candidate"],
+        "tree": handoff["tree"],
+        "archive_filename": handoff["archive_filename"],
+        "archive_sha256": handoff["archive_sha256"],
+        "inner_manifest_sha256": handoff["inner_manifest_sha256"],
+        "system": handoff["system"],
+        "architecture": handoff["architecture"],
+        "profile_id": handoff["profile_id"],
+        "platform_launcher": launcher_name,
+        "platform_launcher_sha256": artifacts[launcher_name],
+        "raw_content_serialized": False,
+        "absolute_paths_serialized": False,
+    }
+    binding["binding_digest"] = "sha256:" + hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return binding
+
+
+def _require_recorded_maintenance_binding(
+    root: Path, binding: dict[str, object]
+) -> None:
+    receipt_path = root / ".sigma" / "lifecycle" / "p106-install.json"
+    try:
+        if receipt_path.is_symlink() or receipt_path.stat().st_size > 1024 * 1024:
+            raise OSError
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_NOT_RECORDED",
+            "The project has no readable exact maintenance release binding.",
+            "Do not guess a launcher; reinstall through the canonical public route.",
+        ) from error
+    recorded = receipt.get("maintenance_launcher_binding") if isinstance(receipt, dict) else None
+    if not isinstance(recorded, dict):
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_BINDING_NOT_RECORDED",
+            "The project predates the separate maintenance release binding.",
+            "Do not guess a launcher; reinstall through the canonical public route.",
+        )
+    if recorded != binding:
+        raise _fail(
+            "SOS_ALPHA_MAINTENANCE_RELEASE_MISMATCH",
+            "The verified maintenance archive does not match the project's recorded release.",
+            "Rediscover and download the exact recorded release before continuing.",
+        )
 
 
 def validate_platform(
@@ -508,6 +639,7 @@ def run_onboarding(
     project: Path,
     *,
     primary_authority_id: str | None = None,
+    maintenance_handoff_json: str | None = None,
     uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
@@ -517,6 +649,11 @@ def run_onboarding(
     uv = uv_path or _required_command("uv", which)
     find_codex(which=which)
     manifest = verify_bundle(bundle)
+    maintenance_binding = (
+        _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+        if maintenance_handoff_json is not None
+        else None
+    )
     if uv_path is not None:
         _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
@@ -606,6 +743,13 @@ def run_onboarding(
     print("Existing project compatibility check passed.")
     print("\nSOS will now show one complete project plan and ask once before changing files.")
     init_command = [os.fspath(sos), "init", "--with-codex"]
+    if maintenance_binding is not None:
+        init_command.extend(
+            [
+                "--maintenance-release-binding-json",
+                json.dumps(maintenance_binding, sort_keys=True, separators=(",", ":")),
+            ]
+        )
     if primary_authority_id is not None:
         init_command.extend(["--primary-authority", primary_authority_id])
     init_command.append(os.fspath(root))
@@ -630,6 +774,7 @@ def run_update(
     project: Path,
     *,
     uv_path: str | None = None,
+    maintenance_handoff_json: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
@@ -638,9 +783,16 @@ def run_update(
     uv = uv_path or _required_command("uv", which)
     find_codex(which=which)
     manifest = verify_bundle(bundle)
+    maintenance_binding = (
+        _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+        if maintenance_handoff_json is not None
+        else None
+    )
     if uv_path is not None:
         _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
+    if maintenance_binding is not None:
+        _require_recorded_maintenance_binding(root, maintenance_binding)
     updated = runner(_offline_tool_install_command(uv, bundle, force=True), check=False)
     if updated.returncode != 0:
         raise _fail(
@@ -664,6 +816,7 @@ def run_remove(
     project: Path,
     *,
     uv_path: str | None = None,
+    maintenance_handoff_json: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
@@ -671,9 +824,16 @@ def run_remove(
     git = _required_command("git", which)
     uv = uv_path or _required_command("uv", which)
     manifest = verify_bundle(bundle)
+    maintenance_binding = (
+        _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+        if maintenance_handoff_json is not None
+        else None
+    )
     if uv_path is not None:
         _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
+    if maintenance_binding is not None:
+        _require_recorded_maintenance_binding(root, maintenance_binding)
     sos = _installed_sos(uv, runner)
     removed = runner([os.fspath(sos), "setup", "remove", "codex", os.fspath(root)], check=False)
     if removed.returncode != 0:
@@ -700,6 +860,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
     parser.add_argument("--primary-authority")
     parser.add_argument("--uv")
+    parser.add_argument("--maintenance-release-binding-json")
     parser.add_argument("--mode", choices=("install", "update", "remove"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
@@ -710,17 +871,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "The alpha launcher must not be run through a symbolic link.",
                 "Run the checked start-sos-alpha file directly from the extracted bundle.",
             )
+        if arguments.maintenance_release_binding_json is None:
+            raise _fail(
+                "SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED",
+                "This public launcher requires the exact canonical release binding.",
+                "Start from the public GitHub URL so Codex can verify and supply the binding.",
+            )
         if arguments.mode == "install":
             run_onboarding(
                 launcher.parent,
                 arguments.project,
                 primary_authority_id=arguments.primary_authority,
                 uv_path=arguments.uv,
+                maintenance_handoff_json=arguments.maintenance_release_binding_json,
             )
         elif arguments.mode == "update":
-            run_update(launcher.parent, arguments.project, uv_path=arguments.uv)
+            run_update(
+                launcher.parent,
+                arguments.project,
+                uv_path=arguments.uv,
+                maintenance_handoff_json=arguments.maintenance_release_binding_json,
+            )
         else:
-            run_remove(launcher.parent, arguments.project, uv_path=arguments.uv)
+            run_remove(
+                launcher.parent,
+                arguments.project,
+                uv_path=arguments.uv,
+                maintenance_handoff_json=arguments.maintenance_release_binding_json,
+            )
     except StartError as error:
         print("\nSOS alpha setup stopped.", file=sys.stderr)
         print(f"Code: {error.code}", file=sys.stderr)

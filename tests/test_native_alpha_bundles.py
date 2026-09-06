@@ -274,7 +274,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "SOS-macOS-0.1.0a3"
+            source = root / "SOS-macOS-0.1.0a4"
             source.mkdir()
             (source / "Install-SOS.command").write_text("#!/bin/sh\n", encoding="utf-8")
             (source / "Install-SOS.command").chmod(0o755)
@@ -287,7 +287,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 members = archive.getmembers()
                 self.assertEqual(
                     [member.name for member in members],
-                    ["SOS-macOS-0.1.0a3", "SOS-macOS-0.1.0a3/Install-SOS.command"],
+                    ["SOS-macOS-0.1.0a4", "SOS-macOS-0.1.0a4/Install-SOS.command"],
                 )
                 self.assertTrue(all(member.uid == member.gid == 0 for member in members))
 
@@ -701,7 +701,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         tool_bin: Path,
         payloads: dict[str, dict[str, object]],
         *,
-        version: str = "sos 0.1.0a3",
+        version: str = "sos 0.1.0a4",
     ):
         def completed(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             if arguments[1:] == ["tool", "dir", "--bin"]:
@@ -752,7 +752,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 "status": "stale",
                 "reasons": ["SOS_SOURCE_STATUS_CHANGED"],
             }
-            invalid_cases.append((stale, "sos 0.1.0a3"))
+            invalid_cases.append((stale, "sos 0.1.0a4"))
             executable = self.smoke_payloads()
             executable["check"]["families"][1] = {
                 "family_id": "python.stdlib-unittest",
@@ -761,7 +761,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
                 "isolation": "unexpected",
                 "reasons": ["SOS_CHECK_CONFIGURED"],
             }
-            invalid_cases.append((executable, "sos 0.1.0a3"))
+            invalid_cases.append((executable, "sos 0.1.0a4"))
             invalid_cases.append((self.smoke_payloads(), "sos 0.1.0a1"))
             for invalid_payloads, version in invalid_cases:
                 with (

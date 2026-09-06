@@ -17,6 +17,7 @@
         "invocation": {"type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
         "kind": {"enum": ["download_archive", "handoff_to_interactive_user", "invoke_launcher", "none", "open_store"]},
         "launcher": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "maxLength": 80},
+        "maintenance_binding": {"$ref": "#/$defs/maintenance_handoff"},
         "store_product_id": {"type": "string", "pattern": "^[A-Z0-9]{12}$"},
         "store_protocol_uri": {"type": "string", "pattern": "^ms-windows-store://pdp/\\?productid=[A-Z0-9]{12}$", "maxLength": 100},
         "store_web_url": {"type": "string", "pattern": "^https://apps\\.microsoft\\.com/detail/[A-Z0-9]{12}$", "maxLength": 120}
@@ -37,5 +38,26 @@
     "system": {"enum": ["darwin", "linux", "unknown", "windows"]},
     "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 32}
+  },
+  "$defs": {
+    "maintenance_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "archive_filename", "archive_sha256", "candidate", "contract", "inner_manifest_sha256", "platform_launcher", "profile_id", "release_tag", "system", "tree", "version"],
+      "properties": {
+        "architecture": {"enum": ["arm64", "x86_64"]},
+        "archive_filename": {"type": "string", "pattern": "^SOS-[A-Za-z0-9._-]+\\.(zip|tar\\.gz)$", "maxLength": 120},
+        "archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "candidate": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "contract": {"const": "sos_public_maintenance_handoff_v1"},
+        "inner_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "platform_launcher": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "maxLength": 80},
+        "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$"},
+        "release_tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 40},
+        "system": {"enum": ["darwin", "linux", "windows"]},
+        "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+a[0-9]+$", "maxLength": 32}
+      }
+    }
   }
 }

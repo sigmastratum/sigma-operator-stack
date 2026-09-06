@@ -30,7 +30,7 @@ def _load_source_verifier():
 
 source_verifier = _load_source_verifier()
 
-VERSION = "0.1.0a3"
+VERSION = "0.1.0a4"
 MSIX_VERSION = "1.0.7.0"
 LOGO_ASSETS = {
     "Square44x44Logo.png": (44, 44),
@@ -43,7 +43,7 @@ REQUIRED = {
     "runtime/python.exe",
     "runtime/Lib/site-packages/sos/__init__.py",
     "uv.exe",
-    "wheelhouse/sigma_operator_stack-0.1.0a3-py3-none-any.whl",
+    "wheelhouse/sigma_operator_stack-0.1.0a4-py3-none-any.whl",
 }
 STORE_IDENTITY_KEYS = {
     "contract",

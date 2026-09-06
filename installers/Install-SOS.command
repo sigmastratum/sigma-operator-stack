@@ -4,13 +4,32 @@ set -eu
 MODE="${1:-install}"
 PROJECT="${2:-$(pwd)}"
 PRIMARY_AUTHORITY=""
-if [ "$#" -gt 2 ]; then
-  if [ "$#" -ne 4 ] || [ "$3" != "--primary-authority" ] || [ -z "$4" ]; then
-    echo "SOS_ALPHA_ARGUMENTS_INVALID: use Install-SOS.command install PROJECT [--primary-authority EXACT_ID]." >&2
-    exit 2
-  fi
-  PRIMARY_AUTHORITY="$4"
-fi
+MAINTENANCE_BINDING=""
+if [ "$#" -ge 2 ]; then shift 2; else shift "$#"; fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --primary-authority)
+      [ "$#" -ge 2 ] && [ -z "$PRIMARY_AUTHORITY" ] && [ -n "$2" ] || {
+        echo "SOS_ALPHA_ARGUMENTS_INVALID: invalid --primary-authority." >&2
+        exit 2
+      }
+      PRIMARY_AUTHORITY="$2"
+      shift 2
+      ;;
+    --maintenance-release-binding-json)
+      [ "$#" -ge 2 ] && [ -z "$MAINTENANCE_BINDING" ] && [ -n "$2" ] || {
+        echo "SOS_ALPHA_ARGUMENTS_INVALID: invalid --maintenance-release-binding-json." >&2
+        exit 2
+      }
+      MAINTENANCE_BINDING="$2"
+      shift 2
+      ;;
+    *)
+      echo "SOS_ALPHA_ARGUMENTS_INVALID: use Install-SOS.command install PROJECT [--primary-authority EXACT_ID] --maintenance-release-binding-json EXACT_JSON from the public release index." >&2
+      exit 2
+      ;;
+  esac
+done
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 UV_SOURCE="$SCRIPT_DIR/uv"
 case "$(uname -s)" in
@@ -72,6 +91,9 @@ if [ "$PYTHON_STATUS" -ne 0 ]; then
 fi
 
 set -- "$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE"
+if [ -n "$MAINTENANCE_BINDING" ]; then
+  set -- "$@" --maintenance-release-binding-json "$MAINTENANCE_BINDING"
+fi
 if [ -n "$PRIMARY_AUTHORITY" ]; then
   set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"
 fi

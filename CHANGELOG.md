@@ -3,6 +3,14 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
+## 0.1.0a4 — Unreleased
+
+### Fixed
+
+- Separate the project-local MCP Python binding from the public maintenance
+  archive/launcher binding. Fresh sessions rediscover and verify a new exact
+  release extraction before same-version update, smoke, or removal.
+
 ## 0.1.0a3 — 2026-09-05
 
 ### Fixed

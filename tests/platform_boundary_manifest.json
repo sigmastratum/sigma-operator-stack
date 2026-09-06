@@ -39,6 +39,7 @@
     "src/sos/lifecycle.py": {"class": "shared_core"},
     "src/sos/managed_files.py": {"class": "shared_core"},
     "src/sos/mcp.py": {"class": "shared_core"},
+    "src/sos/maintenance_binding.py": {"class": "shared_core"},
     "src/sos/package_resources.py": {"class": "package_resource_mechanism"},
     "src/sos/platform_admission.py": {"class": "shared_core"},
     "src/sos/platform_services.py": {"class": "shared_core"},

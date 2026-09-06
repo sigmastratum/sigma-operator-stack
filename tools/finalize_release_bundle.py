@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 
-VERSION = "0.1.0a3"
+VERSION = "0.1.0a4"
 ONBOARDING_FILES = (
     ("tools/start_sos_alpha.py", "start-sos-alpha", "text/x-python", 0o755),
     ("docs/alpha-quickstart.md", "START-HERE.md", "text/markdown", 0o644),
@@ -67,7 +67,7 @@ def _verify_wheel(wheel: Path) -> None:
         if metadata_name not in names or license_name not in names:
             raise ValueError("wheel metadata or license is missing")
         value = archive.read(metadata_name).decode("utf-8")
-        for required in ("Version: 0.1.0a3", "Requires-Python: <3.13,>=3.11", "License: Apache-2.0"):
+        for required in ("Version: 0.1.0a4", "Requires-Python: <3.13,>=3.11", "License: Apache-2.0"):
             if required not in value:
                 raise ValueError(f"wheel metadata mismatch: {required}")
         allowed = (

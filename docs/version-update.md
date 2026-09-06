@@ -13,6 +13,13 @@ must preserve its human confirmation boundary. Invalid control-plane
 integrity, required recovery, managed-file drift or an unverified launcher
 continues to fail closed.
 
+The lifecycle receipt names two different identities. The MCP binding covers
+the managed Python executable used for project-local MCP. The maintenance
+binding covers the archive and platform launcher. Their digests are never
+compared. A fresh session rediscovers the canonical pointer, downloads and
+verifies a new extraction of the exact archive, and compares only the
+maintenance binding before update, smoke or removal.
+
 ## Alpha contract
 
 Before updating, retain the exact predecessor release identity and its

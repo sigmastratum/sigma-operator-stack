@@ -99,8 +99,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
             'cd "$RUNNER_TEMP/existing"',
             "sha256sum -c SHA256SUMS",
-            "SOS-Linux-0.1.0a3.zip",
-            "SOS-macOS-0.1.0a3.tar.gz",
+            "SOS-Linux-0.1.0a4.zip",
+            "SOS-macOS-0.1.0a4.tar.gz",
             "--json isDraft",
         ):
             self.assertIn(required, workflow)
@@ -189,11 +189,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertLess(preserve, checkout)
         self.assertLess(checkout, execute)
         self.assertIn(
-            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a4-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
         self.assertNotIn(
-            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a3-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a4-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
 

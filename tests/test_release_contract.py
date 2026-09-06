@@ -13,7 +13,7 @@ from sos.cli import main
 from sos.mcp import handle_message
 
 
-EXPECTED_VERSION = "0.1.0a3"
+EXPECTED_VERSION = "0.1.0a4"
 
 
 class PublicReleaseContractTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class PublicReleaseContractTests(unittest.TestCase):
     def test_public_metadata_and_support_truth_are_frozen(self) -> None:
         root = Path(__file__).resolve().parents[1]
         pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('version = "0.1.0a3"', pyproject)
+        self.assertIn('version = "0.1.0a4"', pyproject)
         self.assertIn('requires-python = ">=3.11,<3.13"', pyproject)
         self.assertIn('license = {text = "Apache-2.0"}', pyproject)
         self.assertIn('requires = ["setuptools==84.0.0"]', pyproject)

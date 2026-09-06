@@ -27,6 +27,7 @@ from sos.lifecycle import (
     preview_one_command_init,
     recover_one_command_init,
 )
+from sos.maintenance_binding import MaintenanceLauncherBinding
 from sos.repository import inspect_repository, repository_identity_contract
 from sos.result import Status, TerminalResult
 from sos.workspace import qualify_once, workspace_status
@@ -67,6 +68,54 @@ class P106LifecycleTests(unittest.TestCase):
         return LauncherBinding(
             os.fspath(Path(sys.executable)), version, "sha256:" + fill * 64
         )
+
+    def maintenance_binding(self, fill: str = "2") -> MaintenanceLauncherBinding:
+        return MaintenanceLauncherBinding(
+            version="0.1.0a4",
+            release_tag="v0.1.0a4",
+            candidate="3" * 40,
+            tree="4" * 40,
+            archive_filename="SOS-macOS-0.1.0a4.tar.gz",
+            archive_sha256="5" * 64,
+            inner_manifest_sha256="6" * 64,
+            system="darwin",
+            architecture="arm64",
+            profile_id="macos-14-arm64-control-plane-alpha",
+            platform_launcher="Install-SOS.command",
+            platform_launcher_sha256=fill * 64,
+        )
+
+    def test_install_receipt_keeps_mcp_and_maintenance_launchers_distinct(self) -> None:
+        temporary, root = self.make_project(agents=None, config=None)
+        self.addCleanup(temporary.cleanup)
+        mcp = self.binding(version="0.1.0a4", fill="1")
+        maintenance = self.maintenance_binding(fill="2")
+        plan = prepare_one_command_init(
+            str(root), launcher=mcp, maintenance_binding=maintenance
+        )
+        preview = plan.preview()
+        self.assertEqual(
+            preview.details["mcp_launcher_binding"]["binding_digest"], mcp.digest
+        )
+        self.assertEqual(
+            preview.details["maintenance_launcher_binding"]["binding_digest"],
+            maintenance.digest,
+        )
+        self.assertNotEqual(mcp.digest, maintenance.digest)
+
+        result = execute_one_command_init(
+            plan, confirmed=True, controlling_tty_observed=True
+        )
+        self.assertEqual(result.status, "success", result.to_dict())
+        receipt = json.loads(
+            (root / ".sigma/lifecycle/p106-install.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(receipt["contract"], "sos_p106_install_receipt_v2")
+        self.assertEqual(receipt["mcp_launcher_binding"]["binding_digest"], mcp.digest)
+        self.assertEqual(
+            receipt["maintenance_launcher_binding"]["binding_digest"], maintenance.digest
+        )
+        self.assertNotIn("launcher_digest", receipt)
 
     def test_preview_is_zero_write_and_overlay_matches_actual_for_dirty_matrix(self) -> None:
         temporary, root = self.make_project()

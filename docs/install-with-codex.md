@@ -43,7 +43,9 @@ When a public pointer exists, Codex must:
 10. for Microsoft Store, open the declared Store deep link and wait for the
     ordinary signed-in user to complete the Store installation;
 11. observe the installed Store identity/version and launcher availability;
-12. invoke only the exact launcher and argument grammar named by the index;
+12. serialize the route projection's `maintenance_binding` as canonical JSON
+    and invoke only the exact launcher and argument grammar named by the index,
+    passing it as `--maintenance-release-binding-json`;
 13. show the SOS aggregate preview and wait for the human to confirm or refuse;
 14. retain the exact managed executable path returned by the launcher;
 15. render setup, workspace, check-plan and qualification state truthfully;
@@ -81,6 +83,20 @@ Invalid control-plane integrity, required recovery, managed-file drift or an
 unverified launcher still blocks maintenance. This exception never permits
 application edits, qualification claims, commit, push, deploy or external
 actions.
+
+Two launcher identities are deliberately separate. The MCP launcher binding
+(`mcp_launcher_binding`) authenticates the managed Python executable used by
+the project-local MCP server. The maintenance launcher binding
+(`maintenance_launcher_binding`) authenticates the public archive
+and `Install-SOS.command`. Their digests describe different files and must
+never be compared.
+
+Every maintenance request starts again from the canonical pointer, downloads
+the exact archive into a new disposable extraction, verifies the pointer,
+index, archive, inner manifest and platform launcher, and compares that
+maintenance binding with `.sigma/lifecycle/p106-install.json`. It then invokes
+the newly extracted launcher. A cached extraction or the MCP Python executable
+is not a substitute for this procedure.
 
 The repository-owned route projection uses five states: `ready`,
 `user_action_required`, `unsupported`, `blocked` and `invalid`. Only `ready`

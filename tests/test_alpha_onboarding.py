@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +114,66 @@ class AlphaOnboardingTests(unittest.TestCase):
             encoding="utf-8",
         )
         return bundle
+
+    def test_public_maintenance_handoff_binds_outer_launcher_not_mcp_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = self.make_bundle(Path(temporary), system="Linux", public=True)
+            manifest = alpha.verify_bundle(bundle, system="Linux")
+            handoff = {
+                "contract": "sos_public_maintenance_handoff_v1",
+                "version": alpha.VERSION,
+                "release_tag": f"v{alpha.VERSION}",
+                "candidate": manifest["candidate"],
+                "tree": manifest["tree"],
+                "archive_filename": f"SOS-Linux-{alpha.VERSION}.zip",
+                "archive_sha256": "c" * 64,
+                "inner_manifest_sha256": hashlib.sha256(
+                    (bundle / "release-manifest.json").read_bytes()
+                ).hexdigest(),
+                "system": "linux",
+                "architecture": "x86_64",
+                "profile_id": "linux-x86_64-alpha",
+                "platform_launcher": "Install-SOS.command",
+            }
+            with mock.patch.object(alpha.platform, "system", return_value="Linux"), mock.patch.object(
+                alpha.platform, "machine", return_value="x86_64"
+            ):
+                binding = alpha._maintenance_binding(
+                    bundle,
+                    manifest,
+                    json.dumps(handoff, sort_keys=True, separators=(",", ":")),
+                )
+            self.assertEqual(
+                binding["platform_launcher_sha256"],
+                hashlib.sha256((bundle / "Install-SOS.command").read_bytes()).hexdigest(),
+            )
+            self.assertNotIn("mcp_launcher_digest", binding)
+
+            project = Path(temporary) / "project"
+            receipt = project / ".sigma/lifecycle/p106-install.json"
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(
+                json.dumps(
+                    {
+                        "contract": "sos_p106_install_receipt_v2",
+                        "maintenance_launcher_binding": binding,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            alpha._require_recorded_maintenance_binding(project, binding)
+            mismatched = dict(binding)
+            mismatched["archive_sha256"] = "e" * 64
+            with self.assertRaises(alpha.StartError) as mismatch:
+                alpha._require_recorded_maintenance_binding(project, mismatched)
+            self.assertEqual(
+                mismatch.exception.code, "SOS_ALPHA_MAINTENANCE_RELEASE_MISMATCH"
+            )
+
+            handoff["inner_manifest_sha256"] = "d" * 64
+            with self.assertRaises(alpha.StartError) as raised:
+                alpha._maintenance_binding(bundle, manifest, json.dumps(handoff))
+            self.assertEqual(raised.exception.code, "SOS_ALPHA_MAINTENANCE_BINDING_MISMATCH")
 
     def test_platform_boundary_is_explicit_and_fail_closed(self) -> None:
         alpha.validate_platform("Linux", "x86_64", (3, 11), "6.8.0")

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version        = "0.1.0a3"
+	version        = "0.1.0a4"
 	pythonVersion  = "3.12.14"
 	uvVersion      = "0.12.6"
 	uvDigest       = "965816e654d8fac650b282345c89c1daff16a0cfe45e9d2d2a8f5af3fed466a4"

@@ -163,6 +163,20 @@ def resolve(
         )
     delivery = platform["delivery"]
     if delivery == "archive":
+        maintenance_binding = {
+            "contract": "sos_public_maintenance_handoff_v1",
+            "version": index["version"],
+            "release_tag": index["release_tag"],
+            "candidate": index["candidate"],
+            "tree": index["tree"],
+            "archive_filename": platform["archive_filename"],
+            "archive_sha256": platform["archive_sha256"],
+            "inner_manifest_sha256": platform["inner_manifest_sha256"],
+            "system": platform["system"],
+            "architecture": platform["architecture"],
+            "profile_id": platform["profile_id"],
+            "platform_launcher": platform["launcher"],
+        }
         return _projection(
             system=safe_system,
             architecture=safe_architecture,
@@ -176,6 +190,7 @@ def resolve(
                 "invocation": platform["invocation"],
                 "kind": "download_archive",
                 "launcher": platform["launcher"],
+                "maintenance_binding": maintenance_binding,
             },
         )
     if observation is None:

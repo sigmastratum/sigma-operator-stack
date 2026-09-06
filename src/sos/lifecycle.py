@@ -31,6 +31,11 @@ from .compatibility import (
     discover_compatibility,
 )
 from .dirty import observe_application
+from .maintenance_binding import (
+    MaintenanceBindingError,
+    MaintenanceLauncherBinding,
+    mcp_launcher_binding_payload,
+)
 from .platform_admission import admit_project_filesystem
 from .platform_services import PlatformServiceError, current_platform_services
 from .repository import (
@@ -82,10 +87,11 @@ class OneCommandPlan:
     expected_application_fingerprint: str
     expected_application_state: str
     aggregate_plan_digest: str
+    maintenance_binding: MaintenanceLauncherBinding | None
 
     def pending_payload(self) -> dict[str, Any]:
         return {
-            "contract": "sos_p106_pending_v1",
+            "contract": "sos_p106_pending_v2",
             "transaction_id": self.transaction_id,
             "bootstrap_intent_id": self.bootstrap_intent_id,
             "bootstrap_plan_id": self.bootstrap_plan_id,
@@ -98,6 +104,11 @@ class OneCommandPlan:
             "expected_application_fingerprint": self.expected_application_fingerprint,
             "expected_application_state": self.expected_application_state,
             "aggregate_plan_digest": self.aggregate_plan_digest,
+            "maintenance_launcher_binding": (
+                self.maintenance_binding.payload()
+                if self.maintenance_binding is not None
+                else None
+            ),
             "raw_project_content_serialized": False,
             "absolute_paths_serialized": False,
             "qualification_included": False,
@@ -126,7 +137,16 @@ class OneCommandPlan:
             "qualification_next_action": "sos qualify",
             "rollback_order": [".codex/config.toml", "AGENTS.md"],
             "package_version": self.setup.binding.package_version,
-            "launcher_digest": self.setup.binding.digest,
+            "mcp_launcher_binding": mcp_launcher_binding_payload(
+                package_version=self.setup.binding.package_version,
+                executable_sha256=self.setup.binding.executable_sha256,
+                binding_digest=self.setup.binding.digest,
+            ),
+            "maintenance_launcher_binding": (
+                self.maintenance_binding.payload()
+                if self.maintenance_binding is not None
+                else None
+            ),
             "raw_project_content_serialized": False,
             "absolute_paths_serialized": False,
             "network_performed": False,
@@ -144,6 +164,7 @@ def prepare_one_command_init(
     *,
     launcher: LauncherBinding | None = None,
     primary_authority_id: str | None = None,
+    maintenance_binding: MaintenanceLauncherBinding | None = None,
 ) -> OneCommandPlan:
     root = discover_repository_root(path)
     admission = admit_project_filesystem(root)
@@ -208,7 +229,10 @@ def prepare_one_command_init(
         "primary_authority_id": compatibility.primary_authority_id,
         "expected_application_fingerprint": projected.fingerprint,
         "package_version": setup.binding.package_version,
-        "launcher_digest": setup.binding.digest,
+        "mcp_launcher_binding_digest": setup.binding.digest,
+        "maintenance_launcher_binding_digest": (
+            maintenance_binding.digest if maintenance_binding is not None else None
+        ),
         "qualification_included": False,
     }
     return OneCommandPlan(
@@ -223,6 +247,7 @@ def prepare_one_command_init(
         projected.fingerprint,
         projected.state,
         digest_value(aggregate),
+        maintenance_binding,
     )
 
 
@@ -231,12 +256,14 @@ def preview_one_command_init(
     *,
     launcher: LauncherBinding | None = None,
     primary_authority_id: str | None = None,
+    maintenance_binding: MaintenanceLauncherBinding | None = None,
 ) -> TerminalResult:
     try:
         return prepare_one_command_init(
             path,
             launcher=launcher,
             primary_authority_id=primary_authority_id,
+            maintenance_binding=maintenance_binding,
         ).preview()
     except LifecycleError as exc:
         if exc.reason == "SOS_ALREADY_INITIALIZED":
@@ -308,15 +335,23 @@ def execute_one_command_init(
         files.update(render_codex_bootstrap_control_files(plan.setup))
         files[_RECEIPT] = _json_bytes(
             {
-                "contract": "sos_p106_install_receipt_v1",
+                "contract": "sos_p106_install_receipt_v2",
                 "aggregate_plan_digest": plan.aggregate_plan_digest,
                 "repository_id": plan.repository_id,
                 "application_fingerprint": actual.fingerprint,
                 "codex_setup_plan_digest": plan.setup.plan_digest,
                 "compatibility_discovery_digest": plan.compatibility.discovery_digest,
                 "primary_authority_id": plan.compatibility.primary_authority_id,
-                "launcher_digest": plan.setup.binding.digest,
-                "package_version": plan.setup.binding.package_version,
+                "mcp_launcher_binding": mcp_launcher_binding_payload(
+                    package_version=plan.setup.binding.package_version,
+                    executable_sha256=plan.setup.binding.executable_sha256,
+                    binding_digest=plan.setup.binding.digest,
+                ),
+                "maintenance_launcher_binding": (
+                    plan.maintenance_binding.payload()
+                    if plan.maintenance_binding is not None
+                    else None
+                ),
                 "qualification_performed": False,
                 "network_performed": False,
                 "raw_project_content_serialized": False,
@@ -351,7 +386,14 @@ def execute_one_command_init(
                 "network_performed": False,
             },
         )
-    except (LifecycleError, RepositoryError, ClientIntegrationError, ContractError, TransactionError) as exc:
+    except (
+        LifecycleError,
+        RepositoryError,
+        ClientIntegrationError,
+        ContractError,
+        MaintenanceBindingError,
+        TransactionError,
+    ) as exc:
         if committed:
             return TerminalResult(
                 "sos_p106_init_result_v1",
@@ -534,11 +576,16 @@ def _read_pending(root: Path, staging_name: str) -> tuple[dict[str, Any], str]:
         "local_nonce", "repository_id", "setup_manifest", "setup_plan_digest",
         "compatibility_discovery_digest", "primary_authority_id",
         "expected_application_fingerprint", "expected_application_state",
-        "aggregate_plan_digest", "raw_project_content_serialized",
+        "aggregate_plan_digest", "maintenance_launcher_binding", "raw_project_content_serialized",
         "absolute_paths_serialized", "qualification_included", "network_performed",
     }
-    if not isinstance(value, dict) or set(value) != required or value["contract"] != "sos_p106_pending_v1":
+    if not isinstance(value, dict) or set(value) != required or value["contract"] != "sos_p106_pending_v2":
         raise LifecycleError("SOS_P106_PENDING_INVALID")
+    if value["maintenance_launcher_binding"] is not None:
+        try:
+            MaintenanceLauncherBinding.from_payload(value["maintenance_launcher_binding"])
+        except MaintenanceBindingError as exc:
+            raise LifecycleError("SOS_P106_PENDING_INVALID") from exc
     for field in (
         "bootstrap_intent_id", "bootstrap_plan_id", "repository_id", "setup_plan_digest",
         "compatibility_discovery_digest",

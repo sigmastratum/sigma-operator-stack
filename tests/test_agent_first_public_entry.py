@@ -158,6 +158,11 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
                 self.assertEqual(projection["status"], "ready")
                 self.assertEqual(projection["action"]["kind"], "download_archive")
                 self.assertEqual(projection["action"]["archive_filename"], filename)
+                binding = projection["action"]["maintenance_binding"]
+                self.assertEqual(binding["contract"], "sos_public_maintenance_handoff_v1")
+                self.assertEqual(binding["archive_filename"], filename)
+                self.assertEqual(binding["platform_launcher"], "Install-SOS.command")
+                self.assertEqual(binding["version"], projection["version"])
                 self.assertFalse(projection["network_performed"])
                 self.assertFalse(projection["mutations_performed"])
                 self.assertEqual(projection["provider_calls"], 0)
@@ -183,6 +188,17 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         unsupported["launcher"] = "SOS-Installer.exe"
         invalid["platforms"] = [unsupported]
         self.assertTrue(tuple(validator.iter_errors(invalid)))
+
+    def test_mcp_and_maintenance_launcher_digests_are_never_compared(self) -> None:
+        instructions = (ROOT / "src/sos/client_integration.py").read_text(encoding="utf-8")
+        route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
+        for text in (instructions, route):
+            normalized = " ".join(text.split())
+            self.assertIn("MCP launcher binding", normalized)
+            self.assertIn("maintenance launcher binding", normalized)
+            self.assertIn("must never be compared", normalized)
+        self.assertIn("new disposable extraction", route)
+        self.assertIn("--maintenance-release-binding-json", route)
 
 
 if __name__ == "__main__":
