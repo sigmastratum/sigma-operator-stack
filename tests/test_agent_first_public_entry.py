@@ -62,6 +62,14 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("historical GitHub Release assets", " ".join(entry.split()))
         self.assertIn("Only a direct HTTP `404` or `410`", route)
 
+    def test_install_route_has_exactly_one_project_confirmation_layer(self) -> None:
+        route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
+        normalized = " ".join(route.split())
+        self.assertIn("must not insert an agent-level approval", normalized)
+        self.assertIn("user's single confirmation", normalized)
+        self.assertIn("answers the existing launcher prompt", normalized)
+        self.assertIn("confirmation layer is a failed onboarding replay", normalized)
+
     def test_historical_quickstart_is_not_install_authority(self) -> None:
         historical = (ROOT / "docs/alpha-quickstart.md").read_text(encoding="utf-8")
         self.assertIn("not** public installation authority", historical)

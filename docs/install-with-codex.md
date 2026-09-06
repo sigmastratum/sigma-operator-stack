@@ -50,6 +50,16 @@ When a public pointer exists, Codex must:
 16. recommend qualification only when a configured executable family exists;
 17. ask the user to open a genuinely fresh Codex task for recovery proof.
 
+The initial explicit request to install SOS authorizes download, verification,
+archive extraction and preparation of the SOS-owned per-user environment. It
+does **not** authorize project mutation. Codex must not insert an agent-level
+approval before invoking the verified launcher. It invokes the launcher until
+the launcher emits its digest-bound aggregate project preview and pauses at
+its confirmation prompt, presents that exact preview to the user, and answers
+the existing launcher prompt only after the user's single confirmation. A
+second paraphrased preview, approval to start the launcher, or confirmation
+layer is a failed onboarding replay.
+
 Codex may request ordinary network or command-execution permission. It must
 not answer the SOS mutation prompt, select project authority, change PATH or a
 shell profile, install undeclared host dependencies, weaken TLS/platform
