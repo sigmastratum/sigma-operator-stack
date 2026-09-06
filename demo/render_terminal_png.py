@@ -23,7 +23,7 @@ def main() -> int:
             color = "#fbbf24"
         if line.startswith("$"):
             color = "#93c5fd"
-        draw.text((52, 48 + index * 34), line, font=font, fill=color)
+        draw.text((52, 48 + index * 29), line, font=font, fill=color)
     image.save(OUTPUT, format="PNG", optimize=True)
     return 0
 

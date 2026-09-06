@@ -56,6 +56,7 @@ REQUIRED_FILES = {
     "demo/recovery-terminal.png",
     "demo/terminal-frame.txt",
     "demo/transcript.md",
+    "demo/url-only-install-output.schema.json",
     "demo/verify_fresh_codex_capture.py",
     "demo/voiceover.mp3",
     "demo/voiceover.txt",
@@ -68,6 +69,8 @@ REQUIRED_FILES = {
     "docs/dependency-licenses.md",
     "docs/launch-operations.md",
     "docs/publication-checklist.md",
+    "docs/promotion-runbook.md",
+    "docs/release-notes-0.1.0a5.md",
     "docs/repository-opening-runbook.md",
     "docs/roadmap.md",
     "docs/threat-model.md",
@@ -304,7 +307,7 @@ def _expected_terminal_png(repository: Path) -> bytes:
             color = "#fbbf24"
         if line.startswith("$"):
             color = "#93c5fd"
-        draw.text((52, 48 + index * 34), line, font=font, fill=color)
+        draw.text((52, 48 + index * 29), line, font=font, fill=color)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()
@@ -411,10 +414,14 @@ def inspect(repository: Path) -> dict[str, object]:
         value = json.loads((repository / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
         if (
             not isinstance(value, dict)
-            or value.get("contract") != "sos_demo_media_manifest_v2"
+            or value.get("contract") != "sos_demo_media_manifest_v3"
             or value.get("synthetic_repository") is not True
-            or value.get("provider_calls") != 2
-            or value.get("fresh_codex_provider_calls") != 1
+            or value.get("provider_calls") != 10
+            or value.get("fresh_codex_provider_calls") != 9
+            or value.get("release_tag") != "v0.1.0a5"
+            or value.get("archive_sha256") != "1f001538785f586c4b7857bd32b86a92dddec3919c08a86624b4d2f7685fc94f"
+            or value.get("index_sha256") != "f09c8b45ada38a4187f7db61e4523120022f23aad9d5fc624dad6f4d99cc4cc5"
+            or value.get("inner_manifest_sha256") != "1b72a943a6dca0b38b0df803ef6adf918883bdc60d510df3556470492974c25d"
             or value.get("duration_seconds") not in range(60, 121)
             or value.get("fresh_codex_receipt_sha256") != hashlib.sha256((repository / "demo" / "fresh-codex-receipt.json").read_bytes()).hexdigest()
             or value.get("terminal_frame_sha256") != hashlib.sha256((repository / "demo" / "terminal-frame.txt").read_bytes()).hexdigest()
@@ -433,11 +440,18 @@ def inspect(repository: Path) -> dict[str, object]:
     try:
         receipt = json.loads((repository / "demo" / "fresh-codex-receipt.json").read_text(encoding="utf-8"))
         if (
-            receipt.get("contract") != "sos_fresh_codex_capture_receipt_v1"
+            receipt.get("contract") != "sos_url_only_codex_capture_receipt_v1"
             or receipt.get("status") != "passed"
-            or receipt.get("provider_calls") != 1
-            or receipt.get("shell_calls") != 0
-            or receipt.get("mutation_tool_calls") != 0
+            or receipt.get("product_turns") != 3
+            or receipt.get("provider_requests_total") != 9
+            or receipt.get("discarded_preparation_requests") != 6
+            or receipt.get("schema_rejected_requests") != 3
+            or receipt.get("human_confirmation") is not True
+            or receipt.get("install", {}).get("project_files_changed_before_confirmation") is not False
+            or receipt.get("install", {}).get("sentinel_preserved") is not True
+            or receipt.get("fresh_recovery", {}).get("shell_calls") != 0
+            or receipt.get("fresh_recovery", {}).get("mutation_tool_calls") != 0
+            or receipt.get("fresh_recovery", {}).get("external_actions") != 0
             or receipt.get("raw_prompt_stored") is not False
             or receipt.get("raw_response_stored") is not False
             or receipt.get("raw_tool_results_stored") is not False

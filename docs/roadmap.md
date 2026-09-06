@@ -3,7 +3,7 @@
 This roadmap describes public Community capability maturity. It is not a
 release promise or a compatibility claim.
 
-## Current alpha
+## Completed in the current alpha
 
 - local accepted-state and currentness records in a conventional Git project;
 - exact, reversible Codex-first setup with an eight-tool read/proposal MCP;
@@ -18,28 +18,23 @@ release promise or a compatibility claim.
 - one portable decision core with qualified Linux, Windows, and macOS
   filesystem adapters;
 - native macOS Apple Silicon install/update/remove lifecycle evidence;
-- an exact Windows 11 x86_64 MSIX accepted into Microsoft Store certification.
-- a 60-second narrated fresh-agent demonstration bound to the exact `0.1.0a2`
-  product candidate and its reproducible wheel inside the admitted native-Linux
-  profile.
+- a public source repository, immutable Linux/macOS `v0.1.0a5` artifacts and a
+  canonical release pointer;
+- URL-only Codex installation, fresh recovery, same-version update, smoke and
+  removal lifecycle evidence for the admitted Linux/macOS archive routes;
+- a 60-second narrated predecessor demonstration of the recovery/stale-refusal
+  principle; it is historical evidence, not the current launch demonstration.
 
 ## Next
 
-- open the audited source repository without publishing an installation
-  pointer or claiming package availability;
+- bind a current `0.1.0a5` Linux URL-only launch demonstration and complete the
+  24--48 hour promotion observation window;
 - finish Microsoft Store certification, then run Store-signed Windows
-  install/update/remove on a clean ordinary-user profile;
-- while certification runs, finish the exact launcher projection, offline
-  agent-first route replay, and sandbox-to-interactive-user handoff contract;
+  install/update/remove and AF104 on a clean ordinary-user profile;
+- sign and notarize the macOS archive when Developer ID funding is available;
+- improve reason-code documentation from synthetic reproductions;
 - keep public routing/documentation changes separate from immutable platform
-  package bytes so a docs-only correction does not require package
-  recertification;
-- perform the URL-only agent-first drill from the exact public candidate;
-- freeze the wheel, platform packages, SBOM, checksums, provenance,
-  documentation, release index, and demo as one exact release packet;
-- publish `release/current.json` only after every declared platform artifact
-  and lifecycle claim passes its own gate;
-- improve reason-code documentation from synthetic reproductions.
+  package bytes so a docs-only correction does not require recertification.
 
 ## Later
 

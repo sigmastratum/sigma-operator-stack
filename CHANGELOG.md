@@ -74,8 +74,10 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Package replacement preserves immutable receipt history but fails stale until
   setup rebind, agent restart, and separate per-project qualification complete.
 
-[0.1.0a2](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a2),
+[0.1.0a5](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a5)
+is the current installable Community Alpha. The public
 [0.1.0a3](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a3)
 and [0.1.0a4](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a4)
-are immutable predecessor releases. The `0.1.0a5` release link is added only
-after its exact candidate is tagged and its assets are public.
+releases are immutable predecessors, not current installation authority.
+`0.1.0a2` remains an unpublished historical candidate and has no public
+release permalink.

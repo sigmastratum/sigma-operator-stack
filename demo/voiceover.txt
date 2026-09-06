@@ -1,19 +1,11 @@
-A new coding agent should not need your old chat to continue safely.
+A fresh Codex session receives only the public GitHub link and one instruction: install SOS, but show the preview before changing the project.
 
-SOS installs a local control plane inside an existing Git repository. It first
-discovers competing project authorities and asks you to choose. One preview,
-one confirmation, and the project is connected to Codex without replacing your
-existing instructions.
+Codex finds the canonical release pointer, verifies the exact tag, index, Linux archive, inner manifest, wheel, and checksums. The released launcher prepares its own Python and dependencies. The user does not repair PATH or install tooling.
 
-SOS stays honest. Before tests run, preflight says not verified. Qualification
-is a separate, isolated step, bound to the exact source.
+SOS presents one aggregate plan. It will create its local control-plane records and connect the project to Codex. Qualification is excluded. Nothing in the project changes until the human confirms that exact digest.
 
-Now a completely fresh Codex session asks SOS for project status, current work,
-boundaries, checks, and the next safe action. No previous conversation is
-required.
+After confirmation, installation completes and the existing user file remains byte-for-byte unchanged.
 
-When the source changes, SOS marks the old qualification stale instead of
-reusing a false green result. The agent is told to review and qualify before
-continuing.
+Now a genuinely fresh Codex session uses only SOS's read-only project tools. It recovers accepted authority, confirms that the workspace is current, and reports the truth: current work is not configured, qualification is not verified, and external actions still require the owner.
 
-Local-first. Reversible. No hidden telemetry. This is Sigma Operator Stack.
+One public link. One visible preview. Human authority stays human. This is Sigma Operator Stack.

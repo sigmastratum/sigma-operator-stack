@@ -11,18 +11,20 @@ from pathlib import Path
 
 
 EXPECTED_OUTPUT = {
-    "contract": "sos_fresh_codex_recovery_v1",
+    "contract": "sos_fresh_codex_recovery_v2",
     "authority_state": "accepted_local_weak_evidence",
-    "current_work_path": "tasks/current.md",
+    "current_work_state": "not_configured",
     "external_actions": "owner_required",
-    "qualification_state": "passed_local",
-    "safe_next_action": "review-and-qualify",
+    "qualification_state": "not_verified",
+    "safe_next_action": "review-declare-and-qualify",
 }
 REQUIRED_TOOLS = {
     "sos_status",
     "sos_preflight",
     "sos_active_task",
     "sos_next_action",
+    "sos_qualification_plan",
+    "sos_recover",
 }
 ALLOWED_TOOLS = REQUIRED_TOOLS | {
     "sos_qualification_plan",
@@ -99,7 +101,7 @@ def verify(
     return {
         "candidate": candidate,
         "client": client,
-        "contract": "sos_fresh_codex_capture_receipt_v1",
+        "contract": "sos_fresh_codex_recovery_receipt_v2",
         "events_sha256": _digest(events_path),
         "fresh_ephemeral_session": True,
         "mcp_server": "sigma_operator_stack",

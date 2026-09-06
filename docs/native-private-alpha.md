@@ -1,8 +1,11 @@
-# SOS native private-alpha evidence route 0.1.0a4
+# Historical SOS native private-alpha evidence route 0.1.0a4
+
+> Archived invited-test instructions. Do not use this document to install the
+> current public release; start at the repository root `INSTALL.md`.
 
 This is a historical invited-test route, not the public installation path.
 Public agents must follow [`install-with-codex.md`](install-with-codex.md) and
-stop while `release/current.json` is absent.
+use only the canonical `release/current.json` authority.
 
 This checked bundle is for an invited native-platform test. It is not a signed
 public installer.

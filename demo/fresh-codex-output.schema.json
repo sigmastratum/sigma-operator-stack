@@ -5,17 +5,17 @@
   "required": [
     "contract",
     "authority_state",
-    "current_work_path",
+    "current_work_state",
     "external_actions",
     "qualification_state",
     "safe_next_action"
   ],
   "properties": {
-    "contract": {"type": "string", "const": "sos_fresh_codex_recovery_v1"},
+    "contract": {"type": "string", "const": "sos_fresh_codex_recovery_v2"},
     "authority_state": {"type": "string", "enum": ["accepted_local_weak_evidence"]},
-    "current_work_path": {"type": "string", "enum": ["tasks/current.md"]},
+    "current_work_state": {"type": "string", "enum": ["not_configured"]},
     "external_actions": {"type": "string", "enum": ["owner_required"]},
-    "qualification_state": {"type": "string", "enum": ["passed_local"]},
-    "safe_next_action": {"type": "string", "enum": ["review-and-qualify"]}
+    "qualification_state": {"type": "string", "enum": ["not_verified"]},
+    "safe_next_action": {"type": "string", "enum": ["review-declare-and-qualify"]}
   }
 }

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "architecture": {"const": "x86_64", "type": "string"},
+    "archive_verified": {"const": true, "type": "boolean"},
+    "candidate": {"const": "ae59b5ac6faf4fa6fe3443550a575ed1b32cfb51", "type": "string"},
+    "contract": {"const": "sos_url_only_install_preview_v1", "type": "string"},
+    "index_verified": {"const": true, "type": "boolean"},
+    "inner_manifest_verified": {"const": true, "type": "boolean"},
+    "plan_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "pointer_verified": {"const": true, "type": "boolean"},
+    "project_files_changed": {"const": false, "type": "boolean"},
+    "proposed_targets": {
+      "items": {
+        "enum": [".sigma/", "AGENTS.md", ".codex/config.toml"],
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "qualification_state": {"const": "not_verified", "type": "string"},
+    "release_tag": {"const": "v0.1.0a5", "type": "string"},
+    "runtime_prepared": {"const": true, "type": "boolean"},
+    "status": {"const": "preview_ready", "type": "string"},
+    "system": {"const": "linux", "type": "string"},
+    "tree": {"const": "e5d75f4b52ff1ed4668bb4572ba1d424af7b8c09", "type": "string"},
+    "user_confirmation_required": {"const": true, "type": "boolean"},
+    "version": {"const": "0.1.0a5", "type": "string"}
+  },
+  "required": [
+    "contract",
+    "status",
+    "version",
+    "release_tag",
+    "candidate",
+    "tree",
+    "system",
+    "architecture",
+    "pointer_verified",
+    "index_verified",
+    "archive_verified",
+    "inner_manifest_verified",
+    "runtime_prepared",
+    "project_files_changed",
+    "proposed_targets",
+    "plan_digest",
+    "qualification_state",
+    "user_confirmation_required"
+  ],
+  "type": "object"
+}

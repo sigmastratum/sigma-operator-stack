@@ -7,7 +7,8 @@
 > directly. GitHub search, snippets and cached repository pages are not release
 > authority and cannot prove that the pointer is absent.
 
-**Current installable Community alpha: `0.1.0a5`.** Older releases remain
+**Current installable Community alpha: `0.1.0a5`. Linux is the primary
+promotion path.** Older releases remain
 available as history but are not current installation authority.
 
 Fresh coding-agent sessions often resume from stale chat context, an old green
@@ -24,13 +25,12 @@ next action.
 
 ![Terminal view of SOS recovering project state and refusing a stale result](demo/recovery-terminal.png)
 
-The [60-second narrated demo](demo/recovery-demo.mp4) and its
-[text transcript](demo/transcript.md) show initialization, separate
-qualification, fresh-session recovery, a source change, and the stale refusal.
-It is verified predecessor evidence bound to product candidate `d234078` and
-demonstrates the product principle inside the admitted native-Linux profile.
-It is not evidence for the current source HEAD, URL-only installation, or
-release readiness. Platform-specific support remains bounded by the matrix
+The [current narrated demo](demo/recovery-demo.mp4) and its
+[text transcript](demo/transcript.md) show the exact `0.1.0a5` Linux path:
+URL-only discovery, release verification, one project preview, explicit human
+confirmation, installation, and genuinely fresh-session recovery. Its
+content-safe receipt is bound to product candidate `ae59b5a`, the release
+archive and wheel. Platform-specific support remains bounded by the matrix
 below.
 
 ## Install with Codex
@@ -49,9 +49,9 @@ The expected results are:
 - truthful `current`, `stale`, `not_configured`, or `not_verified` state;
 - a fresh Codex session recovers current work and one safe next action.
 
-Candidate scope: **Codex-first · Linux x86_64 · macOS 14+ Apple Silicon
-control plane · Windows 11 x86_64 pending Store lifecycle · local-first ·
-no telemetry**.
+Candidate scope: **Codex-first · Linux x86_64 primary path · unsigned
+experimental macOS 14+ Apple Silicon control plane · Windows 11 x86_64
+pending Store lifecycle · local-first · no telemetry**.
 
 [Limitations](#support-matrix) · [Security](SECURITY.md) ·
 [Uninstall and preservation](docs/version-update.md#removal)
@@ -84,9 +84,10 @@ shows the product outcome:
 4. A fresh session recovers accepted state and the next allowed action.
 5. A later source change is detected as stale instead of silently trusted.
 
-The recording combines the offline local lifecycle with one explicitly
-approved, receipt-verified ephemeral Codex recovery. No raw task, response,
-tool result, session identifier, account data, or host path is retained.
+The recording combines three explicitly approved Codex turns—preview,
+confirmed installation and fresh recovery—with one approved narration call.
+No raw task, response, tool result, session identifier, account data, or host
+path is retained.
 
 There is one public installation route. The released platform launcher
 owns its declared Python, `uv`, and package dependencies; the developer does
@@ -156,7 +157,7 @@ expands the claim.
 | Package network and telemetry | Launcher acquisition is bounded; SOS entrypoint counters remained `0/0/0` in qualified runs | No network or telemetry after verified handoff | Release evidence must bind the exact platform launcher |
 | Existing agent/governance files | Preserve/append/create/block and collision fixtures passed | No silent overwrite | Semantic ambiguity requires an owner choice |
 
-The native private-alpha bundles pin managed Python `3.12.14` and `uv 0.12.6`.
+The public Community Alpha archives pin managed Python `3.12.14` and `uv 0.12.6`.
 Exact Git and Codex versions are artifact-specific and must be frozen in the
 public release index before any broad compatibility claim. The Codex adapter
 exposes exactly eight read/proposal MCP tools.

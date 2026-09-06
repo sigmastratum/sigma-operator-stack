@@ -20,7 +20,7 @@ CAPTURE_RECEIPT = ROOT / "fresh-codex-receipt.json"
 VOICEOVER_TEXT = ROOT / "voiceover.txt"
 VOICEOVER_AUDIO = ROOT / "voiceover.mp3"
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
-FRAME_DURATIONS = (2, 6, 7, 7, 8, 10, 10, 10)
+FRAME_DURATIONS = (2, 8, 8, 8, 9, 10, 10, 13)
 
 
 def digest(path: Path) -> str:
@@ -38,7 +38,7 @@ def render_frame(lines: list[str], path: Path) -> None:
             color = "#fbbf24"
         if line.startswith("$"):
             color = "#93c5fd"
-        draw.text((52, 48 + index * 34), line, font=font, fill=color)
+        draw.text((52, 48 + index * 29), line, font=font, fill=color)
     image.save(path, format="PNG", optimize=True)
 
 
@@ -48,10 +48,10 @@ def render_hook(path: Path) -> None:
     title = ImageFont.load_default(size=42)
     body = ImageFont.load_default(size=24)
     draw.rounded_rectangle((24, 24, 1176, 776), radius=14, fill="#111827", outline="#334155", width=2)
-    draw.text((70, 175), "A fresh coding agent.", font=title, fill="#e5e7eb")
-    draw.text((70, 245), "Your existing project.", font=title, fill="#e5e7eb")
-    draw.text((70, 315), "One safe next action.", font=title, fill="#a7f3d0")
-    draw.text((72, 430), "No previous chat required.", font=body, fill="#93c5fd")
+    draw.text((70, 175), "One public link.", font=title, fill="#e5e7eb")
+    draw.text((70, 245), "One visible preview.", font=title, fill="#e5e7eb")
+    draw.text((70, 315), "A fresh session recovers.", font=title, fill="#a7f3d0")
+    draw.text((72, 430), "SOS 0.1.0a5 · Linux", font=body, fill="#93c5fd")
     draw.text((72, 490), "Sigma Operator Stack", font=body, fill="#fbbf24")
     image.save(path, format="PNG", optimize=True)
 
@@ -110,16 +110,20 @@ def main() -> int:
             raise SystemExit("SOS_DEMO_MEDIA_LIMIT_EXCEEDED")
         media[name] = {"codec": codec, "container": container, "sha256": digest(path), "size": path.stat().st_size}
     receipt = json.loads(CAPTURE_RECEIPT.read_text(encoding="utf-8"))
-    if receipt.get("contract") != "sos_fresh_codex_capture_receipt_v1" or receipt.get("status") != "passed":
+    if receipt.get("contract") != "sos_url_only_codex_capture_receipt_v1" or receipt.get("status") != "passed":
         raise SystemExit("SOS_DEMO_CAPTURE_RECEIPT_INVALID")
     manifest = {
         "candidate": receipt["candidate"],
-        "contract": "sos_demo_media_manifest_v2",
+        "archive_sha256": receipt["archive_sha256"],
+        "contract": "sos_demo_media_manifest_v3",
         "duration_seconds": sum(FRAME_DURATIONS),
         "fresh_codex_receipt_sha256": digest(CAPTURE_RECEIPT),
-        "fresh_codex_provider_calls": receipt["provider_calls"],
+        "fresh_codex_provider_calls": receipt["provider_requests_total"],
+        "index_sha256": receipt["index_sha256"],
+        "inner_manifest_sha256": receipt["inner_manifest_sha256"],
         "media": media,
-        "provider_calls": receipt["provider_calls"] + 1,
+        "provider_calls": receipt["provider_requests_total"] + 1,
+        "release_tag": receipt["release_tag"],
         "synthetic_repository": True,
         "terminal_frame_sha256": digest(SOURCE),
         "transcript_sha256": digest(TRANSCRIPT),

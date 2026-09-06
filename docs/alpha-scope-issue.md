@@ -1,8 +1,8 @@
 # Community alpha scope and known limitations — 0.1.0a5
 
-This is the canonical draft for the issue that will be pinned after the
-repository becomes public. Do not create it remotely from a source-preview
-commit without separate approval.
+This is the canonical source for the issue that will be created, assigned to
+`@sigmastratum` and pinned before promotion. Remote creation and pinning remain
+separately approved actions.
 
 SOS records accepted project state for fresh coding-agent sessions, detects
 stale or unverified work and returns one safe next action. The alpha is
@@ -19,9 +19,17 @@ Codex-first, local-first and has no telemetry.
 - Other agents, platforms and check families are unverified or unsupported as
   described in the README support matrix.
 
-No public installation authority exists until an immutable release pointer is
-published. `not_configured`, `not_verified`, ambiguous and unsupported states
-are never green.
+The only public installation authority is the immutable `v0.1.0a5` release
+selected by `main:release/current.json`. `not_configured`, `not_verified`,
+ambiguous and unsupported states are never green.
+
+## Exact test requested
+
+Give the repository URL to a fresh Codex task and ask it to install SOS in the
+current project while showing the preview before mutation. After installation,
+open a genuinely fresh task and verify recovery, a same-version update, the
+public smoke test and a removal preview. Confirm removal only after reviewing
+the exact managed targets; `.sigma` and unrelated user files must remain.
 
 ## Reporting useful alpha evidence
 

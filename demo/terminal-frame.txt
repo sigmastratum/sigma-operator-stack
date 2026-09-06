@@ -1,21 +1,23 @@
-SOS 0.1.0a2 · candidate d234078 · wheel 04c4722e · Linux workflow demo
+SOS 0.1.0a5 · URL-only Linux · candidate ae59b5a · wheel 547f3d22
 
-$ sos compatibility . --json
-owner_required  SOS_PRIMARY_AUTHORITY_REQUIRED
-$ sos init --with-codex --primary-authority agents:AGENTS.md .
-success         SOS_P106_INSTALLED
-$ sos preflight . --json
-not_verified    SOS_QUALIFICATION_NOT_RUN
-$ sos qualify . --family python.stdlib-unittest
-passed_local    SOS_QUALIFICATION_PASSED
-$ codex exec --ephemeral [read-only SOS recovery]
-fresh_session   passed
-MCP tools       status · preflight · active_task · next_action · recover
-authority       accepted_local_weak_evidence
-qualification   passed_local
-external action owner_required
-next action     review-and-qualify
-$ sos status . --json  # after synthetic source change
-stale           SOS_SOURCE_STATUS_CHANGED
-$ sos next-action . --json
-stale           review-and-qualify
+Fresh Codex
+> https://github.com/sigmastratum/sigma-operator-stack
+> Install SOS in my current project. Show me the preview before changing it.
+
+pointer       verified · v0.1.0a5
+index         verified · f09c8b45
+Linux archive verified · 1f001538
+inner manifest verified · 1b72a943
+
+preview_ready sha256:8690e435…8ad7
+create        .sigma/ · AGENTS.md · .codex/config.toml
+qualification excluded
+human         yes - apply this exact plan
+success       SOS_WORKSPACE_CURRENT
+
+Fresh Codex session · SOS MCP only
+authority     accepted_local_weak_evidence
+current work  not_configured · owner input required
+qualification not_verified · no false green state
+external      owner_required
+next action   review project map, declare work, then qualify

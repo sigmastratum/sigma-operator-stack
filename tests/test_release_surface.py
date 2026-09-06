@@ -419,21 +419,30 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertIn("exact alpha artifacts selected by `release/current.json`", security)
         self.assertIn("Security fixes are provided for the latest published", security)
         self.assertIn("## 0.1.0a3 — 2026-09-05", changelog)
-        self.assertNotIn("releases/tag/v0.1.0a5", changelog)
+        self.assertIn("releases/tag/v0.1.0a5", changelog)
+        self.assertNotIn("releases/tag/v0.1.0a2", changelog)
         for heading in (
-            "## Gate 1: source preview opening",
-            "## Gate 2: Linux/macOS installable release",
-            "## Gate 3: Windows Store admission",
-            "## Gate 4: promotion",
+            "## Gate 1: source preview opening — completed",
+            "## Gate 2: Linux/macOS installable release — completed, promotion observation pending",
+            "## Gate 3: Windows Store admission — pending",
+            "## Gate 4: promotion — blocked pending this checklist",
         ):
             self.assertIn(heading, checklist)
         for required in ("@sigmastratum", "D+2", "D+7", "D+14", "D+30", "not adoption"):
             self.assertIn(required, launch)
-        for required in ("verified predecessor evidence", "not evidence for the current source HEAD"):
+        self.assertIn("repository is already public", launch)
+        self.assertIn("Before promotion", launch)
+        for required in ("current narrated demo", "URL-only discovery", "genuinely fresh-session recovery"):
             self.assertIn(required, readme)
-        self.assertIn("verified predecessor evidence for the product principle", demo)
+        self.assertIn("current Linux-primary URL-only demonstration", demo)
         self.assertIn("unsigned/not-notarized", readme.lower())
         self.assertIn("accepted Community Alpha defer", checklist)
+        self.assertNotIn("README states that no installable public release", checklist)
+        self.assertNotIn("Status: pre-public", (root / "PUBLIC_REPOSITORY_BOUNDARY.md").read_text())
+        self.assertIn(
+            "This repository is public.",
+            (root / "AGENTS.md").read_text(encoding="utf-8"),
+        )
         for forbidden in ("xattr -d", "spctl --master-disable"):
             self.assertNotIn(forbidden, readme + checklist)
 
@@ -441,9 +450,50 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs/alpha-scope-issue.md").read_text(encoding="utf-8")
         self.assertIn("Community alpha scope and known limitations — 0.1.0a5", text)
-        self.assertIn("Do not create it remotely", text)
+        self.assertIn("Remote creation and pinning remain", text)
+        self.assertIn("## Exact test requested", text)
         self.assertIn("Stars, clones, views, forks and", text)
         self.assertIn("not adoption", text)
+
+    def test_current_release_notes_bind_exact_public_artifacts(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs" / "release-notes-0.1.0a5.md").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            "ae59b5ac6faf4fa6fe3443550a575ed1b32cfb51",
+            "e5d75f4b52ff1ed4668bb4572ba1d424af7b8c09",
+            "fd3cd4f864a6b339538ce8a4ce972acc7665065b",
+            "f09c8b45ada38a4187f7db61e4523120022f23aad9d5fc624dad6f4d99cc4cc5",
+            "1f001538785f586c4b7857bd32b86a92dddec3919c08a86624b4d2f7685fc94f",
+            "adfd7fdf5e5270748244c4a8ecb8bb1a22b5282f1864dec0217133738c4ad89c",
+            "547f3d229ffb9d7d6b77dcf3ea869c7591a135c9f003fac333704cb311701ae8",
+            "6ac14b7f3e05c2348dfe189312648dffc402846b42a9def12c3431623974111c",
+        ):
+            self.assertIn(value, text)
+        self.assertIn(
+            "Install SOS in my current project. Show me the preview before changing it.",
+            text,
+        )
+
+    def test_promotion_runbook_freezes_remote_safeguards(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs" / "promotion-runbook.md").read_text(encoding="utf-8")
+        for required in (
+            "source (3.11)",
+            "source (3.12)",
+            "release-artifacts",
+            "Dependabot alerts and security updates",
+            "secret scanning",
+            "private vulnerability reporting as enabled",
+            "against deletion and force-push",
+            "reviewer `@sigmastratum`",
+            "first 24 hours: no promotion",
+            "after 48 hours without a blocker",
+        ):
+            self.assertIn(required, text)
+        self.assertIn("PyPI remains disabled", text)
+        self.assertIn("immutable `v0.1.0a5` tag", text)
 
     def test_issue_forms_are_typed_and_public_safe(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -481,18 +531,26 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         for name in ("recovery-loop.png", "recovery-terminal.png"):
             self.assertLess((root / "demo" / name).stat().st_size, 2 * 1024 * 1024)
         manifest = json.loads((root / "demo" / "media-manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v2")
+        self.assertEqual(manifest["contract"], "sos_demo_media_manifest_v3")
         self.assertTrue(manifest["synthetic_repository"])
-        self.assertEqual(manifest["provider_calls"], 2)
-        self.assertEqual(manifest["fresh_codex_provider_calls"], 1)
+        self.assertEqual(manifest["provider_calls"], 10)
+        self.assertEqual(manifest["fresh_codex_provider_calls"], 9)
+        self.assertEqual(manifest["release_tag"], "v0.1.0a5")
         self.assertGreaterEqual(manifest["duration_seconds"], 60)
         self.assertLessEqual(manifest["duration_seconds"], 120)
         receipt = json.loads((root / "demo" / "fresh-codex-receipt.json").read_text(encoding="utf-8"))
-        self.assertEqual(receipt["contract"], "sos_fresh_codex_capture_receipt_v1")
+        self.assertEqual(receipt["contract"], "sos_url_only_codex_capture_receipt_v1")
         self.assertEqual(receipt["status"], "passed")
-        self.assertEqual(receipt["provider_calls"], 1)
-        self.assertEqual(receipt["shell_calls"], 0)
-        self.assertEqual(receipt["mutation_tool_calls"], 0)
+        self.assertEqual(receipt["product_turns"], 3)
+        self.assertEqual(receipt["provider_requests_total"], 9)
+        self.assertEqual(receipt["discarded_preparation_requests"], 6)
+        self.assertEqual(receipt["schema_rejected_requests"], 3)
+        self.assertTrue(receipt["human_confirmation"])
+        self.assertFalse(receipt["install"]["project_files_changed_before_confirmation"])
+        self.assertTrue(receipt["install"]["sentinel_preserved"])
+        self.assertEqual(receipt["fresh_recovery"]["shell_calls"], 0)
+        self.assertEqual(receipt["fresh_recovery"]["mutation_tool_calls"], 0)
+        self.assertEqual(receipt["fresh_recovery"]["external_actions"], 0)
         voiceover = manifest["voiceover"]
         self.assertEqual(voiceover["provider_calls"], 1)
         self.assertEqual(voiceover["model"], "gpt-4o-mini-tts-2025-12-15")

@@ -1,10 +1,10 @@
 # SOS Public Repository Boundary
 
-Status: pre-public, public-safe product candidate
+Status: public Community Alpha source and distribution boundary
 
-This repository is the clean source home for the future public Sigma Operator
-Stack core. Its current private visibility is a staging condition, not
-permission to store private material.
+This repository is the public source home for the Sigma Operator Stack
+Community core. Public visibility and an installable alpha do not permit
+private material, broaden platform support, or authorize promotion claims.
 
 ## Allowed
 
@@ -36,11 +36,11 @@ exact public diff.
 
 ## Public Core Boundary
 
-The intended public core is local-first and offline-capable. It must remain
+The public core is local-first and offline-capable. It must remain
 useful without a hosted account and must retain local record access, export,
 uninstall, stale detection, security fixes and public schemas. Future paid
 team or hosted services are separate products and must consume versioned public
 contracts without weakening this boundary.
 
-No commit, push, package publication or visibility change is authorized merely
-by this document.
+No commit, push, package publication, promotion or visibility change is
+authorized merely by this document.

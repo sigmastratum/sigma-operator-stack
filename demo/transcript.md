@@ -1,49 +1,69 @@
-# Fresh-agent recovery transcript
+# SOS 0.1.0a5 URL-only Linux demo transcript
 
-This transcript is the canonical text equivalent of one exact-candidate run
-against a wholly synthetic repository. The local SOS lifecycle performed no
-network request. One separately approved ephemeral Codex session used the
-project-local read-only SOS MCP server. Raw task text, response text, tool
-results, session identifiers and absolute paths were not retained.
+This is the canonical content-safe transcript for a real provider-backed Codex
+capture against a marker-owned synthetic Git repository. It is bound to SOS
+product candidate `ae59b5ac6faf4fa6fe3443550a575ed1b32cfb51`, tree
+`e5d75f4b52ff1ed4668bb4572ba1d424af7b8c09`, and the published Linux archive.
+Host paths, session identifiers, raw prompts, raw responses and raw tool results
+are not retained.
 
-1. **Discover.** `sos compatibility . --json` returns
-   `owner_required / SOS_PRIMARY_AUTHORITY_REQUIRED` because the synthetic
-   project has both `AGENTS.md` and OpenSpec authority candidates. No write is
-   performed.
-2. **Install.** The operator runs `sos init --with-codex
-   --primary-authority agents:AGENTS.md .`, inspects one aggregate preview, and
-   confirms once. Existing project instructions and unrelated Codex settings
-   are preserved.
-3. **Stay honest.** `sos preflight . --json` returns `not_verified` and names
-   qualification as the next action. Installation did not run tests.
-4. **Qualify separately.** On an admitted native-Linux host, the operator runs
-   `sos qualify . --family python.stdlib-unittest`, inspects the plan, and confirms. The receipt becomes
-   `passed_local` for the exact source.
-5. **Recover fresh.** A genuinely new Codex session runs with `--ephemeral`,
-   ignores user configuration and receives only the generated eight-tool SOS
-   MCP allow-list in a read-only sandbox. The capture verifier observes
-   completed calls to `sos_status`, `sos_preflight`, `sos_active_task`,
-   `sos_next_action` and `sos_recover`, with no shell or mutation call.
-6. **Project a content-safe result.** The fresh session identifies authority
-   as `accepted_local_weak_evidence`, current work as `tasks/current.md`,
-   qualification as `passed_local`, external actions as `owner_required`, and
-   the safe next-action class as `review-and-qualify`. Only those categorical
-   fields and raw-input digests survive in `fresh-codex-receipt.json`.
-7. **Detect change.** A synthetic source comment is added. The next status is
-   `stale / SOS_SOURCE_STATUS_CHANGED`; the old green receipt is not reused.
-8. **Continue safely.** `sos next-action . --json` returns the bounded
-   `review-and-qualify` action instead of silently continuing.
+## Scene 1 — URL-only entry
 
-The public media is rendered from this transcript, the canonical terminal
-frame and the receipt for product candidate `d234078`. The demonstrated run is
-inside the admitted native-Linux profile; it does not by itself establish
-Windows, macOS, release-readiness or broad adoption.
+A fresh Codex session receives exactly the public repository URL and:
 
-The first frame displays abbreviated product-candidate and wheel identities:
-`d234078` and `04c4722e`. Their complete bindings are recorded in
-`media-manifest.json`.
+> Install SOS in my current project. Show me the preview before changing it.
 
-The video opens immediately with the outcome rather than an idle terminal
-frame. Its English narration is the exact public text in `voiceover.txt`; the
-generated audio and TTS provider count are separately digest-bound in the
-media manifest.
+Codex reads the canonical public instructions. It verifies `release/current.json`,
+the immutable `v0.1.0a5` tag, release index, Linux x86_64 archive, inner manifest,
+wheel and bundled checksums. It does not substitute a branch archive or install
+Python, `uv`, or dependencies manually.
+
+## Scene 2 — exact preview and human confirmation
+
+The verified launcher prepares the SOS-owned per-user environment outside the
+project. It then produces one aggregate project plan:
+
+- create `.sigma/` control-plane records;
+- create the bounded SOS integration in `AGENTS.md`;
+- create the project-local MCP configuration in `.codex/config.toml`;
+- exclude qualification from installation.
+
+The plan digest is
+`sha256:8690e4358a879141a3e57362dbd672cc1872db1150ada653addd943340fa8ad7`.
+The project remains unchanged until the human explicitly confirms this exact
+plan. After confirmation, installation reports `SOS_WORKSPACE_CURRENT` and the
+synthetic user sentinel retains its original SHA-256.
+
+## Scene 3 — genuinely fresh recovery
+
+A new Codex session starts with the installed project configuration. It calls
+only the project-local `sigma_operator_stack` MCP server. Six read/proposal
+tools complete: `sos_status`, `sos_preflight`, `sos_active_task`,
+`sos_next_action`, `sos_qualification_plan`, and `sos_recover`. Shell calls,
+mutation tools and external actions are zero in this recovery session.
+
+SOS reports:
+
+- authority: accepted locally with weak evidence;
+- workspace: current, control-plane integrity valid;
+- current work: `not_configured`, owner input required;
+- qualification: `not_verified`, with both registered families unconfigured;
+- external actions: owner-required;
+- safe next action: review the project map, declare current work, then follow
+  the separate doctor and qualification flow.
+
+No green qualification claim is made. No project file changes during recovery.
+
+## Capture accounting and scope
+
+The retained product sequence consists of three successful Codex turns:
+verified preview, confirmed installation, and fresh recovery. The public receipt
+also accounts for six discarded capture-preparation requests, including three
+schema rejections. Those preparation attempts are not product evidence. One
+separately approved TTS request generated the narration.
+
+The capture runner used a disposable synthetic project and user environment
+because nested Linux `bwrap` is unavailable on the recording host. This is a
+capture-harness constraint, not a change to SOS installation semantics. The
+demo proves the current Linux URL-only route. It does not claim notarized macOS,
+Windows Store readiness, broad agent support, adoption, or time savings.

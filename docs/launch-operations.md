@@ -35,7 +35,8 @@ not combined, and private tester messages are not published without permission.
 
 ## Pinned scope issue
 
-After public visibility, create one issue from
+Before promotion, create one issue from
 [`alpha-scope-issue.md`](alpha-scope-issue.md), assign it to the launch owner and
-pin it. Creating or pinning the issue is a separate remote action; this source
-file grants no such authority.
+pin it. The repository is already public; the missing pinned issue remains a
+launch-surface gate. Creating or pinning it is a separate remote action, and
+this source file grants no such authority.

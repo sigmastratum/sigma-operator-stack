@@ -56,30 +56,16 @@ class PublicDemoTests(unittest.TestCase):
             self.assertIn("SOS_DEMO_TARGET_NOT_MARKER_OWNED", completed.stderr)
             self.assertEqual((foreign / "keep.txt").read_text(encoding="utf-8"), "synthetic\n")
 
-    def test_transcript_and_expected_steps_match(self) -> None:
+    def test_transcript_matches_current_url_only_capture(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        expected = json.loads(
-            (root / "examples" / "fresh-agent-recovery" / "expected.json").read_text(encoding="utf-8")
-        )
         transcript = (root / "demo" / "transcript.md").read_text(encoding="utf-8")
-        names = [step["name"] for step in expected["steps"]]
-        self.assertEqual(
-            names,
-            [
-                "compatibility",
-                "init",
-                "preflight_before_qualification",
-                "qualify_python_unittest",
-                "fresh_recovery",
-                "source_change",
-                "safe_next_action",
-            ],
-        )
         for token in (
-            "SOS_PRIMARY_AUTHORITY_REQUIRED",
+            "v0.1.0a5",
+            "URL-only entry",
+            "human explicitly confirms",
+            "not_configured",
             "not_verified",
-            "passed_local",
-            "SOS_SOURCE_STATUS_CHANGED",
+            "genuinely fresh recovery",
         ):
             self.assertIn(token, transcript)
 
@@ -141,6 +127,7 @@ class PublicDemoTests(unittest.TestCase):
                 model="gpt-5.6-sol",
             )
         self.assertEqual(receipt["status"], "passed")
+        self.assertEqual(receipt["contract"], "sos_fresh_codex_recovery_receipt_v2")
         self.assertEqual(receipt["provider_calls"], 1)
         self.assertEqual(receipt["shell_calls"], 0)
         self.assertEqual(receipt["mutation_tool_calls"], 0)

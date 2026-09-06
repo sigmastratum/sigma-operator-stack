@@ -1,63 +1,55 @@
-# Reproducible demo assets
+# Reproducible SOS 0.1.0a5 demo assets
 
-`transcript.md` is the canonical public evidence. `capture.sh` resets the
-synthetic project and runs the same commands in a real terminal. The operator
-must answer the two product confirmations; the script does not inject hidden
-approval.
+This directory contains the current Linux-primary URL-only demonstration. It
+is bound to product candidate `ae59b5ac6faf4fa6fe3443550a575ed1b32cfb51`
+and the published `v0.1.0a5` Linux archive.
 
-`terminal-frame.txt` is the canonical content-safe terminal frame and
-`render_terminal_png.py` deterministically produces `recovery-terminal.png`.
-It contains only synthetic commands, typed outcomes, and the result of one
-receipt-verified ephemeral Codex recovery. Raw task text, response text, tool
-results, session identifiers and absolute paths are never retained.
+`transcript.md` is the canonical public text equivalent. `terminal-frame.txt`
+is the content-safe terminal projection; `render_terminal_png.py` renders
+`recovery-terminal.png` deterministically. `render_video.py` combines the
+frame sequence with the exact narration in `voiceover.txt` and the single
+approved TTS result in `voiceover.mp3`.
 
-`recovery-demo.webm` and `recovery-demo.mp4` are deterministic terminal media
-generated from `terminal-frame.txt`. The local lifecycle is offline. Exactly
-one explicitly approved provider-backed Codex step is projected through
-`fresh-codex-receipt.json`; preparation failures are not release evidence.
+`fresh-codex-receipt.json` records only categorical and digest-bound evidence:
+the exact release bindings, preview digest, explicit human confirmation,
+sentinel preservation, provider-request accounting, and six completed
+read/proposal SOS MCP tools in a genuinely fresh session. Raw prompts,
+responses, tool results, session identifiers and absolute paths are not kept.
 
-These checked-in assets are verified predecessor evidence for the product
-principle. They are not bound to the current source HEAD and do not prove the
-public URL-only installation route or release readiness. Their existing media,
-transcript, receipt and manifest bytes remain an internally consistent
-historical packet; launch media must be rebuilt from the final release
-candidate.
+The retained product sequence is:
 
-The final cut opens with the product outcome in the first frame, then moves to
-the exact terminal sequence after two seconds. `voiceover.txt` is the canonical
-public narration. One separately approved TTS call generates `voiceover.mp3`;
-the media manifest binds its model, voice, text, bytes and provider-call count.
+1. a fresh Codex session receives only the repository URL and canonical install
+   instruction;
+2. Codex verifies the pointer, tag, index, Linux archive and inner manifest,
+   then runs the verified launcher to obtain the exact preview;
+3. a human confirms the digest-bound plan;
+4. Codex completes installation without running qualification;
+5. a genuinely fresh Codex session recovers currentness, boundaries,
+   `not_configured`, `not_verified`, and one safe next action using only the
+   project-local SOS MCP server.
 
-`capture_fresh_codex.py` accepts the operator instruction from an external
-temporary file, runs Codex with `--ephemeral`, `--ignore-user-config`, a
-read-only sandbox and only the generated eight-tool SOS MCP allow-list, then
-deletes raw events and response with its temporary directory. The public
-receipt stores only categorical recovery fields, tool names and digests.
+The capture used a marker-owned disposable project and user environment. The
+recording host cannot nest Codex's Linux `bwrap` sandbox, so the capture runner
+was externally bounded to that disposable root. This limitation is explicit in
+the transcript and does not alter the product's preview or authority rules.
 
-Capture requirements:
+Media requirements:
 
-- terminal: 100 columns by 30 rows, dark background, 16 px monospace;
-- no host prompt, username, repository path, environment, credentials, or
-  network access in frame;
-- captions follow `transcript.md` exactly;
-- narration follows `voiceover.txt` exactly and begins with the first frame;
-- WebM and MP4 must each remain below 2 MiB;
-- GIF is optional and only retained when readable below the same limit;
-- media metadata and extracted text must pass the public-content scanner.
-- the fresh step requires `SOS_FRESH_CODEX_PROVIDER_APPROVED=1`; no default or
-  hidden provider call exists;
-- `SOS_FRESH_CODEX_TASK_FILE` is external and is never copied or hashed into
-  the repository.
+- 60–120 seconds, 1200×800, dark terminal presentation;
+- no username, host prompt, absolute path, credential, raw conversation or raw
+  tool output;
+- narration is exactly `voiceover.txt`;
+- MP4 and WebM are each below 2 MiB;
+- all media, text, release and provider-call bindings are verified by the
+  public scanner.
 
-Rebuild deterministic PNG assets with:
+Rebuild deterministic local render products with:
 
 ```bash
-python3 demo/render_draft_png.py
 python3 demo/render_terminal_png.py
 python3 demo/render_video.py --ffmpeg /path/to/ffmpeg
 ```
 
-The video renderer uses fixed arguments, strips source metadata, validates
-size, and rewrites `media-manifest.json`. The containers retain only ordinary
-codec/muxer identification. Rebuilding with a different encoder version changes
-the media digest and therefore requires a release-evidence rebind.
+The old `0.1.0a2` principle demo is retained only in Git history. This packet
+does not claim notarized macOS, Windows support, broad agent support, adoption,
+or time savings.

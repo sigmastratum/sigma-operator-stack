@@ -33,9 +33,11 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("docs/install-with-codex.md", first_viewport)
         self.assertIn("INSTALL.md", first_viewport)
         self.assertIn(POINTER_URL, first_viewport)
-        self.assertIn(
-            "Current installable Community alpha: `0.1.0a5`", first_viewport
-        )
+        self.assertIn("Current installable Community alpha: `0.1.0a5`", first_viewport)
+        self.assertIn("Linux is the primary", first_viewport)
+        normalized = " ".join(readme.split())
+        self.assertIn("unsigned experimental macOS", normalized)
+        self.assertIn("Windows 11 x86_64 pending Store lifecycle", normalized)
         self.assertNotIn("/release/0.1.0a3/release/current.json", first_viewport)
         self.assertIn("checked-in release", first_viewport)
         self.assertIn("Release activation is fail closed", readme)

@@ -1,4 +1,7 @@
-# Public repository opening runbook
+# Historical public repository opening runbook
+
+> Completed operator record. This is not the current installation,
+> publication, package-release or promotion procedure.
 
 This runbook records the already separate source-opening transaction and must
 not be reused as package-release authority. It separates publication of

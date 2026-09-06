@@ -2,9 +2,8 @@
 
 Read `PUBLIC_REPOSITORY_BOUNDARY.md` before every task.
 
-This repository is intended to become public. Treat every uncommitted file,
-test fixture, log and generated artifact as publicly disclosable regardless of
-the repository's current visibility.
+This repository is public. Treat every uncommitted file, test fixture, log and
+generated artifact as publicly disclosable before it enters the worktree.
 
 Only public SOS product source, public contracts, synthetic fixtures,
 hermetic qualification, user documentation and distribution metadata belong

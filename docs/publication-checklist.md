@@ -10,7 +10,7 @@ the [public repository opening runbook](repository-opening-runbook.md).
 ## Metadata
 
 - About: `Project state and fresh-session recovery for coding agents.`
-- Homepage: repository README
+- Homepage: canonical `INSTALL.md`
 - Topics: `coding-agents`, `codex`, `mcp`, `developer-tools`,
   `ai-native-sdlc`, `local-first`, `agent-governance`, `provenance`, `python`,
   `git`
@@ -20,29 +20,25 @@ the [public repository opening runbook](repository-opening-runbook.md).
 - Issues: enabled
 - Discussions: disabled
 - Wiki: disabled
-- Private vulnerability reporting: enable and confirm immediately after public
-  visibility; GitHub does not expose it for private repositories
+- Private vulnerability reporting: enabled and confirmed
 
-## Gate 1: source preview opening
+## Gate 1: source preview opening — completed
 
-- exact reviewed candidate, clean linear source lineage and full-history scan;
-- README states that no installable public release or release pointer exists;
-- `release/current.json`, public tag, GitHub Release and package publication
-  remain absent;
-- public metadata, community files, dependency/license inventory and links pass;
-- visibility change, private-vulnerability-reporting activation and readback
-  form one rollback-bound transaction; activation failure returns the
-  repository to private;
-- push, remote settings and visibility each retain a separate approval.
+- The source-opening transaction completed before installable release routing.
+- Exact source, public-history scan, community files, dependency/license
+  inventory, anonymous readback and public CI passed.
+- Private vulnerability reporting is enabled.
+- The historical opening transaction did not authorize the later tag, release,
+  pointer, package publication or promotion.
 
-This gate precedes an installable release. A later reviewed routing successor
-may add `release/current.json` without changing the frozen product candidate.
+The later reviewed routing successor added `release/current.json` without
+changing the frozen product candidate.
 
 The predecessor demo may illustrate the product principle at this gate only
 when it is explicitly described as neither current-HEAD nor URL-only release
 evidence.
 
-## Gate 2: Linux/macOS installable release
+## Gate 2: Linux/macOS installable release — completed, promotion observation pending
 
 - one exact release candidate binds the wheel, Linux/macOS archives, SBOM,
   checksums, provenance, dependency licenses and release index;
@@ -50,17 +46,19 @@ evidence.
 - macOS lifecycle passes from the exact unsigned/not-notarized `.tar.gz` after
   the documented system `Open Anyway` approval; no Gatekeeper-clean claim is
   made, and executable qualification remains explicitly unsupported;
-- AF102/AF103 and fresh URL-only Codex drills pass for each claimed platform;
-- launch media is regenerated from that exact candidate;
-- tag, GitHub Release, PyPI and release-pointer activation remain separately
-  approved operations.
+- AF102/AF103 and URL-only lifecycle evidence pass for the admitted archive
+  routes; promotion uses Linux as the primary demonstrated path;
+- tag `v0.1.0a5`, GitHub Release and the canonical pointer are public;
+- PyPI remains unpublished and is not part of the current installation route;
+- current-candidate launch media and the 24--48 hour observation window remain
+  promotion gates.
 
 Developer ID signing and notarization remain a required beta/stable gate, but
 are an explicitly accepted Community Alpha defer. The release must never
 recommend `xattr`, Gatekeeper disablement, administrator execution or another
 security bypass.
 
-## Gate 3: Windows Store admission
+## Gate 3: Windows Store admission — pending
 
 - Microsoft certification is read back for the exact Store transport artifact;
 - Store-signed clean-user install, Start Menu, CLI alias, update and removal pass;
@@ -69,7 +67,7 @@ security bypass.
 - Windows is absent from the release index and support claim until those gates
   and an independent review pass.
 
-## Gate 4: promotion
+## Gate 4: promotion — blocked pending this checklist
 
 - the exact public source and artifacts pass anonymous readback and public CI;
 - a 24--48 hour quiet observation window has no integrity or support blocker;
@@ -78,9 +76,9 @@ security bypass.
 - promotion and adoption claims require separate approval and attributable
   evidence.
 
-## Source-publication boundary
+## Historical source-publication boundary
 
-The repository may become public before an installable release only when:
+The repository became public before an installable release only when:
 
 - `release/current.json` is absent;
 - README identifies the repository as source preview, not package availability;
@@ -90,15 +88,14 @@ The repository may become public before an installable release only when:
   implied by the visibility change.
 
 The source-only opening transaction and the later release-routing transaction
-are different commits and approvals. The current routing packet binds Linux
+were different commits and approvals. The current routing packet binds Linux
 and macOS only; Windows remains absent until Store certification and lifecycle
 evidence pass.
 
-Before the gated publication workflow runs, a separately approved operator
-creates the immutable tag and a draft GitHub Release containing the complete
-reviewed asset set. The workflow refuses an absent or non-draft release and
-checks both native archives against the release index before publication. It
-does not construct an incomplete release from generic wheel assets.
+The gated publication workflow consumed a separately approved immutable tag
+and complete draft GitHub Release. It verified both native archives against
+the release index before publishing and did not construct an incomplete
+release from generic wheel assets.
 
 Release history is represented only by immutable `v*` tags and GitHub
 Releases. Remote `release/*` branches are forbidden because a historical copy
@@ -112,17 +109,13 @@ GitHub Release activation and PyPI publication are separate authorities. The
 manual workflow defaults `publish_pypi` to false; PyPI remains skipped unless a
 later approval explicitly sets that input to true.
 
-The submitted Store MSIX was the correct reviewed artifact when uploaded. It
-is now classified as predecessor evidence because the later source successor
-adds schemas that are included in the release wheel. This is candidate drift,
-not an erroneous upload, and it is not a reason to cancel the in-flight
-certification.
+Windows Store artifacts remain a separate predecessor/evidence line. They do
+not authorize a Windows support claim in the current Linux/macOS release.
 
-This source-publication successor does not inherit exact-package evidence from
-an earlier candidate. Before package release, every Linux, macOS, Windows,
-wheel, SBOM, release-index, demo, and Store artifact must be rebuilt or
-explicitly rebound to the one final reviewed candidate. Store certification of
-an earlier MSIX cannot authorize the successor.
+The current `0.1.0a5` Linux/macOS package set is bound to one reviewed product
+candidate. A future product candidate cannot inherit those exact-package
+bindings, and Store certification of an earlier MSIX cannot authorize a
+successor.
 
 Checked-in media becomes exact-candidate evidence only when its manifest binds
 the sole candidate, wheel, transcript, terminal frame and receipt-verified
