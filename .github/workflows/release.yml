@@ -48,6 +48,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "${{ inputs.routing_commit }}"
           test -z "$(git status --short)"
+          test -z "$(git ls-remote --heads origin 'refs/heads/release/*')"
           test -f release/current.json
           test -f release/sos-release-index-v1.json
           python tools/check_public_release_pointer.py --repository . --require-public

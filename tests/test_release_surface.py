@@ -172,6 +172,44 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             workflow[dependency_step:pointer_step],
         )
 
+    def test_release_workflow_forbids_historical_release_branches(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        checklist = (root / "docs/publication-checklist.md").read_text(encoding="utf-8")
+        branch_gate = "git ls-remote --heads origin 'refs/heads/release/*'"
+        self.assertIn(branch_gate, workflow)
+        self.assertIn("Remote `release/*` branches are forbidden", checklist)
+        self.assertIn("`main:release/current.json`", checklist)
+
+        specification = importlib.util.spec_from_file_location(
+            "sos_workflow_release_branch_gate", root / "tools" / "check_workflows.py"
+        )
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            shutil.copytree(root / ".github", repository / ".github")
+            (repository / "tools").mkdir()
+            shutil.copy2(
+                root / "tools" / "check_public_release_pointer.py",
+                repository / "tools" / "check_public_release_pointer.py",
+            )
+            release = repository / ".github/workflows/release.yml"
+            release.write_text(
+                release.read_text(encoding="utf-8").replace(
+                    f'          test -z "$(%s)"\n' % branch_gate,
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = module.inspect(repository)
+            self.assertIn(
+                "SOS_RELEASE_BRANCH_AUTHORITY_AMBIGUOUS", result["failures"]
+            )
+
     def test_release_build_python_is_exactly_bound(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")

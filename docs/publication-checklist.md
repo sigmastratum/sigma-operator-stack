@@ -100,6 +100,14 @@ reviewed asset set. The workflow refuses an absent or non-draft release and
 checks both native archives against the release index before publication. It
 does not construct an incomplete release from generic wheel assets.
 
+Release history is represented only by immutable `v*` tags and GitHub
+Releases. Remote `release/*` branches are forbidden because a historical copy
+of `release/current.json` can be mistaken for current installation authority.
+Any temporary release-preparation branch must be deleted before pointer
+activation; the publication workflow fails closed while any such remote head
+exists. The only canonical mutable discovery location is
+`main:release/current.json`.
+
 GitHub Release activation and PyPI publication are separate authorities. The
 manual workflow defaults `publish_pypi` to false; PyPI remains skipped unless a
 later approval explicitly sets that input to true.

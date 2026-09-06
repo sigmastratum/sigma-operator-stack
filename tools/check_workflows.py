@@ -109,6 +109,8 @@ def inspect(root: Path) -> dict[str, object]:
         if required not in release_source:
             failures.append("SOS_RELEASE_POINTER_GATE_INCOMPLETE")
             break
+    if "git ls-remote --heads origin 'refs/heads/release/*'" not in release_source:
+        failures.append("SOS_RELEASE_BRANCH_AUTHORITY_AMBIGUOUS")
     dependency_position = release_source.find("Install exact pointer verification dependencies")
     pointer_position = release_source.find("Verify routing pointer and preserve it")
     if dependency_position < 0 or pointer_position < 0 or dependency_position > pointer_position:
