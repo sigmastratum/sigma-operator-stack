@@ -15,7 +15,7 @@ SCHEMAS = ROOT / "src/sos/schemas"
 FIXTURES = ROOT / "tests/fixtures/agent-first-release"
 POINTER_URL = (
     "https://raw.githubusercontent.com/sigmastratum/"
-    "sigma-operator-stack/release/0.1.0a3/release/current.json"
+    "sigma-operator-stack/main/release/current.json"
 )
 
 
@@ -33,6 +33,10 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("docs/install-with-codex.md", first_viewport)
         self.assertIn("INSTALL.md", first_viewport)
         self.assertIn(POINTER_URL, first_viewport)
+        self.assertIn(
+            "Current installable Community alpha: `0.1.0a3`", first_viewport
+        )
+        self.assertNotIn("/release/0.1.0a3/release/current.json", first_viewport)
         self.assertIn("checked-in release", first_viewport)
         self.assertIn("Release activation is fail closed", readme)
         self.assertLess(
@@ -48,11 +52,14 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         route = (ROOT / "docs/install-with-codex.md").read_text(encoding="utf-8")
         for text in (entry, route):
             self.assertIn(POINTER_URL, text)
+            self.assertNotIn("/release/0.1.0a3/release/current.json", text)
             self.assertIn("404", text)
             self.assertIn("410", text)
             self.assertIn("SOS_PUBLIC_RELEASE_DISCOVERY_BLOCKED", text)
             self.assertIn("SOS_PUBLIC_RELEASE_METADATA_INVALID", text)
         self.assertIn("Never infer pointer absence from search results", entry)
+        self.assertIn("stable discovery surface", entry)
+        self.assertIn("historical GitHub Release assets", " ".join(entry.split()))
         self.assertIn("Only a direct HTTP `404` or `410`", route)
 
     def test_historical_quickstart_is_not_install_authority(self) -> None:

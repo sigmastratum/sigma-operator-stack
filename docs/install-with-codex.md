@@ -11,7 +11,7 @@ Give the public repository URL to a genuinely fresh Codex task and say:
 Codex must start at the root [`INSTALL.md`](../INSTALL.md) and issue a direct
 request for the canonical raw pointer:
 
-<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a3/release/current.json>
+<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/main/release/current.json>
 
 Only a direct HTTP `404` or `410` proves that no public pointer is available.
 A search result, cached GitHub page, missing directory-listing link, timeout,

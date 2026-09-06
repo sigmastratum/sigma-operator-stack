@@ -8,7 +8,11 @@ It does not authorize project mutation.
 Fetch this exact URL directly, without using GitHub search, an indexed snippet,
 or a cached repository-page rendering:
 
-<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a3/release/current.json>
+<https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/main/release/current.json>
+
+The repository default branch is the stable discovery surface. Do not infer a
+release from an older version branch or from the presence of historical
+GitHub Release assets; the fetched pointer is the only current authority.
 
 Classify the result as follows:
 

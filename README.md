@@ -3,9 +3,12 @@
 **Project state for coding agents.**
 
 > **Agent installation entrypoint:** open [`INSTALL.md`](INSTALL.md), then fetch
-> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/release/0.1.0a3/release/current.json)
+> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/main/release/current.json)
 > directly. GitHub search, snippets and cached repository pages are not release
 > authority and cannot prove that the pointer is absent.
+
+**Current installable Community alpha: `0.1.0a3`.** Older releases remain
+available as history but are not current installation authority.
 
 Fresh coding-agent sessions often resume from stale chat context, an old green
 check, or the wrong local instructions. SOS records accepted project state in
