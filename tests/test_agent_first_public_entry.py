@@ -42,8 +42,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("checked-in release", first_viewport)
         self.assertIn("Release activation is fail closed", readme)
         self.assertLess(
-            first_viewport.index("demo/recovery-demo.mp4"),
             first_viewport.index("Install SOS in my current project"),
+            first_viewport.index("demo/recovery-demo.mp4"),
         )
         self.assertGreaterEqual(readme.count("docs/install-with-codex.md"), 1)
         self.assertNotIn("uv tool install", readme)
