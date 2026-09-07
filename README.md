@@ -61,9 +61,10 @@ This is a reproducible, zero-provider tutorial, not another recorded Codex
 session. Executable qualification in the example requires the admitted native
 Linux profile. The video above proves the installation route separately.
 
-SOS only recovers work that has been explicitly recorded. Installation does
-not invent a task or run qualification (the separate execution of registered
-project checks). Missing and unverified state stays visible.
+SOS only recovers work that has been explicitly recorded.
+Installation and qualification are deliberately different operations:
+setup does not invent a task or run registered project checks. Missing and
+unverified state stays visible.
 
 Sigma Operator Stack is the formal project name. SOS works alongside your
 repository, issue tracker, existing `AGENTS.md`, and governance framework.
