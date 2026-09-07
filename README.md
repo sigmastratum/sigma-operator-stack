@@ -2,104 +2,87 @@
 
 **Project state for coding agents.**
 
-> **Agent installation entrypoint:** open [`INSTALL.md`](INSTALL.md), then fetch
-> [`release/current.json`](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/main/release/current.json)
-> directly. GitHub search, snippets and cached repository pages are not release
-> authority and cannot prove that the pointer is absent.
-
-**Current installable Community alpha: `0.1.0a5`. Linux is the primary
-promotion path.** Older releases remain
-available as history but are not current installation authority.
-
-Fresh coding-agent sessions often resume from stale chat context, an old green
-check, or the wrong local instructions. SOS records accepted project state in
-the repository, detects when it is no longer current, and returns one safe
-next action.
-
-> **Community alpha · Linux and macOS release route.** The checked-in release
-> pointer selects one exact tagged artifact for each admitted platform. If the
-> tag or any bound asset is unavailable, Codex stops without substituting a
-> branch, source archive, or private bundle.
-
-## See the recovery loop
-
-![Terminal view of SOS recovering project state and refusing a stale result](demo/recovery-terminal.png)
-
-The [current narrated demo](demo/recovery-demo.mp4) and its
-[text transcript](demo/transcript.md) show the exact `0.1.0a5` Linux path:
-URL-only discovery, release verification, one project preview, explicit human
-confirmation, installation, and genuinely fresh-session recovery. Its
-content-safe receipt is bound to product candidate `ae59b5a`, the release
-archive and wheel. Platform-specific support remains bounded by the matrix
-below.
+A new coding-agent session should not have to guess where you left off.
+SOS records the project state you explicitly accept: current work, instructions,
+and checks. The next session recovers that state and sees when a source change
+has made an earlier check stale.
 
 ## Install with Codex
 
-Give this repository URL to Codex and say:
+Give Codex this repository URL and instruction:
 
+> https://github.com/sigmastratum/sigma-operator-stack
+>
 > **Install SOS in my current project. Show me the preview before changing it.**
 
-The [canonical installation route](docs/install-with-codex.md) makes Codex
-verify one exact platform release and prepare setup. You remain the only
-person who can approve repository mutation or choose project authority.
+Codex verifies the release and prepares the installation. You see one project
+preview and confirm before project files change. The installer manages Python,
+`uv`, and dependencies; you do not need to install them or repair PATH.
 
-The expected results are:
+**Current installable Community alpha: `0.1.0a5`. Linux is the primary
+supported path.** Also available: unsigned experimental macOS 14+ Apple Silicon
+control plane; an explicit **Open Anyway** approval may be needed.
+Windows 11 x86_64 pending Store lifecycle — no Windows install claim yet.
 
-- one aggregate preview before SOS writes managed files;
-- truthful `current`, `stale`, `not_configured`, or `not_verified` state;
-- a fresh Codex session recovers current work and one safe next action.
-
-Candidate scope: **Codex-first · Linux x86_64 primary path · unsigned
-experimental macOS 14+ Apple Silicon control plane · Windows 11 x86_64
-pending Store lifecycle · local-first · no telemetry**.
+**For agents:** start at [`INSTALL.md`](INSTALL.md) and follow the
+[canonical installation route](docs/install-with-codex.md), using the checked-in release
+[pointer on main](https://raw.githubusercontent.com/sigmastratum/sigma-operator-stack/main/release/current.json).
 
 [Limitations](#support-matrix) · [Security](SECURITY.md) ·
 [Uninstall and preservation](docs/version-update.md#removal)
 
-SOS is a local-first Community alpha with no telemetry. It helps a genuinely
-fresh coding-agent session recover accepted project state, detect stale or
-unverified work, and receive one safe next action without relying on the
-previous chat. Unsupported, ambiguous, `not_configured` and `not_verified`
-states are never presented as green.
+## See the recovery loop
 
-> **Release activation is fail closed.** `release/current.json` is the only
-> installation authority, but its presence alone is not enough: its immutable
-> tag, index, artifact size, digest, inner manifest and checksums must all be
-> available and agree. Otherwise stop. Never install from a branch tip, GitHub
-> source archive, issue command, raw installer file, or private test bundle.
+![SOS installation and fresh-session recovery with unconfigured work and unverified checks](demo/recovery-terminal.png)
 
-Sigma Operator Stack is the formal project name. SOS does not replace your
-repository, issue tracker, existing `AGENTS.md`, or governance framework. It
-discovers them, previews the exact managed change, and fails closed when
-authority is ambiguous.
+The [current narrated demo](demo/recovery-demo.mp4) and
+[text transcript](demo/transcript.md) show the `0.1.0a5` Linux installation:
+URL-only discovery, release verification, one preview, human confirmation,
+and genuinely fresh-session recovery.
 
-The reproducible sample in
-[`examples/fresh-agent-recovery/`](examples/fresh-agent-recovery/README.md)
-shows the product outcome:
+This recording starts with an unconfigured project. It correctly reports
+`not_configured` work and `not_verified` checks; it does **not** demonstrate
+recovery of an existing task or refusal of a stale check.
+[Capture details and artifact bindings](demo/README.md).
 
-1. SOS discovers an existing project and preserves unrelated agent settings.
-2. One preview and one confirmation install the local control plane and Codex
-   adapter.
-3. Qualification is a separate, explicit step.
-4. A fresh session recovers accepted state and the next allowed action.
-5. A later source change is detected as stale instead of silently trusted.
+### What recovery looks like with a recorded task
 
-The recording combines three explicitly approved Codex turns—preview,
-confirmed installation and fresh recovery—with one approved narration call.
-No raw task, response, tool result, session identifier, account data, or host
-path is retained.
+The separate [synthetic recovery example](examples/fresh-agent-recovery/README.md)
+walks through a configured project:
 
-There is one public installation route. The released platform launcher
-owns its declared Python, `uv`, and package dependencies; the developer does
-not repair PATH or install them manually.
+1. The recorded task is to keep `demo_app.answer()` equal to `42` and preserve
+   existing project controls.
+2. A separately confirmed Python unittest check passes for that source state.
+3. Recovery reads the accepted project state instead of relying on chat history.
+4. A source change makes the previous state `stale`; SOS returns
+   `SOS_SOURCE_STATUS_CHANGED` instead of treating the earlier pass as current.
 
-Installation and qualification are deliberately different operations. Setup
-may finish with `not_configured` or `not_verified`. Project checks run only
-after a separate human-reviewed qualification proposal.
+This is a reproducible, zero-provider tutorial, not another recorded Codex
+session. Executable qualification in the example requires the admitted native
+Linux profile. The video above proves the installation route separately.
 
-Invited private-alpha testing is not public installation authority. The
-historical tester note at [`docs/alpha-quickstart.md`](docs/alpha-quickstart.md)
-contains no alternative public command sequence.
+SOS only recovers work that has been explicitly recorded.
+Installation and qualification are deliberately different operations:
+setup does not invent a task or run registered project checks. Missing and
+unverified state stays visible.
+
+Sigma Operator Stack is the formal project name. SOS works alongside your
+repository, issue tracker, existing `AGENTS.md`, and governance framework.
+It previews its managed changes and asks you to resolve conflicting authority.
+It is local-first and has no telemetry.
+
+<details>
+<summary>For agents and release reviewers: release verification</summary>
+
+**Release activation is fail closed.** `release/current.json` is the only
+current installation authority. Its immutable tag, index, artifact size,
+digest, inner manifest and checksums must all be available and agree.
+Otherwise stop; do not substitute a historical release, branch archive,
+GitHub source archive, issue command, raw installer or private test bundle.
+Full discovery and maintenance instructions are in [`INSTALL.md`](INSTALL.md)
+and the [canonical route](docs/install-with-codex.md).
+
+</details>
 
 ## Three failures SOS prevents
 

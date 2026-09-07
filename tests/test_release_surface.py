@@ -375,8 +375,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
         headings = [
-            "## See the recovery loop",
             "## Install with Codex",
+            "## See the recovery loop",
             "## Three failures SOS prevents",
             "## Support matrix",
             "## Coexistence with an existing project",
