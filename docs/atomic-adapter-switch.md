@@ -35,6 +35,19 @@ closed. Package acquisition, predecessor retention, signature verification,
 and release selection remain responsibilities of the successor platform
 launcher outside this module.
 
+The complete integration entry inventory is checked both during preview and
+application revalidation. Only the defined regular manifest files and the
+coordinator directory are admitted; symlinks or wrong-type metadata refuse.
+Immediately before recording commit, every planned client must still probe
+against the successor and the complete client inventory must remain unchanged.
+Target drift at that boundary cannot yield a successful committed event.
+If rollback cannot safely restore foreign-modified bytes, the result retains
+`recovery_required` and does not overwrite those bytes.
+
+POSIX publication applies the planned permission mode to the unpublished
+temporary file before publication. A restrictive process umask does not cause
+an installed target to disagree with its plan; no user umask setting is changed.
+
 The integration seam is:
 
 ```python

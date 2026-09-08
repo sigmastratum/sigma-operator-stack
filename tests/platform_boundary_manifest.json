@@ -29,6 +29,7 @@
     "src/sos/contracts.py": {"class": "shared_core"},
     "src/sos/dirty.py": {"class": "shared_core"},
     "src/sos/entrypoint.py": {"class": "shared_core"},
+    "src/sos/integration_inventory.py": {"class": "shared_core"},
     "src/sos/isolation.py": {
       "class": "qualification_execution_mechanism",
       "symbols": [

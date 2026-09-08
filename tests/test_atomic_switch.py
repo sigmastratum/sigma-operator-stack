@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from sos.atomic_switch import (
+    AtomicSwitchError,
     execute_atomic_switch,
     prepare_atomic_switch,
     recover_atomic_switch,
@@ -33,6 +36,67 @@ def git(root: Path, *args: str) -> None:
 
 
 class AtomicSwitchTests(unittest.TestCase):
+    def test_target_drift_before_commit_never_reports_success(self) -> None:
+        temporary, root, predecessor = self.project()
+        self.addCleanup(temporary.cleanup)
+        successor = self.binding("0.1.0a6", "b")
+        plan = prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
+        foreign = b"Synthetic foreign replacement\n"
+
+        def drift(point):
+            if point == "before_commit":
+                (root / "AGENTS.md").write_bytes(foreign)
+
+        result = execute_atomic_switch(plan, confirmed=True, controlling_tty_observed=True, fault=drift)
+        self.assertNotEqual(result.status, "success", result.to_dict())
+        self.assertTrue(result.details["recovery_required"])
+        self.assertEqual((root / "AGENTS.md").read_bytes(), foreign)
+        events = (root / ".sigma/integrations/atomic-switches" / plan.switch_id).glob("[0-9]*.json")
+        self.assertNotIn("committed", [json.loads(p.read_text())["state"] for p in events])
+        recovered = recover_atomic_switch(str(root), plan.switch_id, predecessor=predecessor, successor=successor)
+        self.assertNotEqual(recovered.status, "success")
+        self.assertEqual((root / "AGENTS.md").read_bytes(), foreign)
+
+    def test_unknown_adapter_before_preview_and_after_preview_refuses(self) -> None:
+        temporary, root, predecessor = self.project()
+        self.addCleanup(temporary.cleanup)
+        successor = self.binding("0.1.0a6", "b")
+        plan = prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
+        unknown = root / ".sigma/integrations/unknown-client.json"
+        unknown.write_text("{}")
+        with self.assertRaisesRegex(AtomicSwitchError, "UNKNOWN_CLIENT"):
+            prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
+        result = execute_atomic_switch(plan, confirmed=True, controlling_tty_observed=True)
+        self.assertNotEqual(result.status, "success")
+        self.assertFalse((root / ".sigma/integrations/atomic-switches").exists())
+        self.assertEqual(unknown.read_text(), "{}")
+        self.assert_bound(root, predecessor)
+
+    def test_coordinator_metadata_symlink_refuses(self) -> None:
+        temporary, root, predecessor = self.project()
+        self.addCleanup(temporary.cleanup)
+        (root / ".sigma/integrations/atomic-switches").symlink_to(root, target_is_directory=True)
+        with self.assertRaisesRegex(AtomicSwitchError, "INVENTORY_INVALID"):
+            prepare_atomic_switch(str(root), predecessor=predecessor, successor=self.binding("0.1.0a6", "b"))
+
+    def test_install_and_switch_preserve_modes_under_restrictive_umask(self) -> None:
+        previous = os.umask(0o077)
+        try:
+            temporary, root, predecessor = self.project()
+            self.addCleanup(temporary.cleanup)
+            modes = {name: (root / name).stat().st_mode & 0o777
+                     for name in ("AGENTS.md", ".codex/config.toml", "CLAUDE.md", ".mcp.json")}
+            self.assertEqual(modes["CLAUDE.md"], 0o644)
+            self.assertEqual(modes[".mcp.json"], 0o644)
+            successor = self.binding("0.1.0a6", "b")
+            plan = prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
+            result = execute_atomic_switch(plan, confirmed=True, controlling_tty_observed=True)
+            self.assertEqual(result.status, "success", result.to_dict())
+            self.assert_bound(root, successor)
+            self.assertEqual(modes, {name: (root / name).stat().st_mode & 0o777 for name in modes})
+        finally:
+            os.umask(previous)
+
     def binding(self, version: str, marker: str) -> LauncherBinding:
         return LauncherBinding(
             f"/opt/synthetic/sos-python-{marker}", version, marker * 64

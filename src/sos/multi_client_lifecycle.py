@@ -13,33 +13,10 @@ from .client_integration import (
     project_codex_package_update,
 )
 from .atomic_switch import execute_atomic_switch, prepare_atomic_switch
+from .integration_inventory import unknown_integration_files as _unknown_integration_files
 from .result import Status, TerminalResult
-from .platform_services import PlatformServiceError, current_platform_services
-from .repository import RepositoryError, discover_repository_root
-
-
-_KNOWN_INTEGRATION_FILES = frozenset(
-    {"codex-mcp.json", "codex-first.json", "claude-code.json", "atomic-switches"}
-)
-
-
-def _unknown_integration_files(path: str) -> list[str]:
-    root = discover_repository_root(path)
-    service = current_platform_services()
-    with service.open_repository(root) as repository:
-        observed = service.observe_object(repository, ".sigma/integrations")
-        if observed.kind == "absent":
-            return []
-        if observed.kind != "directory":
-            raise PlatformServiceError("invalid_integrations_directory")
-        listing = service.enumerate_directory_bounded(
-            repository, ".sigma/integrations", 64
-        )
-    return sorted(
-        entry.name
-        for entry in listing.entries
-        if entry.name not in _KNOWN_INTEGRATION_FILES
-    )
+from .platform_services import PlatformServiceError
+from .repository import RepositoryError
 
 
 def integration_inventory(path: str = ".") -> TerminalResult:

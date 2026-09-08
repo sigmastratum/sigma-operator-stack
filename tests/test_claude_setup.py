@@ -110,7 +110,8 @@ class ClaudeSetupTests(unittest.TestCase):
         self.assertFalse((root / ".sigma/integrations/claude-code.json").exists())
 
         preview = preview_claude_setup(str(root), launcher=self.binding())
-        (root / "CLAUDE.md").chmod(0o600)
+        original_mode = (root / "CLAUDE.md").stat().st_mode & 0o777
+        (root / "CLAUDE.md").chmod(original_mode ^ 0o040)
         mode_stale = install_claude_setup(
             str(root),
             confirmed=True,

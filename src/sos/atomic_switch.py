@@ -28,6 +28,7 @@ from .client_integration import (
     update_codex_setup,
 )
 from .contracts import digest_value
+from .integration_inventory import unknown_integration_files
 from .repository import RepositoryError, discover_repository_root
 from .result import Status, TerminalResult
 from .platform_services import PlatformServiceError, current_platform_services
@@ -158,6 +159,14 @@ def execute_atomic_switch(
             plan,
         )
     try:
+        # Reject an already stale preview before creating even the coordinator
+        # directory/lock. Recheck under the lock as well to close the admission race.
+        observed = prepare_atomic_switch(
+            os.fspath(plan.root), predecessor=plan.predecessor,
+            successor=plan.successor, switch_nonce=plan.payload["switch_nonce"],
+        )
+        if observed.payload != plan.payload:
+            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_PREVIEW_STALE", Status.STALE)
         with _switch_lock(plan.root):
             return _execute_atomic_switch_locked(
                 plan,
@@ -165,6 +174,8 @@ def execute_atomic_switch(
                 controlling_tty_observed=controlling_tty_observed,
                 fault=fault,
             )
+    except (AtomicSwitchError, RepositoryError) as exc:
+        return _result(getattr(exc, "status", Status.INVALID), exc.reason, plan, recovery_required=False)
     except PlatformServiceError:
         return _result(
             Status.BLOCKED,
@@ -220,6 +231,8 @@ def _execute_atomic_switch_locked(
             _call_fault(fault, f"after_client:{client}")
             _append_event(plan, "client_applied", client)
         _call_fault(fault, "before_commit")
+        if _configured_clients(plan.root, plan.successor) != plan.clients:
+            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE)
         _append_event(plan, "committed")
         return _result(
             Status.SUCCESS,
@@ -353,6 +366,12 @@ def _recover_atomic_switch_locked(
 
 
 def _configured_clients(root: Path, binding: LauncherBinding) -> tuple[str, ...]:
+    try:
+        unknown = unknown_integration_files(os.fspath(root))
+    except (RepositoryError, PlatformServiceError):
+        raise AtomicSwitchError("SOS_INTEGRATION_INVENTORY_INVALID", Status.INVALID) from None
+    if unknown:
+        raise AtomicSwitchError("SOS_INTEGRATION_INVENTORY_UNKNOWN_CLIENT")
     clients: list[str] = []
     codex = codex_setup_status(os.fspath(root), launcher=binding)
     if "SOS_CODEX_SETUP_NOT_INSTALLED" not in codex.reasons:
