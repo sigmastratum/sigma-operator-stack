@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .client_integration import project_codex_package_update
+from .multi_client_lifecycle import project_package_update
 from .qualification_contracts import QualificationContractError, canonical_digest
 from .repository import RepositoryError
 from .result import Status, TerminalResult
@@ -215,7 +215,7 @@ def propose_update(root: str) -> TerminalResult:
     }
     if current.status != Status.SUCCESS:
         return TerminalResult("sos_update_proposal_v1", current.status, current.reasons, details)
-    projected = project_codex_package_update(root)
+    projected = project_package_update(root)
     merged = {**details, **projected.details}
     return TerminalResult("sos_update_proposal_v1", projected.status, projected.reasons, merged)
 

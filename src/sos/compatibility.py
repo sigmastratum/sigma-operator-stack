@@ -75,7 +75,11 @@ class CompatibilityProjection:
         return tuple(candidate["path"] for candidate in self.authority_candidates)
 
     def details(self, managed_plans: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
-        managed_diff = tuple(_managed_diff(plan) for plan in managed_plans)
+        plans = tuple(managed_plans)
+        managed_diff = tuple(_managed_diff(plan) for plan in plans)
+        successor = any(
+            plan.get("contract") == "sos_managed_file_plan_v2" for plan in plans
+        )
         if self.status == Status.OWNER_REQUIRED:
             next_action = (
                 "sos init --with-codex --primary-authority "
@@ -85,7 +89,7 @@ class CompatibilityProjection:
             next_action = "sos init --with-codex PATH"
         else:
             next_action = "resolve the reported compatibility blocker"
-        return {
+        details = {
             "discovery_digest": self.discovery_digest,
             "primary_authority_id": self.primary_authority_id,
             "authority_candidates": [
@@ -94,7 +98,9 @@ class CompatibilityProjection:
             "observations": [dict(value) for value in self.observations],
             "managed_diff": list(managed_diff),
             "next_action": next_action,
-            "actions": ["preserve", "append", "create", "block"],
+            "actions": ["preserve", "append", "insert", "create", "block"]
+            if successor
+            else ["preserve", "append", "create", "block"],
             "writes_performed": False,
             "raw_project_content_serialized": False,
             "absolute_paths_serialized": False,
@@ -108,6 +114,9 @@ class CompatibilityProjection:
                 "max_authority_tree_bytes": _MAX_AUTHORITY_TREE_BYTES,
             },
         }
+        if successor:
+            details["contract"] = "sos_compatibility_projection_v2"
+        return details
 
 
 def discover_compatibility(
@@ -150,6 +159,30 @@ def discover_compatibility(
     observations.append(config)
     if config["action"] == "block":
         blocked.append(config["reason"])
+
+    claude = _observe_managed_file(root, "CLAUDE.md", authority=True)
+    observations.append(claude)
+    if claude["state"] == "present" and claude["action"] != "block":
+        candidates.append({"authority_id": "claude:CLAUDE.md", "path": "CLAUDE.md", "family": "claude"})
+    if claude["action"] == "block":
+        blocked.append(claude["reason"])
+    for relative in (
+        ".mcp.json",
+        ".claude/CLAUDE.md",
+        "CLAUDE.local.md",
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+    ):
+        observed = _observe_managed_file(root, relative, authority=False)
+        observations.append(observed)
+        if observed["action"] == "block":
+            blocked.append(observed["reason"])
+    for relative in (".claude/rules", ".claude/skills", ".claude/commands", ".claude/agents"):
+        observed = _observe_directory(root, relative, authority_id=None, family="claude")
+        if observed is not None:
+            observations.append(observed)
+            if observed["action"] == "block":
+                blocked.append(observed["reason"])
 
     sigma = _observe_sigma(root)
     observations.append(sigma)
@@ -565,7 +598,13 @@ def _managed_diff(plan: dict[str, Any]) -> dict[str, Any]:
         raise CompatibilityError("SOS_COMPATIBILITY_MANAGED_DIFF_INVALID")
     return {
         "target": plan["target"],
-        "action": "append" if plan["patch_kind"] == "append_suffix" else "create",
+        "action": (
+            "append"
+            if plan["patch_kind"] == "append_suffix"
+            else "insert"
+            if plan["patch_kind"] == "insert_bytes"
+            else "create"
+        ),
         "patch_kind": plan["patch_kind"],
         "before_exists": plan["before_exists"],
         "before_byte_count": plan["before_byte_count"],

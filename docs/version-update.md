@@ -34,6 +34,8 @@ sos status PATH
 sos setup status codex PATH
 sos propose-update PATH
 sos setup update codex PATH
+sos setup update claude-code PATH
+sos setup update-all PATH
 ```
 
 The proposal must report that the agent must be restarted, the prior
@@ -75,23 +77,27 @@ the new package independently reports its previous qualification as stale and
 requires its own setup rebind and qualification. No receipt, accepted record
 or currentness state is shared between projects.
 
+Because that global inventory is absent, the successor launcher refuses a
+version-changing package update and any package removal with
+`SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED`. An exact same-version maintenance
+run may repair every adapter recorded in the selected repository through
+`sos setup update-all PATH`; it makes no package-manager call.
+
 Already-running agent processes are not evidence of the new package. Update
 completion requires closing them and starting a fresh process after setup
 rebind.
 
 ## Removal
 
-Remove the project integration before uninstalling the SOS application or
-managed tool environment. Use only the exact platform removal grammar from
-the verified release index; do not translate a command from another platform
-or private-alpha bundle.
+Detach a project integration through the verified launcher before considering
+application removal. Select the exact client (`codex` or `claude-code`); detach
+never removes the shared application or managed tool environment. Application
+removal remains blocked until a future route can prove a global project
+inventory.
 
-Removal deletes only exact SOS-managed Codex integration bytes after a
+Detach deletes only exact SOS-managed client integration bytes after a
 preview and confirmation. It preserves `.sigma`, accepted records,
 qualification history, user-owned files, and unrelated agent configuration.
-If the platform package is removed first, those project records remain but
-the integration may be disconnected until SOS is reinstalled or the bounded
-cleanup is completed.
 
 Never delete `.sigma` to hide an update or removal failure. A collision,
 foreign managed bytes, or an unverifiable target stops without overwrite.

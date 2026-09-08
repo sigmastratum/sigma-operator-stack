@@ -12,7 +12,7 @@ from sos.package_resources import (
 
 class PackageResourceTests(unittest.TestCase):
     def test_exact_registry_is_bounded_and_content_safe(self) -> None:
-        self.assertEqual(len(PACKAGE_RESOURCE_REGISTRY), 10)
+        self.assertEqual(len(PACKAGE_RESOURCE_REGISTRY), 12)
         for resource_id in sorted(PACKAGE_RESOURCE_REGISTRY):
             observed = read_package_resource(resource_id)
             self.assertTrue(observed.payload)

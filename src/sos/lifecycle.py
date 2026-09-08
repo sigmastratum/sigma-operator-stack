@@ -24,6 +24,16 @@ from .client_integration import (
     render_codex_bootstrap_control_files,
     rollback_codex_bootstrap_setup,
 )
+from .claude_integration import (
+    ClaudeBootstrapSetup,
+    ClaudeIntegrationError,
+    apply_claude_bootstrap_setup,
+    claude_setup_status,
+    prepare_claude_bootstrap_setup,
+    probe_claude_bootstrap_setup,
+    render_claude_bootstrap_control_files,
+    rollback_claude_bootstrap_setup,
+)
 from .contracts import ContractError, digest_value, exclusion_policy_digest
 from .compatibility import (
     CompatibilityError,
@@ -84,7 +94,7 @@ class OneCommandPlan:
     bootstrap_plan_id: str
     local_nonce: str | None
     repository_id: str
-    setup: CodexBootstrapSetup
+    setup: CodexBootstrapSetup | ClaudeBootstrapSetup
     compatibility: CompatibilityProjection
     expected_application_fingerprint: str
     expected_application_state: str
@@ -93,7 +103,7 @@ class OneCommandPlan:
 
     def pending_payload(self) -> dict[str, Any]:
         return {
-            "contract": "sos_p106_pending_v2",
+            "contract": "sos_p106_pending_v2" if self.setup.manifest["client"] == "codex" else "sos_p107_pending_v1",
             "transaction_id": self.transaction_id,
             "bootstrap_intent_id": self.bootstrap_intent_id,
             "bootstrap_plan_id": self.bootstrap_plan_id,
@@ -118,10 +128,16 @@ class OneCommandPlan:
         }
 
     def preview(self) -> TerminalResult:
+        client = self.setup.manifest["client"]
+        targets = [plan["target"] for plan in self.setup.manifest["plans"]]
         details = {
             "aggregate_plan_digest": self.aggregate_plan_digest,
             "confirmation_handoff": {
-                "contract": "sos_p106_confirmation_handoff_v1",
+                "contract": (
+                    "sos_p106_confirmation_handoff_v1"
+                    if client == "codex"
+                    else "sos_p107_confirmation_handoff_v1"
+                ),
                 "seed": self.confirmation_seed,
                 "plan_digest": self.aggregate_plan_digest,
             },
@@ -134,15 +150,15 @@ class OneCommandPlan:
                     "expected_application_fingerprint": self.expected_application_fingerprint,
                 }
             ),
-            "codex_setup_plan_digest": self.setup.plan_digest,
+            f"{client.replace('-', '_')}_setup_plan_digest": self.setup.plan_digest,
             "compatibility": self.compatibility.details(self.setup.manifest["plans"]),
             "expected_application_fingerprint": self.expected_application_fingerprint,
             "expected_application_state": self.expected_application_state,
-            "managed_targets": ["AGENTS.md", ".codex/config.toml"],
+            "managed_targets": targets,
             "one_confirmation": True,
             "qualification_included": False,
             "qualification_next_action": "sos qualify",
-            "rollback_order": [".codex/config.toml", "AGENTS.md"],
+            "rollback_order": list(reversed(targets)),
             "package_version": self.setup.binding.package_version,
             "mcp_launcher_binding": mcp_launcher_binding_payload(
                 package_version=self.setup.binding.package_version,
@@ -159,9 +175,9 @@ class OneCommandPlan:
             "network_performed": False,
         }
         return TerminalResult(
-            "sos_p106_init_preview_v1",
+            "sos_p106_init_preview_v1" if client == "codex" else "sos_p107_init_preview_v1",
             Status.OWNER_REQUIRED,
-            ("SOS_P106_CONFIRMATION_REQUIRED",),
+            (("SOS_P106_CONFIRMATION_REQUIRED" if client == "codex" else "SOS_P107_CONFIRMATION_REQUIRED"),),
             details,
         )
 
@@ -173,6 +189,7 @@ def prepare_one_command_init(
     primary_authority_id: str | None = None,
     maintenance_binding: MaintenanceLauncherBinding | None = None,
     confirmation_seed: str | None = None,
+    client: str = "codex",
 ) -> OneCommandPlan:
     root = discover_repository_root(path)
     admission = admit_project_filesystem(root)
@@ -210,9 +227,13 @@ def prepare_one_command_init(
     compatibility = discover_compatibility(
         root, primary_authority_id=primary_authority_id
     )
-    setup = prepare_codex_bootstrap_setup(
-        os.fspath(root), identity.repository_id, launcher=launcher or observe_installed_launcher()
-    )
+    binding = launcher or observe_installed_launcher()
+    if client == "codex":
+        setup = prepare_codex_bootstrap_setup(os.fspath(root), identity.repository_id, launcher=binding)
+    elif client == "claude-code":
+        setup = prepare_claude_bootstrap_setup(os.fspath(root), identity.repository_id, launcher=binding)
+    else:
+        raise LifecycleError("SOS_CLIENT_UNSUPPORTED", Status.UNSUPPORTED)
     compatibility_details = compatibility.details(setup.manifest["plans"])
     if compatibility.status != Status.SUCCESS:
         raise LifecycleError(
@@ -239,12 +260,11 @@ def prepare_one_command_init(
     if not projected.complete or projected.fingerprint is None:
         raise LifecycleError(projected.reasons[0] if projected.reasons else "SOS_DIRTY_OBSERVATION_FAILED", Status.NOT_VERIFIED)
     aggregate = {
-        "contract": "sos_p106_aggregate_plan_v1",
+        "contract": "sos_p106_aggregate_plan_v1" if client == "codex" else "sos_multi_client_lifecycle_plan_v1",
         "repository_id": identity.repository_id,
         "transaction_id": transaction_id,
         "bootstrap_intent_id": bootstrap_intent_id,
         "bootstrap_plan_id": bootstrap_plan_id,
-        "codex_setup_plan_digest": setup.plan_digest,
         "compatibility_discovery_digest": compatibility.discovery_digest,
         "primary_authority_id": compatibility.primary_authority_id,
         "expected_application_fingerprint": projected.fingerprint,
@@ -255,6 +275,11 @@ def prepare_one_command_init(
         ),
         "qualification_included": False,
     }
+    if client == "codex":
+        aggregate["codex_setup_plan_digest"] = setup.plan_digest
+    else:
+        aggregate["client"] = client
+        aggregate["client_setup_plan_digest"] = setup.plan_digest
     return OneCommandPlan(
         root,
         confirmation_seed,
@@ -279,6 +304,7 @@ def preview_one_command_init(
     primary_authority_id: str | None = None,
     maintenance_binding: MaintenanceLauncherBinding | None = None,
     confirmation_seed: str | None = None,
+    client: str = "codex",
 ) -> TerminalResult:
     try:
         return prepare_one_command_init(
@@ -287,25 +313,39 @@ def preview_one_command_init(
             primary_authority_id=primary_authority_id,
             maintenance_binding=maintenance_binding,
             confirmation_seed=confirmation_seed,
+            client=client,
         ).preview()
     except LifecycleError as exc:
         if exc.reason == "SOS_ALREADY_INITIALIZED":
             current = workspace_status(path)
-            setup = codex_setup_status(path, launcher=launcher)
-            if current.status == Status.SUCCESS and setup.status == Status.SUCCESS:
+            setup = _setup_status(client, path, launcher)
+            expected = Status.SUCCESS if client == "codex" else Status.OWNER_REQUIRED
+            if current.status == Status.SUCCESS and setup.status == expected:
                 return TerminalResult(
-                    "sos_p106_init_result_v1",
-                    Status.SUCCESS,
-                    ("SOS_P106_ALREADY_INSTALLED",),
-                    {**current.details, "codex_setup_state": "installed"},
+                    "sos_p106_init_result_v1" if client == "codex" else "sos_p107_init_result_v1",
+                    Status.SUCCESS if client == "codex" else Status.OWNER_REQUIRED,
+                    (
+                        "SOS_P106_ALREADY_INSTALLED"
+                        if client == "codex"
+                        else "SOS_INTERACTIVE_USER_HANDOFF_REQUIRED"
+                    ,),
+                    {**current.details, f"{client.replace('-', '_')}_setup_state": "installed"},
                 )
         return TerminalResult(
-            "sos_p106_init_result_v1", exc.status, (exc.reason,), exc.details
+            "sos_p106_init_result_v1" if client == "codex" else "sos_p107_init_result_v1",
+            exc.status,
+            (exc.reason,),
+            exc.details,
         )
-    except (RepositoryError, ClientIntegrationError, CompatibilityError) as exc:
+    except (RepositoryError, ClientIntegrationError, ClaudeIntegrationError, CompatibilityError) as exc:
         status = exc.status if hasattr(exc, "status") else Status.INVALID
         reason = exc.reason
-        return TerminalResult("sos_p106_init_result_v1", status, (reason,), {})
+        return TerminalResult(
+            "sos_p106_init_result_v1" if client == "codex" else "sos_p107_init_result_v1",
+            status,
+            (reason,),
+            {},
+        )
 
 
 def execute_one_command_init(
@@ -315,11 +355,16 @@ def execute_one_command_init(
     controlling_tty_observed: bool,
     fault: Callable[[str], None] | None = None,
 ) -> TerminalResult:
+    result_contract = (
+        "sos_p106_init_result_v1"
+        if plan.setup.manifest["client"] == "codex"
+        else "sos_p107_init_result_v1"
+    )
     if not confirmed:
         return plan.preview()
     if not controlling_tty_observed:
         return TerminalResult(
-            "sos_p106_init_result_v1",
+            result_contract,
             Status.OWNER_REQUIRED,
             ("SOS_ACCEPTANCE_TTY_REQUIRED",),
             {},
@@ -338,7 +383,7 @@ def execute_one_command_init(
         )
         staging_created = True
         _call_fault(fault, "staging_created")
-        apply_codex_bootstrap_setup(plan.setup)
+        _apply_setup(plan.setup)
         applied = True
         _call_fault(fault, "targets_applied")
         actual = _actual_application(plan)
@@ -355,14 +400,12 @@ def execute_one_command_init(
             compatibility_discovery_digest=plan.compatibility.discovery_digest,
             recognized_authority_paths=plan.compatibility.authority_paths,
         )
-        files.update(render_codex_bootstrap_control_files(plan.setup))
-        files[_RECEIPT] = _json_bytes(
-            {
-                "contract": "sos_p106_install_receipt_v2",
+        files.update(_render_setup_control_files(plan.setup))
+        receipt = {
+                "contract": "sos_p106_install_receipt_v2" if plan.setup.manifest["client"] == "codex" else "sos_p107_install_receipt_v1",
                 "aggregate_plan_digest": plan.aggregate_plan_digest,
                 "repository_id": plan.repository_id,
                 "application_fingerprint": actual.fingerprint,
-                "codex_setup_plan_digest": plan.setup.plan_digest,
                 "compatibility_discovery_digest": plan.compatibility.discovery_digest,
                 "primary_authority_id": plan.compatibility.primary_authority_id,
                 "mcp_launcher_binding": mcp_launcher_binding_payload(
@@ -380,7 +423,13 @@ def execute_one_command_init(
                 "raw_project_content_serialized": False,
                 "absolute_paths_serialized": False,
             }
-        )
+        if plan.setup.manifest["client"] == "codex":
+            receipt["codex_setup_plan_digest"] = plan.setup.plan_digest
+        else:
+            receipt["client"] = plan.setup.manifest["client"]
+            receipt["client_setup_plan_digest"] = plan.setup.plan_digest
+        receipt_path = _RECEIPT if plan.setup.manifest["client"] == "codex" else "lifecycle/p107-install.json"
+        files[receipt_path] = _json_bytes(receipt)
         extend_bootstrap_staging(plan.root, plan.transaction_id, files)
         final_actual = _actual_application(plan)
         if final_actual.fingerprint != plan.expected_application_fingerprint:
@@ -390,17 +439,19 @@ def execute_one_command_init(
         committed = True
         _call_fault(fault, "committed")
         current_status = workspace_status(os.fspath(plan.root))
-        setup_status = codex_setup_status(os.fspath(plan.root), launcher=plan.setup.binding)
-        if current_status.status != Status.SUCCESS or setup_status.status != Status.SUCCESS:
+        client = plan.setup.manifest["client"]
+        setup_status = _setup_status(client, os.fspath(plan.root), plan.setup.binding)
+        expected_setup_status = Status.SUCCESS if client == "codex" else Status.OWNER_REQUIRED
+        if current_status.status != Status.SUCCESS or setup_status.status != expected_setup_status:
             raise LifecycleError("SOS_P106_POST_COMMIT_VERIFICATION_FAILED", Status.BLOCKED)
         return TerminalResult(
-            "sos_p106_init_result_v1",
-            Status.SUCCESS,
-            ("SOS_P106_INSTALLED", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL"),
+            "sos_p106_init_result_v1" if client == "codex" else "sos_p107_init_result_v1",
+            Status.SUCCESS if client == "codex" else Status.OWNER_REQUIRED,
+            (("SOS_P106_INSTALLED", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL") if client == "codex" else ("SOS_INTERACTIVE_USER_HANDOFF_REQUIRED", "SOS_ACCEPTANCE_ASSURANCE_WEAK_LOCAL")),
             {
                 **current_status.details,
                 "aggregate_plan_digest": plan.aggregate_plan_digest,
-                "codex_setup_state": "installed",
+                f"{client.replace('-', '_')}_setup_state": "installed",
                 "compatibility_discovery_digest": plan.compatibility.discovery_digest,
                 "primary_authority_id": plan.compatibility.primary_authority_id,
                 "configured_check_families": configured_count,
@@ -413,23 +464,24 @@ def execute_one_command_init(
         LifecycleError,
         RepositoryError,
         ClientIntegrationError,
+        ClaudeIntegrationError,
         ContractError,
         MaintenanceBindingError,
         TransactionError,
     ) as exc:
         if committed:
             return TerminalResult(
-                "sos_p106_init_result_v1",
+                result_contract,
                 Status.BLOCKED,
                 ("SOS_P106_POST_COMMIT_VERIFICATION_FAILED",),
                 {"aggregate_plan_digest": plan.aggregate_plan_digest},
             )
         if applied:
             try:
-                rollback_codex_bootstrap_setup(plan.setup)
+                _rollback_setup(plan.setup)
             except Exception:
                 return TerminalResult(
-                    "sos_p106_init_result_v1",
+                    result_contract,
                     Status.BLOCKED,
                     ("SOS_P106_RECOVERY_REQUIRED",),
                     {"aggregate_plan_digest": plan.aggregate_plan_digest},
@@ -439,66 +491,76 @@ def execute_one_command_init(
                 discard_bootstrap_staging(plan.root, plan.transaction_id)
             except TransactionError:
                 return TerminalResult(
-                    "sos_p106_init_result_v1",
+                    result_contract,
                     Status.BLOCKED,
                     ("SOS_P106_RECOVERY_REQUIRED",),
                     {"aggregate_plan_digest": plan.aggregate_plan_digest},
                 )
         reason = exc.reason if hasattr(exc, "reason") else str(exc)
         status = exc.status if hasattr(exc, "status") else Status.BLOCKED
-        return TerminalResult("sos_p106_init_result_v1", status, (reason,), {})
+        return TerminalResult(result_contract, status, (reason,), {})
 
 
 def recover_one_command_init(
-    path: str = ".", *, launcher: LauncherBinding | None = None
+    path: str = ".", *, launcher: LauncherBinding | None = None, client: str = "codex"
 ) -> TerminalResult:
+    recovery_contract = (
+        "sos_p106_recovery_result_v1"
+        if client == "codex"
+        else "sos_p107_recovery_result_v1"
+    )
     try:
         root = discover_repository_root(path)
         inspection = inspect_repository(root)
         if inspection.control_plane_state != "absent":
             current = workspace_status(os.fspath(root))
-            setup = codex_setup_status(os.fspath(root), launcher=launcher)
-            if current.status == Status.SUCCESS and setup.status == Status.SUCCESS:
+            setup = _setup_status(client, os.fspath(root), launcher)
+            expected = Status.SUCCESS if client == "codex" else Status.OWNER_REQUIRED
+            if current.status == Status.SUCCESS and setup.status == expected:
                 return TerminalResult(
-                    "sos_p106_recovery_result_v1",
+                    recovery_contract,
                     Status.SUCCESS,
                     ("SOS_P106_INSTALLED",),
                     {"recovery_required": False},
                 )
             return TerminalResult(
-                "sos_p106_recovery_result_v1", Status.BLOCKED, ("SOS_P106_RECOVERY_REQUIRED",), {}
+                recovery_contract, Status.BLOCKED, ("SOS_P106_RECOVERY_REQUIRED",), {}
             )
         if len(inspection.staging_roots) != 1:
             reason = "SOS_P106_NOT_CONFIGURED" if not inspection.staging_roots else "SOS_P106_RECOVERY_REQUIRED"
             status = Status.NOT_VERIFIED if not inspection.staging_roots else Status.BLOCKED
-            return TerminalResult("sos_p106_recovery_result_v1", status, (reason,), {})
+            return TerminalResult(recovery_contract, status, (reason,), {})
         staging_name = inspection.staging_roots[0]
         transaction_id = staging_name.removeprefix(".sigma.init.")
         pending, pending_digest = _read_pending(root, staging_name)
         if pending["transaction_id"] != transaction_id:
             raise LifecycleError("SOS_P106_PENDING_INVALID")
         binding = launcher or observe_installed_launcher()
-        setup = CodexBootstrapSetup(root, binding, pending["setup_manifest"], ())
+        setup = (
+            CodexBootstrapSetup(root, binding, pending["setup_manifest"], ())
+            if pending["setup_manifest"].get("client") == "codex"
+            else ClaudeBootstrapSetup(root, binding, pending["setup_manifest"], ())
+        )
         if setup.plan_digest != pending["setup_plan_digest"] or binding.digest != setup.manifest["launcher_digest"]:
             raise LifecycleError("SOS_P106_PENDING_STALE", Status.STALE)
-        observed = probe_codex_bootstrap_setup(setup)
+        observed = probe_codex_bootstrap_setup(setup) if setup.manifest["client"] == "codex" else probe_claude_bootstrap_setup(setup)
         if observed == "after":
-            rollback_codex_bootstrap_setup(setup)
+            _rollback_setup(setup)
         elif observed != "before":
             raise LifecycleError("SOS_P106_TARGET_DRIFT", Status.STALE)
         discard_bootstrap_staging(
             root, transaction_id, recovery_binding_digest=pending_digest
         )
         return TerminalResult(
-            "sos_p106_recovery_result_v1",
+            recovery_contract,
             Status.SUCCESS,
             ("SOS_P106_ROLLBACK_RECOVERED",),
             {"recovery_required": False, "aggregate_plan_digest": pending["aggregate_plan_digest"]},
         )
-    except (LifecycleError, RepositoryError, ClientIntegrationError, TransactionError, OSError, ValueError) as exc:
+    except (LifecycleError, RepositoryError, ClientIntegrationError, ClaudeIntegrationError, TransactionError, OSError, ValueError) as exc:
         reason = exc.reason if hasattr(exc, "reason") else "SOS_P106_PENDING_INVALID"
         status = exc.status if hasattr(exc, "status") else Status.INVALID
-        return TerminalResult("sos_p106_recovery_result_v1", status, (reason,), {})
+        return TerminalResult(recovery_contract, status, (reason,), {})
 
 
 def _stable_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str, str, str | None]:
@@ -512,6 +574,28 @@ def _stable_plan_inputs(plan: OneCommandPlan) -> tuple[str, str, str, str, str, 
     )
 
 
+def _setup_status(client: str, path: str, launcher: LauncherBinding | None) -> TerminalResult:
+    return codex_setup_status(path, launcher=launcher) if client == "codex" else claude_setup_status(path, launcher=launcher)
+
+
+def _apply_setup(setup: CodexBootstrapSetup | ClaudeBootstrapSetup) -> None:
+    if setup.manifest["client"] == "codex":
+        apply_codex_bootstrap_setup(setup)
+    else:
+        apply_claude_bootstrap_setup(setup)
+
+
+def _rollback_setup(setup: CodexBootstrapSetup | ClaudeBootstrapSetup) -> None:
+    if setup.manifest["client"] == "codex":
+        rollback_codex_bootstrap_setup(setup)
+    else:
+        rollback_claude_bootstrap_setup(setup)
+
+
+def _render_setup_control_files(setup: CodexBootstrapSetup | ClaudeBootstrapSetup) -> dict[str, bytes]:
+    return render_codex_bootstrap_control_files(setup) if setup.manifest["client"] == "codex" else render_claude_bootstrap_control_files(setup)
+
+
 def _revalidated_plan_inputs(
     plan: OneCommandPlan,
 ) -> tuple[str, str, str, str, str, str | None]:
@@ -519,9 +603,10 @@ def _revalidated_plan_inputs(
     if inspection.control_plane_state != "absent" or inspection.staging_roots:
         raise LifecycleError("SOS_P106_PREVIEW_STALE", Status.STALE)
     identity = repository_identity_contract(plan.root, local_repository_nonce=plan.local_nonce)
-    setup = prepare_codex_bootstrap_setup(
-        os.fspath(plan.root), identity.repository_id, launcher=plan.setup.binding
-    )
+    if plan.setup.manifest["client"] == "codex":
+        setup = prepare_codex_bootstrap_setup(os.fspath(plan.root), identity.repository_id, launcher=plan.setup.binding)
+    else:
+        setup = prepare_claude_bootstrap_setup(os.fspath(plan.root), identity.repository_id, launcher=plan.setup.binding)
     compatibility = discover_compatibility(
         plan.root,
         primary_authority_id=plan.compatibility.primary_authority_id,
@@ -602,7 +687,7 @@ def _read_pending(root: Path, staging_name: str) -> tuple[dict[str, Any], str]:
         "aggregate_plan_digest", "maintenance_launcher_binding", "raw_project_content_serialized",
         "absolute_paths_serialized", "qualification_included", "network_performed",
     }
-    if not isinstance(value, dict) or set(value) != required or value["contract"] != "sos_p106_pending_v2":
+    if not isinstance(value, dict) or set(value) != required or value["contract"] not in {"sos_p106_pending_v2", "sos_p107_pending_v1"}:
         raise LifecycleError("SOS_P106_PENDING_INVALID")
     if value["maintenance_launcher_binding"] is not None:
         try:

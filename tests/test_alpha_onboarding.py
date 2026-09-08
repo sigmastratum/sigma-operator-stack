@@ -22,6 +22,36 @@ SPEC.loader.exec_module(alpha)
 
 
 class AlphaOnboardingTests(unittest.TestCase):
+    def test_main_routes_explicit_claude_install_and_detach(self) -> None:
+        binding = '{"contract":"synthetic"}'
+        with mock.patch.object(alpha, "run_onboarding") as onboarding:
+            status = alpha.main(
+                [
+                    "--client",
+                    "claude-code",
+                    "--maintenance-release-binding-json",
+                    binding,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(onboarding.call_args.kwargs["client"], "claude-code")
+
+        with mock.patch.object(alpha, "run_detach") as detach:
+            status = alpha.main(
+                [
+                    "--mode",
+                    "detach",
+                    "--client",
+                    "claude-code",
+                    "--maintenance-release-binding-json",
+                    binding,
+                    "/synthetic/project",
+                ]
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(detach.call_args.kwargs["client"], "claude-code")
+
     def test_confirmation_handoff_arguments_fail_before_launcher_work(self) -> None:
         with mock.patch.object(alpha, "run_onboarding") as onboarding:
             incomplete = alpha.main(

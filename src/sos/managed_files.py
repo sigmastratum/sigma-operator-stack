@@ -22,8 +22,10 @@ from .result import Status
 
 
 _PLAN_CONTRACT = "sos_managed_file_plan_v1"
+_PLAN_V2_CONTRACT = "sos_managed_file_plan_v2"
 _EVENT_CONTRACT = "sos_managed_file_event_v1"
 _BATCH_CONTRACT = "sos_managed_file_batch_v1"
+_BATCH_V2_CONTRACT = "sos_managed_file_batch_v2"
 _BATCH_PROJECTION_CONTRACT = "sos_managed_file_batch_projection_v1"
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _JOURNAL_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -105,6 +107,45 @@ def build_managed_file_plan(
     return plan
 
 
+def build_managed_file_plan_v2(
+    *,
+    journal_id: str,
+    repository_id: str,
+    target: str,
+    patch_kind: str,
+    patch_offset: int,
+    before_exists: bool,
+    before_byte_count: int,
+    before_digest: str,
+    patch_byte_count: int,
+    patch_digest: str,
+    after_byte_count: int,
+    after_digest: str,
+) -> dict[str, Any]:
+    plan = {
+        "contract": _PLAN_V2_CONTRACT,
+        "journal_id": journal_id,
+        "repository_id": repository_id,
+        "target": target,
+        "patch_kind": patch_kind,
+        "patch_offset": patch_offset,
+        "before_exists": before_exists,
+        "before_byte_count": before_byte_count,
+        "before_digest": before_digest,
+        "patch_byte_count": patch_byte_count,
+        "patch_digest": patch_digest,
+        "after_exists": True,
+        "after_byte_count": after_byte_count,
+        "after_digest": after_digest,
+        "raw_content_serialized": False,
+        "absolute_paths_serialized": False,
+        "plan_digest": "sha256:" + "0" * 64,
+    }
+    plan["plan_digest"] = _sealed_digest(plan, "plan_digest")
+    _validate_plan(plan)
+    return plan
+
+
 def build_managed_file_batch(
     *, batch_id: str, repository_id: str, plans: Sequence[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -135,6 +176,50 @@ def build_managed_file_batch(
         )
     value = {
         "contract": _BATCH_CONTRACT,
+        "batch_id": batch_id,
+        "repository_id": repository_id,
+        "step_count": len(steps),
+        "steps": steps,
+        "raw_content_serialized": False,
+        "absolute_paths_serialized": False,
+        "batch_digest": "sha256:" + "0" * 64,
+    }
+    value["batch_digest"] = _sealed_digest(value, "batch_digest")
+    _validate_batch(value)
+    return value
+
+
+def build_managed_file_batch_v2(
+    *, batch_id: str, repository_id: str, plans: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    _validate_journal_id(batch_id)
+    if not isinstance(plans, Sequence) or isinstance(plans, (str, bytes)):
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+    if not 1 <= len(plans) <= _MAX_BATCH_STEPS:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_LIMIT_EXCEEDED", Status.UNSUPPORTED)
+    steps: list[dict[str, Any]] = []
+    journal_ids: set[str] = set()
+    targets: set[str] = set()
+    for ordinal, plan in enumerate(plans, start=1):
+        _validate_plan(plan)
+        if plan["contract"] != _PLAN_V2_CONTRACT:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_PLAN_MISMATCH")
+        if plan["repository_id"] != repository_id:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_REPOSITORY_MISMATCH", Status.STALE)
+        if plan["journal_id"] in journal_ids or plan["target"] in targets:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_DUPLICATE_TARGET")
+        journal_ids.add(plan["journal_id"])
+        targets.add(plan["target"])
+        steps.append({
+            "sequence_ordinal": ordinal,
+            "journal_id": plan["journal_id"],
+            "plan_contract": plan["contract"],
+            "plan_digest": plan["plan_digest"],
+            "target": plan["target"],
+            "patch_kind": plan["patch_kind"],
+        })
+    value = {
+        "contract": _BATCH_V2_CONTRACT,
         "batch_id": batch_id,
         "repository_id": repository_id,
         "step_count": len(steps),
@@ -649,6 +734,7 @@ def _require_batch_step_plan(step: dict[str, Any], plan: dict[str, Any]) -> None
         or step["plan_digest"] != plan["plan_digest"]
         or step["target"] != plan["target"]
         or step["patch_kind"] != plan["patch_kind"]
+        or (step.get("plan_contract") is not None and step["plan_contract"] != plan["contract"])
     ):
         raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_PLAN_MISMATCH", Status.STALE)
 
@@ -705,6 +791,13 @@ def _read_plan(root: Path, digest: str) -> dict[str, Any]:
 
 
 def _validate_plan(value: object) -> None:
+    if isinstance(value, dict) and value.get("contract") == _PLAN_V2_CONTRACT:
+        _validate_plan_v2(value)
+        return
+    _validate_plan_v1(value)
+
+
+def _validate_plan_v1(value: object) -> None:
     required = {
         "contract", "journal_id", "repository_id", "target", "patch_kind",
         "before_exists", "before_byte_count", "before_digest", "patch_byte_count",
@@ -746,7 +839,56 @@ def _validate_plan(value: object) -> None:
         raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
 
 
+def _validate_plan_v2(value: object) -> None:
+    required = {
+        "contract", "journal_id", "repository_id", "target", "patch_kind",
+        "patch_offset", "before_exists", "before_byte_count", "before_digest",
+        "patch_byte_count", "patch_digest", "after_exists", "after_byte_count",
+        "after_digest", "raw_content_serialized", "absolute_paths_serialized",
+        "plan_digest",
+    }
+    if not isinstance(value, dict) or set(value) != required or value["contract"] != _PLAN_V2_CONTRACT:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    _validate_journal_id(value["journal_id"])
+    if not isinstance(value["repository_id"], str) or not _DIGEST.fullmatch(value["repository_id"]):
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    _validate_target(value["target"])
+    if value["patch_kind"] not in {"create_file", "append_suffix", "insert_bytes"}:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    if not isinstance(value["before_exists"], bool) or value["after_exists"] is not True:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    for field in ("patch_offset", "before_byte_count", "patch_byte_count", "after_byte_count"):
+        if not isinstance(value[field], int) or isinstance(value[field], bool) or not 0 <= value[field] <= 1024 * 1024:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    for field in ("before_digest", "patch_digest", "after_digest", "plan_digest"):
+        if not isinstance(value[field], str) or not _DIGEST.fullmatch(value[field]):
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    if value["raw_content_serialized"] is not False or value["absolute_paths_serialized"] is not False:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    if value["after_byte_count"] != value["before_byte_count"] + value["patch_byte_count"]:
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    if value["patch_kind"] == "create_file":
+        if value["before_exists"] or value["before_byte_count"] != 0 or value["before_digest"] != _EMPTY_DIGEST or value["patch_offset"] != 0:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+        if value["patch_byte_count"] != value["after_byte_count"] or value["patch_digest"] != value["after_digest"]:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    else:
+        if not value["before_exists"] or value["patch_offset"] > value["before_byte_count"]:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+        if value["patch_kind"] == "append_suffix" and value["patch_offset"] != value["before_byte_count"]:
+            raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+    if value["plan_digest"] != _sealed_digest(value, "plan_digest"):
+        raise ManagedFileError("SOS_MANAGED_FILE_PLAN_INVALID")
+
+
 def _validate_batch(value: object) -> None:
+    if isinstance(value, dict) and value.get("contract") == _BATCH_V2_CONTRACT:
+        _validate_batch_v2(value)
+        return
+    _validate_batch_v1(value)
+
+
+def _validate_batch_v1(value: object) -> None:
     required = {
         "contract", "batch_id", "repository_id", "step_count", "steps",
         "raw_content_serialized", "absolute_paths_serialized", "batch_digest",
@@ -790,6 +932,41 @@ def _validate_batch(value: object) -> None:
     if not isinstance(value["batch_digest"], str) or not _DIGEST.fullmatch(value["batch_digest"]):
         raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
     if value["batch_digest"] != _sealed_digest(value, "batch_digest"):
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+
+
+def _validate_batch_v2(value: object) -> None:
+    required = {
+        "contract", "batch_id", "repository_id", "step_count", "steps",
+        "raw_content_serialized", "absolute_paths_serialized", "batch_digest",
+    }
+    if not isinstance(value, dict) or set(value) != required or value["contract"] != _BATCH_V2_CONTRACT:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+    _validate_journal_id(value["batch_id"])
+    if not isinstance(value["repository_id"], str) or not _DIGEST.fullmatch(value["repository_id"]):
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+    if not isinstance(value["step_count"], int) or isinstance(value["step_count"], bool) or not 1 <= value["step_count"] <= _MAX_BATCH_STEPS or not isinstance(value["steps"], list) or len(value["steps"]) != value["step_count"]:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+    journal_ids: set[str] = set()
+    targets: set[str] = set()
+    for ordinal, step in enumerate(value["steps"], start=1):
+        if not isinstance(step, dict) or set(step) != {"sequence_ordinal", "journal_id", "plan_contract", "plan_digest", "target", "patch_kind"}:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+        if step["sequence_ordinal"] != ordinal or step["plan_contract"] != _PLAN_V2_CONTRACT:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+        _validate_journal_id(step["journal_id"])
+        if not isinstance(step["plan_digest"], str) or not _DIGEST.fullmatch(step["plan_digest"]):
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+        _validate_target(step["target"])
+        if step["patch_kind"] not in {"create_file", "append_suffix", "insert_bytes"}:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+        if step["journal_id"] in journal_ids or step["target"] in targets:
+            raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_DUPLICATE_TARGET")
+        journal_ids.add(step["journal_id"])
+        targets.add(step["target"])
+    if value["raw_content_serialized"] is not False or value["absolute_paths_serialized"] is not False:
+        raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
+    if not isinstance(value["batch_digest"], str) or not _DIGEST.fullmatch(value["batch_digest"]) or value["batch_digest"] != _sealed_digest(value, "batch_digest"):
         raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_INVALID")
 
 

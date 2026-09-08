@@ -645,11 +645,15 @@ def run_onboarding(
     uv_path: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    client: str = "codex",
 ) -> Path:
     validate_platform()
     git = _required_command("git", which)
     uv = uv_path or _required_command("uv", which)
-    find_codex(which=which)
+    if client == "codex":
+        find_codex(which=which)
+    elif client != "claude-code":
+        raise _fail("SOS_ALPHA_CLIENT_UNSUPPORTED", "The requested client is not supported.", "Use codex or claude-code.")
     manifest = verify_bundle(bundle)
     maintenance_binding = (
         _maintenance_binding(bundle, manifest, maintenance_handoff_json)
@@ -744,7 +748,11 @@ def run_onboarding(
         )
     print("Existing project compatibility check passed.")
     print("\nSOS will now show one complete project plan and ask once before changing files.")
-    init_command = [os.fspath(sos), "init", "--with-codex"]
+    init_command = (
+        [os.fspath(sos), "init", "--with-codex"]
+        if client == "codex"
+        else [os.fspath(sos), "init", "--with-client", client]
+    )
     if maintenance_binding is not None:
         init_command.extend(
             [
@@ -768,8 +776,9 @@ def run_onboarding(
         )
     print("\nSOS is installed and connected to this project.")
     print("Next:")
-    print("1. Restart or reopen Codex if the SOS tools are not visible.")
-    print("2. Trust this project when Codex asks you.")
+    client_name = "Codex" if client == "codex" else "Claude Code"
+    print(f"1. Restart or reopen {client_name} if the SOS tools are not visible.")
+    print(f"2. Complete the normal {client_name} project trust prompt.")
     print("3. From the project root, run: sos qualify .")
     print("Qualification is intentionally separate and will ask before running project checks.")
     return root
@@ -787,7 +796,6 @@ def run_update(
     validate_platform()
     git = _required_command("git", which)
     uv = uv_path or _required_command("uv", which)
-    find_codex(which=which)
     manifest = verify_bundle(bundle)
     maintenance_binding = (
         _maintenance_binding(bundle, manifest, maintenance_handoff_json)
@@ -799,15 +807,15 @@ def run_update(
     root = discover_project_root(project, git, runner)
     if maintenance_binding is not None:
         _require_recorded_maintenance_binding(root, maintenance_binding)
-    updated = runner(_offline_tool_install_command(uv, bundle, force=True), check=False)
-    if updated.returncode != 0:
-        raise _fail(
-            "SOS_ALPHA_UPDATE_FAILED",
-            "uv could not install the exact replacement SOS wheel.",
-            "Read the uv error and rerun the checked bundle after correcting it.",
-        )
     sos = _installed_sos(uv, runner)
-    rebound = runner([os.fspath(sos), "setup", "update", "codex", os.fspath(root)], check=False)
+    version = runner([os.fspath(sos), "--version"], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if version.returncode != 0 or version.stdout.strip() != f"sos {manifest['version']}":
+        raise _fail(
+            "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED",
+            "A version-changing shared package update cannot inventory every project.",
+            "Keep the installed package or use a future inventory-qualified update route.",
+        )
+    rebound = runner([os.fspath(sos), "setup", "update-all", os.fspath(root)], check=False)
     if rebound.returncode != 0:
         raise _fail(
             "SOS_ALPHA_SETUP_UPDATE_FAILED",
@@ -840,21 +848,35 @@ def run_remove(
     root = discover_project_root(project, git, runner)
     if maintenance_binding is not None:
         _require_recorded_maintenance_binding(root, maintenance_binding)
+    raise _fail(
+        "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED",
+        "The shared SOS package cannot be removed without a global project inventory.",
+        "Detach project adapters individually; keep the shared package installed.",
+    )
+
+
+def run_detach(
+    bundle: Path,
+    project: Path,
+    *,
+    client: str,
+    uv_path: str | None = None,
+    maintenance_handoff_json: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> Path:
+    validate_platform()
+    git = _required_command("git", which)
+    uv = uv_path or _required_command("uv", which)
+    manifest = verify_bundle(bundle)
+    if uv_path is not None: _admit_exact_uv(uv, manifest, runner)
+    root = discover_project_root(project, git, runner)
+    if maintenance_handoff_json is not None:
+        _require_recorded_maintenance_binding(root, _maintenance_binding(bundle, manifest, maintenance_handoff_json))
     sos = _installed_sos(uv, runner)
-    removed = runner([os.fspath(sos), "setup", "remove", "codex", os.fspath(root)], check=False)
+    removed = runner([os.fspath(sos), "setup", "remove", client, os.fspath(root)], check=False)
     if removed.returncode != 0:
-        raise _fail(
-            "SOS_ALPHA_SETUP_REMOVE_FAILED",
-            "SOS did not safely remove its exact managed Codex integration.",
-            "Do not remove the package; read the typed SOS result and retry recovery first.",
-        )
-    uninstalled = runner([uv, "tool", "uninstall", "sigma-operator-stack"], check=False)
-    if uninstalled.returncode != 0:
-        raise _fail(
-            "SOS_ALPHA_PACKAGE_REMOVE_FAILED",
-            "The project integration was removed but uv could not remove the SOS package.",
-            "The project .sigma records were preserved; retry only the uv uninstall command.",
-        )
+        raise _fail("SOS_ALPHA_SETUP_REMOVE_FAILED", "SOS did not detach the exact client adapter.", "Read the typed SOS result and run its recovery action.")
     return root
 
 
@@ -869,7 +891,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--maintenance-release-binding-json")
     parser.add_argument("--resume-confirmation-seed")
     parser.add_argument("--expected-plan-digest")
-    parser.add_argument("--mode", choices=("install", "update", "remove"), default="install")
+    parser.add_argument("--client", choices=("codex", "claude-code"), default="codex")
+    parser.add_argument("--mode", choices=("install", "detach", "update", "remove"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
     try:
@@ -912,7 +935,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 maintenance_handoff_json=arguments.maintenance_release_binding_json,
                 resume_confirmation_seed=arguments.resume_confirmation_seed,
                 expected_plan_digest=arguments.expected_plan_digest,
+                client=arguments.client,
             )
+        elif arguments.mode == "detach":
+            run_detach(launcher.parent, arguments.project, client=arguments.client, uv_path=arguments.uv, maintenance_handoff_json=arguments.maintenance_release_binding_json)
         elif arguments.mode == "update":
             run_update(
                 launcher.parent,

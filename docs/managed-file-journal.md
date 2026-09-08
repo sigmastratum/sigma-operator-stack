@@ -25,6 +25,13 @@ The two Draft 2020-12 contracts are:
 - `sos-managed-file-plan-v1.schema.json`;
 - `sos-managed-file-event-v1.schema.json`.
 
+The successor `sos-managed-file-plan-v2.schema.json` preserves those v1
+operations and adds a required byte offset plus `insert_bytes`. Apply inserts
+the deterministic patch at exactly that offset. Rollback first verifies the
+complete after-image and inserted slice, then removes only that slice and
+verifies the reconstructed before digest. V1 validation and replay remain
+closed to v1 plans.
+
 ## Append-only lifecycle
 
 Plans are immutable and addressed by digest. Events are immutable ordinal
@@ -56,6 +63,10 @@ absent. Its two additional Draft 2020-12 contracts are:
 - `sos-managed-file-batch-v1.schema.json`;
 - `sos-managed-file-batch-projection-v1.schema.json`.
 
+`sos-managed-file-batch-v2.schema.json` binds every step to both its plan
+digest and `sos_managed_file_plan_v2` contract. It is used when a batch needs
+byte insertion; it cannot absorb or reinterpret a v1 plan.
+
 Forward coordination prepares and applies one target at a time. Explicit or
 failure-driven rollback visits completed targets in strict reverse order. A
 prepared target is never falsely marked applied or rolled back. When a crash,
@@ -75,8 +86,7 @@ removal use the general journal plus atomic exchange/move-aside target
 operations. Crash recovery is covered before target mutation, after target
 mutation and after rollback.
 
-The one-target journal and bounded multi-target coordinator are reusable
-primitives. Codex remains the first concrete client consumer. Wiring the batch
-into the complete bootstrap/update/uninstall journey, broader qualification,
-Claude parity, cross-server verification, push, publication and release are
-not claimed here.
+The Claude Code adapter is the first v2 consumer. It preserves all existing
+`.mcp.json` bytes while inserting one exact project-scoped server member, and
+uses a v2 suffix plan for `CLAUDE.md`. Actual-client/provider qualification,
+cross-server verification, push, publication and release are not claimed here.

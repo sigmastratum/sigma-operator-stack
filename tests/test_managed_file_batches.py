@@ -13,7 +13,9 @@ from sos.managed_files import (
     ManagedFileBatchError,
     ManagedFileError,
     build_managed_file_batch,
+    build_managed_file_batch_v2,
     build_managed_file_plan,
+    build_managed_file_plan_v2,
     coordinate_managed_file_batch,
     project_managed_file_batch,
     recover_managed_file_batch,
@@ -111,6 +113,35 @@ class ManagedFileBatchTests(unittest.TestCase):
         return build_managed_file_batch(
             batch_id="synthetic-bootstrap", repository_id=repository_id, plans=plans
         )
+
+    def test_v2_batch_replays_without_broadening_v1(self) -> None:
+        temporary, root, repository_id = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        patch = b"managed-v2\n"
+        plan = build_managed_file_plan_v2(
+            journal_id="synthetic-v2",
+            repository_id=repository_id,
+            target="docs/synthetic-v2.md",
+            patch_kind="create_file",
+            patch_offset=0,
+            before_exists=False,
+            before_byte_count=0,
+            before_digest=digest(b""),
+            patch_byte_count=len(patch),
+            patch_digest=digest(patch),
+            after_byte_count=len(patch),
+            after_digest=digest(patch),
+        )
+        batch = build_managed_file_batch_v2(
+            batch_id="synthetic-v2", repository_id=repository_id, plans=[plan]
+        )
+        targets = SyntheticTargets([plan])
+        projection = self.coordinate(root, batch, [plan], targets)
+        self.assertEqual(projection["state"], "integrated")
+        self.assertEqual(project_managed_file_batch(root, batch)["state"], "integrated")
+        schema = json.loads((Path(__file__).parents[1] / "src/sos/schemas/sos-managed-file-batch-v2.schema.json").read_text())
+        Draft202012Validator(schema).validate(batch)
+        self.assertEqual(self.coordinate(root, batch, [plan], targets)["state"], "integrated")
 
     def coordinate(self, root: Path, batch: dict, plans: list[dict], targets: SyntheticTargets) -> dict:
         return coordinate_managed_file_batch(
