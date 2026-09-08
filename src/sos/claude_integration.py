@@ -44,7 +44,7 @@ _INSTRUCTION_TARGET = "CLAUDE.md"
 _MCP_TARGET = ".mcp.json"
 _INSTRUCTION_JOURNAL = "claude-code-instructions-v1"
 _MCP_JOURNAL = "claude-code-mcp-v1"
-_BATCH_ID = "claude-code-setup-v1"
+_BATCH_ID_PREFIX = "claude-code-setup-v1"
 _MAX_BYTES = 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _MAX_JSON_MEMBERS = 4096
@@ -406,7 +406,14 @@ def _prepare_manifest(root: Path, repository_id: str, binding: LauncherBinding) 
     instruction_plan = _plan(repository_id, _INSTRUCTION_JOURNAL, _INSTRUCTION_TARGET, "append_suffix" if instruction_exists else "create_file", len(instruction), instruction, instruction_patch, instruction_after, instruction_exists)
     mcp_plan = _plan(repository_id, _MCP_JOURNAL, _MCP_TARGET, mcp_kind, offset, mcp, mcp_patch, mcp_after, mcp_exists)
     plans = [instruction_plan, mcp_plan]
-    batch = build_managed_file_batch_v2(batch_id=_BATCH_ID, repository_id=repository_id, plans=plans)
+    seed = digest_value([plan["plan_digest"] for plan in plans]).removeprefix(
+        "sha256:"
+    )[:16]
+    batch = build_managed_file_batch_v2(
+        batch_id=f"{_BATCH_ID_PREFIX}-{seed}",
+        repository_id=repository_id,
+        plans=plans,
+    )
     value = {
         "contract": _CONTRACT,
         "client": _CLIENT,
@@ -650,7 +657,8 @@ def _validate_manifest(value: object) -> None:
     if value["raw_content_serialized"] is not False or value["absolute_paths_serialized"] is not False or not isinstance(value["plans"], list) or len(value["plans"]) != 2:
         raise ClaudeIntegrationError("SOS_CLAUDE_CODE_SETUP_MANIFEST_INVALID")
     if (
-        value["batch"].get("batch_id") != _BATCH_ID
+        not isinstance(value["batch"].get("batch_id"), str)
+        or not value["batch"]["batch_id"].startswith(_BATCH_ID_PREFIX + "-")
         or not isinstance(value["repository_id"], str)
         or not value["repository_id"]
         or not isinstance(value["launcher_digest"], str)
@@ -675,6 +683,11 @@ def _validate_manifest(value: object) -> None:
         or mcp.get("target") != _MCP_TARGET
         or mcp.get("patch_kind") not in {"create_file", "insert_bytes"}
     ):
+        raise ClaudeIntegrationError("SOS_CLAUDE_CODE_SETUP_MANIFEST_INVALID")
+    expected_batch_id = _BATCH_ID_PREFIX + "-" + digest_value(
+        [plan["plan_digest"] for plan in value["plans"]]
+    ).removeprefix("sha256:")[:16]
+    if value["batch"]["batch_id"] != expected_batch_id:
         raise ClaudeIntegrationError("SOS_CLAUDE_CODE_SETUP_MANIFEST_INVALID")
     expected = build_managed_file_batch_v2(batch_id=value["batch"]["batch_id"], repository_id=value["repository_id"], plans=value["plans"])
     if expected != value["batch"] or value["manifest_digest"] != _manifest_digest(value):

@@ -16,6 +16,7 @@
       ]
     },
     "src/sos/agent_api.py": {"class": "shared_core"},
+    "src/sos/atomic_switch.py": {"class": "shared_core"},
     "src/sos/capabilities.py": {"class": "shared_core", "proven_non_filesystem_symbols": ["_run_bounded_process"]},
     "src/sos/checks.py": {
       "class": "qualification_execution_mechanism",

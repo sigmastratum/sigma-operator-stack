@@ -5,20 +5,21 @@ from __future__ import annotations
 from .claude_integration import (
     claude_setup_status,
     project_claude_package_update,
-    update_claude_setup,
 )
 from .client_integration import (
+    LauncherBinding,
     codex_setup_status,
+    observe_installed_launcher,
     project_codex_package_update,
-    update_codex_setup,
 )
+from .atomic_switch import execute_atomic_switch, prepare_atomic_switch
 from .result import Status, TerminalResult
 from .platform_services import PlatformServiceError, current_platform_services
 from .repository import RepositoryError, discover_repository_root
 
 
 _KNOWN_INTEGRATION_FILES = frozenset(
-    {"codex-mcp.json", "codex-first.json", "claude-code.json"}
+    {"codex-mcp.json", "codex-first.json", "claude-code.json", "atomic-switches"}
 )
 
 
@@ -187,7 +188,15 @@ def project_package_update(path: str = ".", *, launcher=None) -> TerminalResult:
     )
 
 
-def update_all_setups(path: str = ".", *, confirmed: bool, controlling_tty_observed: bool = False) -> TerminalResult:
+def update_all_setups(
+    path: str = ".",
+    *,
+    confirmed: bool,
+    controlling_tty_observed: bool = False,
+    predecessor_launcher: LauncherBinding | None = None,
+    successor_launcher: LauncherBinding | None = None,
+    fault=None,
+) -> TerminalResult:
     inventory = integration_inventory(path)
     if inventory.status != Status.SUCCESS:
         return TerminalResult(
@@ -196,66 +205,22 @@ def update_all_setups(path: str = ".", *, confirmed: bool, controlling_tty_obser
             inventory.reasons,
             {**inventory.details, "package_manager_calls": 0},
         )
-    if not confirmed:
-        return TerminalResult(
-            "sos_multi_client_update_v1",
-            Status.OWNER_REQUIRED,
-            ("SOS_MULTI_CLIENT_UPDATE_CONFIRMATION_REQUIRED",),
-            {**inventory.details, "package_manager_calls": 0},
+    predecessor = predecessor_launcher or observe_installed_launcher()
+    successor = successor_launcher or predecessor
+    try:
+        plan = prepare_atomic_switch(
+            path, predecessor=predecessor, successor=successor
         )
-    if not controlling_tty_observed:
+    except Exception as exc:
         return TerminalResult(
-            "sos_multi_client_update_v1",
-            Status.OWNER_REQUIRED,
-            ("SOS_MULTI_CLIENT_UPDATE_TTY_REQUIRED",),
+            "sos_atomic_adapter_switch_result_v1",
+            getattr(exc, "status", Status.INVALID),
+            (getattr(exc, "reason", "SOS_ATOMIC_ADAPTER_SWITCH_INVALID"),),
             {"package_manager_calls": 0},
         )
-    codex = codex_setup_status(path)
-    claude = claude_setup_status(path)
-    results: dict[str, TerminalResult] = {}
-    if "SOS_CODEX_SETUP_NOT_INSTALLED" not in codex.reasons:
-        results["codex"] = update_codex_setup(
-            path, confirmed=True, controlling_tty_observed=True
-        )
-    if "SOS_CLAUDE_CODE_SETUP_NOT_INSTALLED" not in claude.reasons:
-        results["claude-code"] = update_claude_setup(
-            path, confirmed=True, controlling_tty_observed=True
-        )
-    failed = {
-        client: result
-        for client, result in results.items()
-        if result.status not in {Status.SUCCESS, Status.OWNER_REQUIRED}
-        or (
-            result.status == Status.OWNER_REQUIRED
-            and "SOS_INTERACTIVE_USER_HANDOFF_REQUIRED" not in result.reasons
-        )
-    }
-    details = {
-        "clients": {
-            client: {
-                "status": result.status.value,
-                "reasons": list(result.reasons),
-            }
-            for client, result in results.items()
-        },
-        "package_manager_calls": 0,
-        "client_restart_required": bool(results),
-    }
-    if failed:
-        details["failed_clients"] = sorted(failed)
-        return TerminalResult(
-            "sos_multi_client_update_v1",
-            Status.BLOCKED,
-            ("SOS_MULTI_CLIENT_UPDATE_INCOMPLETE",),
-            details,
-        )
-    return TerminalResult(
-        "sos_multi_client_update_v1",
-        Status.SUCCESS,
-        (
-            "SOS_MULTI_CLIENT_UPDATED"
-            if results
-            else "SOS_MULTI_CLIENT_UPDATE_NOT_REQUIRED"
-        ,),
-        details,
+    return execute_atomic_switch(
+        plan,
+        confirmed=confirmed,
+        controlling_tty_observed=controlling_tty_observed,
+        fault=fault,
     )

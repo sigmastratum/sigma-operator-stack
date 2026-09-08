@@ -195,6 +195,50 @@ class ManagedFileBatchTests(unittest.TestCase):
             targets.log[-3:], [("rollback", f"synthetic-{item}") for item in range(3, 0, -1)]
         )
 
+    def test_terminal_rollback_allows_a_new_sealed_plan_cycle(self) -> None:
+        temporary, root, repository_id = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        first = self.plans(repository_id, count=1)
+        first_batch = self.batch(repository_id, first)
+        first_targets = SyntheticTargets(first)
+        self.coordinate(root, first_batch, first, first_targets)
+        rollback_managed_file_batch(
+            root,
+            first_batch,
+            rollback_step=first_targets.rollback,
+            probe_step=first_targets.probe,
+        )
+
+        payload = b"successor-managed\n"
+        successor = build_managed_file_plan(
+            journal_id=first[0]["journal_id"],
+            repository_id=repository_id,
+            target=first[0]["target"],
+            patch_kind="create_file",
+            before_exists=False,
+            before_byte_count=0,
+            before_digest=digest(b""),
+            patch_byte_count=len(payload),
+            patch_digest=digest(payload),
+            after_byte_count=len(payload),
+            after_digest=digest(payload),
+        )
+        successor_batch = build_managed_file_batch(
+            batch_id="synthetic-successor",
+            repository_id=repository_id,
+            plans=[successor],
+        )
+        successor_targets = SyntheticTargets([successor])
+        self.assertEqual(
+            project_managed_file_batch(root, successor_batch)["state"], "not_started"
+        )
+        self.assertEqual(
+            self.coordinate(
+                root, successor_batch, [successor], successor_targets
+            )["state"],
+            "integrated",
+        )
+
     def test_apply_failure_rolls_back_completed_steps_and_projects_incomplete(self) -> None:
         temporary, root, repository_id = self.make_project()
         self.addCleanup(temporary.cleanup)

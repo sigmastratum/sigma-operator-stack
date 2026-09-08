@@ -240,7 +240,8 @@ def project_managed_file_batch(root: Path, batch: dict[str, Any]) -> dict[str, A
     stored = _read_batch(root, batch["batch_id"])
     if stored is None:
         for step in batch["steps"]:
-            if replay_managed_file_journal(root, step["journal_id"]) is not None:
+            replay = replay_managed_file_journal(root, step["journal_id"])
+            if replay is not None and replay["latest"]["state"] != "rolled_back":
                 raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_MANIFEST_MISSING", Status.STALE)
         return _build_batch_projection(batch, ["not_started"] * batch["step_count"])
     if stored != batch:
@@ -254,6 +255,9 @@ def project_managed_file_batch(root: Path, batch: dict[str, Any]) -> dict[str, A
             states.append("not_started")
             continue
         if current["plan"] != plan:
+            if current["latest"]["state"] == "rolled_back":
+                states.append("not_started")
+                continue
             raise ManagedFileBatchError("SOS_MANAGED_FILE_BATCH_PLAN_MISMATCH", Status.STALE)
         states.append(current["latest"]["state"])
     return _build_batch_projection(batch, states)
