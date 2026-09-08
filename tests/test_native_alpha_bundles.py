@@ -592,7 +592,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
             with mock.patch.object(alpha.platform, "system", return_value="Darwin"):
                 alpha._admit_exact_uv(str(uv), manifest, runner)
 
-    def test_update_rebinds_only_after_exact_wheel_install(self) -> None:
+    def test_update_repairs_all_bindings_without_replacing_shared_package(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bundle = root / "bundle"
@@ -610,12 +610,13 @@ class NativeAlphaBundleTests(unittest.TestCase):
                     return subprocess.CompletedProcess(arguments, 0, str(project) + "\n", "")
                 if arguments[1:] == ["tool", "dir", "--bin"]:
                     return subprocess.CompletedProcess(arguments, 0, str(tool_bin) + "\n", "")
+                if arguments == [str(tool_bin / "sos"), "--version"]:
+                    return subprocess.CompletedProcess(arguments, 0, f"sos {alpha.VERSION}\n", "")
                 return subprocess.CompletedProcess(arguments, 0, "", "")
 
             with (
                 mock.patch.object(alpha, "validate_platform"),
-                mock.patch.object(alpha, "verify_bundle"),
-                mock.patch.object(alpha, "find_codex"),
+                mock.patch.object(alpha, "verify_bundle", return_value={"version": alpha.VERSION}),
             ):
                 alpha.run_update(
                     bundle,
@@ -623,15 +624,13 @@ class NativeAlphaBundleTests(unittest.TestCase):
                     which=lambda name: f"/bin/{name}",
                     runner=runner,
                 )
-            install_index = next(index for index, call in enumerate(calls) if call[1:3] == ["tool", "install"])
-            setup_index = next(index for index, call in enumerate(calls) if "update" in call and "codex" in call)
-            self.assertLess(install_index, setup_index)
-            self.assertIn("--force", calls[install_index])
-            self.assertIn("--offline", calls[install_index])
-            self.assertIn("--no-index", calls[install_index])
-            self.assertIn("--no-python-downloads", calls[install_index])
+            self.assertIn(
+                [str(tool_bin / "sos"), "setup", "update-all", str(project)],
+                calls,
+            )
+            self.assertFalse(any(call[1:3] == ["tool", "install"] for call in calls))
 
-    def test_remove_never_uninstalls_package_when_setup_remove_fails(self) -> None:
+    def test_remove_blocks_without_global_inventory_and_never_calls_package_manager(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bundle = root / "bundle"
@@ -649,8 +648,6 @@ class NativeAlphaBundleTests(unittest.TestCase):
                     return subprocess.CompletedProcess(arguments, 0, str(project) + "\n", "")
                 if arguments[1:] == ["tool", "dir", "--bin"]:
                     return subprocess.CompletedProcess(arguments, 0, str(tool_bin) + "\n", "")
-                if "remove" in arguments and "codex" in arguments:
-                    return subprocess.CompletedProcess(arguments, 2, "", "")
                 return subprocess.CompletedProcess(arguments, 0, "", "")
 
             with (
@@ -664,8 +661,9 @@ class NativeAlphaBundleTests(unittest.TestCase):
                         which=lambda name: f"/bin/{name}",
                         runner=runner,
                     )
-            self.assertEqual(raised.exception.code, "SOS_ALPHA_SETUP_REMOVE_FAILED")
+            self.assertEqual(raised.exception.code, "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED")
             self.assertFalse(any(call[1:3] == ["tool", "uninstall"] for call in calls))
+            self.assertFalse(any("setup" in call for call in calls))
 
     @staticmethod
     def smoke_payloads() -> dict[str, dict[str, object]]:

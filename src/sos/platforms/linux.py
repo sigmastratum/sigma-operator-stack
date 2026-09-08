@@ -380,6 +380,9 @@ class LinuxPlatformServices:
             )
             try:
                 self._write_all(descriptor, operation.payload)
+                # The previewed mode is exact; creation umask must not silently
+                # change it. Only the unpublished, exclusively created file is touched.
+                os.fchmod(descriptor, operation.mode)
                 os.fsync(descriptor)
                 replacement_identity = self._file_identity(os.fstat(descriptor))
             finally:

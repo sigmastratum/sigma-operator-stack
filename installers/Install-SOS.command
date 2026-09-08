@@ -7,6 +7,8 @@ PRIMARY_AUTHORITY=""
 MAINTENANCE_BINDING=""
 RESUME_CONFIRMATION_SEED=""
 EXPECTED_PLAN_DIGEST=""
+CLIENT="codex"
+CLIENT_SEEN=""
 if [ "$#" -ge 2 ]; then shift 2; else shift "$#"; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -42,6 +44,18 @@ while [ "$#" -gt 0 ]; do
       EXPECTED_PLAN_DIGEST="$2"
       shift 2
       ;;
+    --client)
+      [ "$#" -ge 2 ] && [ -z "$CLIENT_SEEN" ] || {
+        echo "SOS_ALPHA_ARGUMENTS_INVALID: invalid or duplicate --client." >&2
+        exit 2
+      }
+      case "$2" in
+        codex|claude-code) CLIENT="$2" ;;
+        *) echo "SOS_ALPHA_ARGUMENTS_INVALID: --client must be codex or claude-code." >&2; exit 2 ;;
+      esac
+      CLIENT_SEEN="yes"
+      shift 2
+      ;;
     *)
       echo "SOS_ALPHA_ARGUMENTS_INVALID: use the exact arguments from the verified public release route." >&2
       exit 2
@@ -59,9 +73,9 @@ RUNTIME_ROOT="$HOME/.local/share/sigma-operator-stack/runtime"
 UV="$RUNTIME_ROOT/bootstrap/uv-0.12.6"
 PYTHON_ROOT="$RUNTIME_ROOT/python"
 case "$MODE" in
-  install|update|remove) ;;
+  install|detach|update|remove) ;;
   *)
-    echo "SOS_ALPHA_MODE_INVALID: use install, update, or remove." >&2
+    echo "SOS_ALPHA_MODE_INVALID: use install, detach, update, or remove." >&2
     exit 2
     ;;
 esac
@@ -108,8 +122,8 @@ PYTHON=$("$UV" python find --no-config --managed-python --no-python-downloads 3.
 PYTHON_STATUS=$?
 set -e
 if [ "$PYTHON_STATUS" -ne 0 ]; then
-  if [ "$MODE" = "remove" ]; then
-    echo "SOS_ALPHA_MANAGED_PYTHON_MISSING: removal cannot acquire a runtime from the network." >&2
+  if [ "$MODE" = "remove" ] || [ "$MODE" = "detach" ]; then
+    echo "SOS_ALPHA_MANAGED_PYTHON_MISSING: detach/removal cannot acquire a runtime from the network." >&2
     exit 2
   fi
   echo "SOS acquisition: installing the pinned managed Python 3.12.14 runtime."
@@ -117,7 +131,7 @@ if [ "$PYTHON_STATUS" -ne 0 ]; then
   PYTHON=$("$UV" python find --no-config --managed-python --no-python-downloads 3.12.14)
 fi
 
-set -- "$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE"
+set -- "$PYTHON" "$SCRIPT_DIR/start-sos-alpha" --uv "$UV" --mode "$MODE" --client "$CLIENT"
 if [ -n "$MAINTENANCE_BINDING" ]; then
   set -- "$@" --maintenance-release-binding-json "$MAINTENANCE_BINDING"
 fi
@@ -136,12 +150,5 @@ set +e
 "$@"
 STATUS=$?
 set -e
-
-if [ "$STATUS" -eq 0 ] && [ "$MODE" = "remove" ]; then
-  case "$RUNTIME_ROOT" in
-    "$HOME/.local/share/sigma-operator-stack/runtime") /bin/rm -rf "$RUNTIME_ROOT" ;;
-    *) echo "SOS_ALPHA_RUNTIME_REMOVE_REFUSED: managed runtime root is not exact." >&2; exit 2 ;;
-  esac
-fi
 
 exit "$STATUS"

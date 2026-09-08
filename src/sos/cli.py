@@ -25,6 +25,15 @@ from .client_integration import (
     remove_codex_setup,
     update_codex_setup,
 )
+from .claude_integration import (
+    claude_setup_status,
+    install_claude_setup,
+    preview_claude_setup,
+    recover_claude_setup,
+    remove_claude_setup,
+    update_claude_setup,
+)
+from .multi_client_lifecycle import integration_inventory, update_all_setups
 from .mcp import serve_stdio
 from .lifecycle import (
     LifecycleError,
@@ -89,6 +98,7 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--json", action="store_true", dest="as_json")
         if command == "init":
             subparser.add_argument("--with-codex", action="store_true")
+            subparser.add_argument("--with-client", choices=("codex", "claude-code"))
             subparser.add_argument("--primary-authority")
             subparser.add_argument("--maintenance-release-binding-json")
             subparser.add_argument("--resume-confirmation-seed")
@@ -112,7 +122,7 @@ def _parser() -> argparse.ArgumentParser:
     client_commands = client.add_subparsers(dest="client_command", required=True)
     for operation in ("install", "status", "remove"):
         command = client_commands.add_parser(operation)
-        command.add_argument("client", choices=("codex",))
+        command.add_argument("client", choices=("codex", "claude-code"))
         command.add_argument("path", nargs="?", default=".")
         command.add_argument("--json", action="store_true", dest="as_json")
         if operation != "status":
@@ -121,11 +131,18 @@ def _parser() -> argparse.ArgumentParser:
     setup_commands = setup.add_subparsers(dest="setup_command", required=True)
     for operation in ("install", "status", "recover", "update", "remove"):
         command = setup_commands.add_parser(operation)
-        command.add_argument("client", choices=("codex",))
+        command.add_argument("client", choices=("codex", "claude-code"))
         command.add_argument("path", nargs="?", default=".")
         command.add_argument("--json", action="store_true", dest="as_json")
         if operation in {"install", "update", "remove"}:
             command.add_argument("--yes", action="store_true")
+    update_all = setup_commands.add_parser("update-all")
+    update_all.add_argument("path", nargs="?", default=".")
+    update_all.add_argument("--yes", action="store_true")
+    update_all.add_argument("--json", action="store_true", dest="as_json")
+    integrations = subparsers.add_parser("integrations")
+    integrations.add_argument("path", nargs="?", default=".")
+    integrations.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -156,7 +173,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         _print(payload, args.as_json)
         return 0
+    if args.command == "integrations":
+        result = integration_inventory(args.path)
+        _print(result.to_dict(), args.as_json)
+        return 0 if result.status == "success" else 2
     if args.command == "setup":
+        if args.setup_command == "update-all":
+            confirmed = args.yes or _ask_confirmation("Repair all installed SOS client integrations for this project?")
+            result = update_all_setups(args.path, confirmed=confirmed, controlling_tty_observed=sys.stdin.isatty())
+            _print(result.to_dict(), args.as_json)
+            return 0 if result.status == "success" else 2
+        if args.client == "claude-code":
+            if args.setup_command == "status":
+                result = claude_setup_status(args.path)
+            elif args.setup_command == "recover":
+                result = recover_claude_setup(args.path)
+            elif args.setup_command == "install":
+                preview = preview_claude_setup(args.path)
+                _print(preview.to_dict(), args.as_json)
+                if preview.status != "owner_required":
+                    return 0 if preview.status == "success" else 2
+                expected_manifest_digest = preview.details.get("manifest_digest")
+                confirmed = args.yes or _ask_confirmation("Install the SOS Claude Code recovery adapter?")
+                result = install_claude_setup(
+                    args.path,
+                    confirmed=confirmed,
+                    controlling_tty_observed=sys.stdin.isatty(),
+                    expected_manifest_digest=expected_manifest_digest,
+                )
+            elif args.setup_command == "update":
+                confirmed = args.yes or _ask_confirmation("Repair the exact same-version Claude Code adapter?")
+                result = update_claude_setup(args.path, confirmed=confirmed, controlling_tty_observed=sys.stdin.isatty())
+            else:
+                confirmed = args.yes or _ask_confirmation("Detach only the exact SOS-managed Claude Code adapter?")
+                result = remove_claude_setup(args.path, confirmed=confirmed, controlling_tty_observed=sys.stdin.isatty())
+            _print(result.to_dict(), args.as_json)
+            return 0 if result.status == "success" else 2
         if args.setup_command == "status":
             result = codex_setup_status(args.path)
         elif args.setup_command == "recover":
@@ -203,6 +255,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(result.to_dict(), args.as_json)
         return 0 if result.status == "success" else 2
     if args.command == "client":
+        if args.client == "claude-code":
+            if args.client_command == "status":
+                result = claude_setup_status(args.path)
+            elif args.client_command == "install":
+                preview = preview_claude_setup(args.path)
+                _print(preview.to_dict(), args.as_json)
+                if preview.status != "owner_required":
+                    return 0 if preview.status == "success" else 2
+                expected_manifest_digest = preview.details.get("manifest_digest")
+                confirmed = args.yes or _ask_confirmation("Install the SOS Claude Code recovery adapter?")
+                result = install_claude_setup(
+                    args.path,
+                    confirmed=confirmed,
+                    controlling_tty_observed=sys.stdin.isatty(),
+                    expected_manifest_digest=expected_manifest_digest,
+                )
+            else:
+                confirmed = args.yes or _ask_confirmation("Detach only the SOS Claude Code adapter?")
+                result = remove_claude_setup(args.path, confirmed=confirmed, controlling_tty_observed=sys.stdin.isatty())
+            _print(result.to_dict(), args.as_json)
+            return 0 if result.status == "success" else 2
         if args.client_command == "status":
             result = client_status(args.path, args.client)
         elif args.client_command == "install":
@@ -251,6 +324,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = result.to_dict()
         exit_code = 0 if result.status == "success" else 2
     elif args.command == "init":
+        init_client = args.with_client or ("codex" if args.with_codex else None)
+        if args.with_codex and args.with_client not in {None, "codex"}:
+            payload = {"contract": "sos_init_result_v1", "status": "invalid", "reasons": ["SOS_CLIENT_SELECTION_CONFLICT"]}
+            _print(payload, args.as_json)
+            return 2
         confirmation_resume_requested = (
             args.resume_confirmation_seed is not None
             or args.expected_plan_digest is not None
@@ -259,7 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.primary_authority is not None
             or args.maintenance_release_binding_json is not None
             or confirmation_resume_requested
-        ) and not args.with_codex:
+        ) and init_client is None:
             payload = {
                 "contract": "sos_init_result_v1",
                 "status": "invalid",
@@ -275,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             _print(payload, args.as_json)
             return 2
-        if args.with_codex:
+        if init_client is not None:
             if (args.resume_confirmation_seed is None) != (
                 args.expected_plan_digest is None
             ):
@@ -315,10 +393,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     primary_authority_id=args.primary_authority,
                     maintenance_binding=maintenance_binding,
                     confirmation_seed=args.resume_confirmation_seed,
+                    client=init_client,
                 )
             except LifecycleError as exc:
                 if exc.reason == "SOS_P106_RECOVERY_REQUIRED":
-                    recovered = recover_one_command_init(args.path)
+                    recovered = recover_one_command_init(args.path, client=init_client)
                     if recovered.status != "success":
                         result = recovered
                         payload = result.to_dict()
@@ -329,6 +408,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         primary_authority_id=args.primary_authority,
                         maintenance_binding=maintenance_binding,
                         confirmation_seed=args.resume_confirmation_seed,
+                        client=init_client,
                     )
                 else:
                     result = preview_one_command_init(
@@ -336,6 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         primary_authority_id=args.primary_authority,
                         maintenance_binding=maintenance_binding,
                         confirmation_seed=args.resume_confirmation_seed,
+                        client=init_client,
                     )
                     payload = result.to_dict()
                     _print(payload, args.as_json)
@@ -357,7 +438,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preview = one_command_plan.preview()
                 _print(preview.to_dict(), args.as_json)
             confirmed = args.yes or _ask_confirmation(
-                "Apply the exact SOS bootstrap and Codex integration plan"
+                "Apply the exact SOS bootstrap and "
+                + ("Codex" if init_client == "codex" else "Claude Code")
+                + " integration plan"
                 + (
                     f" {one_command_plan.aggregate_plan_digest}?"
                     if args.expected_plan_digest is not None
@@ -377,7 +460,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 controlling_tty_observed=sys.stdin.isatty(),
             )
         payload = result.to_dict()
-        exit_code = 0 if result.status == "success" else 2
+        exit_code = 0 if (
+            result.status == "success"
+            or (
+                result.contract == "sos_p107_init_result_v1"
+                and "SOS_INTERACTIVE_USER_HANDOFF_REQUIRED" in result.reasons
+                and result.details.get("claude_code_setup_state") == "installed"
+            )
+        ) else 2
     elif args.command == "regenerate":
         confirmed = args.yes or _ask_confirmation("Generate successor proposals for the current source?")
         result = regenerate_workspace(

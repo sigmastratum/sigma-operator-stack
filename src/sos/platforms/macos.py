@@ -564,6 +564,7 @@ class MacOSPlatformServices:
             )
             try:
                 self._write_all(descriptor, operation.payload)
+                os.fchmod(descriptor, operation.mode)
                 os.fsync(descriptor)
                 replacement_identity = self._file_identity(os.fstat(descriptor))
             finally:

@@ -16,17 +16,20 @@
       ]
     },
     "src/sos/agent_api.py": {"class": "shared_core"},
+    "src/sos/atomic_switch.py": {"class": "shared_core"},
     "src/sos/capabilities.py": {"class": "shared_core", "proven_non_filesystem_symbols": ["_run_bounded_process"]},
     "src/sos/checks.py": {
       "class": "qualification_execution_mechanism",
       "symbols": ["_run_python_syntax"]
     },
     "src/sos/cli.py": {"class": "shared_core"},
+    "src/sos/claude_integration.py": {"class": "shared_core"},
     "src/sos/client_integration.py": {"class": "shared_core"},
     "src/sos/compatibility.py": {"class": "shared_core"},
     "src/sos/contracts.py": {"class": "shared_core"},
     "src/sos/dirty.py": {"class": "shared_core"},
     "src/sos/entrypoint.py": {"class": "shared_core"},
+    "src/sos/integration_inventory.py": {"class": "shared_core"},
     "src/sos/isolation.py": {
       "class": "qualification_execution_mechanism",
       "symbols": [
@@ -40,6 +43,7 @@
     "src/sos/managed_files.py": {"class": "shared_core"},
     "src/sos/mcp.py": {"class": "shared_core"},
     "src/sos/maintenance_binding.py": {"class": "shared_core"},
+    "src/sos/multi_client_lifecycle.py": {"class": "shared_core"},
     "src/sos/package_resources.py": {"class": "package_resource_mechanism"},
     "src/sos/platform_admission.py": {"class": "shared_core"},
     "src/sos/platform_services.py": {"class": "shared_core"},

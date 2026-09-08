@@ -37,8 +37,10 @@ _SCHEMA_FILES = (
     "sos-execution-result-v1.schema.json",
     "sos-managed-file-batch-projection-v1.schema.json",
     "sos-managed-file-batch-v1.schema.json",
+    "sos-managed-file-batch-v2.schema.json",
     "sos-managed-file-event-v1.schema.json",
     "sos-managed-file-plan-v1.schema.json",
+    "sos-managed-file-plan-v2.schema.json",
     "sos-qualification-plan-v1.schema.json",
     "sos-qualification-receipt-v1.schema.json",
 )

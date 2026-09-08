@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from sos.managed_files import (
     ManagedFileError,
     build_managed_file_plan,
+    build_managed_file_plan_v2,
     record_managed_file_state,
     replay_managed_file_journal,
     require_managed_file_state,
@@ -63,6 +64,34 @@ class ManagedFileJournalTests(unittest.TestCase):
         schema_root = Path(__file__).parents[1] / "src" / "sos" / "schemas"
         for name in ("sos-managed-file-plan-v1.schema.json", "sos-managed-file-event-v1.schema.json"):
             Draft202012Validator.check_schema(json.loads((schema_root / name).read_text(encoding="utf-8")))
+
+    def test_v2_insert_plan_is_separate_and_content_safe(self) -> None:
+        temporary, _root, repository_id = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        before = b'{ "mcpServers": {"other": {}} }\n'
+        patch = b',"sigma_operator_stack":{"command":"sos"}'
+        offset = before.rfind(b"}", 0, before.rfind(b"}"))
+        after = before[:offset] + patch + before[offset:]
+        plan = build_managed_file_plan_v2(
+            journal_id="synthetic-v2",
+            repository_id=repository_id,
+            target=".mcp.json",
+            patch_kind="insert_bytes",
+            patch_offset=offset,
+            before_exists=True,
+            before_byte_count=len(before),
+            before_digest=digest(before),
+            patch_byte_count=len(patch),
+            patch_digest=digest(patch),
+            after_byte_count=len(after),
+            after_digest=digest(after),
+        )
+        self.assertEqual(plan["contract"], "sos_managed_file_plan_v2")
+        self.assertNotIn(before.decode(), json.dumps(plan))
+        schema = json.loads((Path(__file__).parents[1] / "src/sos/schemas/sos-managed-file-plan-v2.schema.json").read_text())
+        Draft202012Validator(schema).validate(plan)
+        with self.assertRaises(ManagedFileError):
+            build_managed_file_plan_v2(**{**{key: value for key, value in plan.items() if key not in {"contract", "plan_digest", "raw_content_serialized", "absolute_paths_serialized", "after_exists"}}, "patch_offset": len(before) + 1})
 
     def test_exact_four_state_chain_is_append_only_and_content_safe(self) -> None:
         temporary, root, repository_id = self.make_project()

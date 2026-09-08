@@ -145,6 +145,45 @@ class CodexBootstrapSetup:
         )
 
 
+def read_integration_target(root: Path, relative_path: str) -> tuple[bytes, bool, int]:
+    """Read one bounded regular repository target without following links."""
+    payload = _read_optional_platform_file(root, relative_path)
+    existed = payload is not None
+    return (payload or b"", existed, _read_setup_target_mode(root, relative_path, existed, 0o644))
+
+
+def publish_integration_target(
+    root: Path,
+    relative_path: str,
+    payload: bytes | None,
+    *,
+    expected: bytes,
+    expected_existed: bool,
+    mode: int,
+    drift_reason: str,
+    recovery_reason: str,
+) -> None:
+    """Publish or restore one exact integration target through platform services."""
+    _publish_managed_target(
+        root,
+        relative_path,
+        payload,
+        expected=expected,
+        expected_existed=expected_existed,
+        mode=mode,
+        drift_reason=drift_reason,
+        recovery_reason=recovery_reason,
+    )
+
+
+def read_integration_control_file(root: Path, relative_path: str) -> bytes | None:
+    return _read_optional_platform_file(root, ".sigma/" + relative_path)
+
+
+def publish_integration_control_file(root: Path, relative_path: str, payload: bytes) -> None:
+    _publish_control_file(root, relative_path, payload)
+
+
 def prepare_codex_bootstrap_setup(
     path: str,
     repository_id: str,
