@@ -3,6 +3,14 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
+## 0.1.0a6 — Unreleased candidate
+
+### Fixed
+
+- Recovery and preflight report current check discovery after source changes,
+  accepted regeneration and separate requalification. Source mismatches refuse
+  a ready state; immutable bootstrap evidence and receipt history are preserved.
+
 ## 0.1.0a5 — 2026-09-06
 
 ### Fixed

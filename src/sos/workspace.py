@@ -678,14 +678,25 @@ def recover_workspace(path: str = ".") -> TerminalResult:
     if status.status in (Status.INVALID, Status.BLOCKED):
         return TerminalResult("sos_recovery_result_v1", status.status, status.reasons, status.details)
     try:
-        _root, _inspection, manifest, replay = _load_and_replay(path)
+        root, _inspection, manifest, replay = _load_and_replay(path)
+        # replay.plan is immutable bootstrap evidence, not current discovery.
+        # Keep it intact while projecting the checks for the observed source.
+        plan = discover_checks(os.fspath(root))
     except (RepositoryError, WorkspaceError, ContractError) as exc:
         reason = exc.reason if isinstance(exc, RepositoryError) else "SOS_CONTROL_PLANE_INTEGRITY_INVALID"
         return _failure(Status.INVALID, reason, contract="sos_recovery_result_v1")
+    binding = manifest["source_binding"]
+    if (
+        plan.source_tree_digest != binding["tree_digest"]
+        or plan.source_status_digest != binding["status_digest"]
+    ):
+        status = TerminalResult(
+            status.contract, Status.STALE, ("SOS_SOURCE_STATUS_CHANGED",), status.details
+        )
     payload = _recovery_payload(
         manifest,
         replay["records"],
-        replay["plan"],
+        plan,
         replay["qualification"],
         replay["qualification_integrity"],
         status=status.status.value,

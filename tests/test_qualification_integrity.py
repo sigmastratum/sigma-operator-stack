@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 
 from sos.agent_api import project_tool
 from sos.checks import discover_checks, qualify_supported
+from sos.repository import RepositoryError
 from sos.qualification_contracts import (
     EXECUTOR_DIGEST,
     PACKAGE_EXECUTION_IDENTITY,
@@ -118,7 +119,7 @@ class QualificationIntegrityTests(unittest.TestCase):
     def test_executor_identity_binds_package_version_and_executable_bytes(self) -> None:
         self.assertEqual(PACKAGE_EXECUTION_IDENTITY["contract"], "sos_package_execution_identity_v1")
         self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package"], "sigma-operator-stack")
-        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package_version"], "0.1.0a5")
+        self.assertEqual(PACKAGE_EXECUTION_IDENTITY["package_version"], "0.1.0a6")
         self.assertGreater(PACKAGE_EXECUTION_IDENTITY["file_count"], 1)
         self.assertRegex(PACKAGE_EXECUTION_IDENTITY["content_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertRegex(EXECUTOR_DIGEST, r"^sha256:[0-9a-f]{64}$")
@@ -412,6 +413,87 @@ class QualificationIntegrityTests(unittest.TestCase):
             ),
             test_receipt,
         )
+
+    def test_recovery_checks_follow_accepted_source_without_rewriting_history(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        _, _, first = qualify_once(
+            str(root), family_id="python.stdlib-unittest",
+            confirmed=True, controlling_tty_observed=True,
+        )
+        self.assertEqual(first["status"], "passed_local")
+        bootstrap = root / ".sigma/checks/plan.json"
+        bootstrap_bytes = bootstrap.read_bytes()
+        preserved = {name: (root / name).read_bytes() for name in (
+            "AGENTS.md", "tasks/current.md", "README.md",
+        )}
+        head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"])
+        test_file = root / "tests/test_smoke.py"
+        test_file.write_text(test_file.read_text() + "\n# Synthetic source change.\n")
+        self.assertEqual(workspace_status(str(root)).status.value, "stale")
+        self.assertEqual(project_tool(str(root), "sos_preflight").status.value, "stale")
+        regeneration = regenerate_workspace(
+            str(root), confirmed=True, controlling_tty_observed=True,
+        )
+        self.assertEqual(regeneration.status.value, "success", regeneration.to_dict())
+        for revision in regeneration.details["acceptance_order"]:
+            accepted = accept_proposal(
+                str(root), revision, confirmed=True, controlling_tty_observed=True,
+            )
+            self.assertEqual(accepted.status.value, "success", accepted.to_dict())
+        # Rebinding is not qualification: the historical pass stays stale.
+        self.assertEqual(project_tool(str(root), "sos_preflight").status.value, "stale")
+        plan, _, second = qualify_once(
+            str(root), family_id="python.stdlib-unittest",
+            confirmed=True, controlling_tty_observed=True,
+        )
+        self.assertEqual(second["status"], "passed_local")
+        self.assertEqual(second["predecessor_receipt"], first["receipt_digest"])
+        expected = discover_checks(str(root)).to_dict()
+        self.assertEqual(plan["discovery_plan_digest"], expected["plan_digest"])
+        before_reads = {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in (root / ".sigma").rglob("*") if path.is_file()
+        }
+        for result in (recover_workspace(str(root)), project_tool(str(root), "sos_preflight")):
+            self.assertEqual(result.status.value, "success", result.to_dict())
+            self.assertEqual(result.details["checks"], expected)
+            self.assertEqual(
+                result.details["checks"]["source_status_digest"],
+                result.details["source_binding"]["status_digest"],
+            )
+            self.assertEqual(result.details["qualification"], second)
+        self.assertEqual(before_reads, {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in (root / ".sigma").rglob("*") if path.is_file()
+        })
+        self.assertEqual(bootstrap.read_bytes(), bootstrap_bytes)
+        self.assertEqual(preserved, {name: (root / name).read_bytes() for name in preserved})
+        self.assertEqual(head, subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"]))
+
+    def test_recovery_refuses_discovery_source_race(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        discovered = discover_checks(str(root))
+        for field in ("source_tree_digest", "source_status_digest"):
+            with self.subTest(field=field), patch(
+                "sos.workspace.discover_checks",
+                return_value=replace(discovered, **{field: "sha256:" + "f" * 64}),
+            ):
+                for result in (recover_workspace(str(root)), project_tool(str(root), "sos_preflight")):
+                    self.assertEqual(result.status.value, "stale", result.to_dict())
+                    self.assertIn("SOS_SOURCE_STATUS_CHANGED", result.reasons)
+
+    def test_recovery_discovery_error_does_not_fall_back_to_bootstrap(self) -> None:
+        temporary, root = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        with patch(
+            "sos.workspace.discover_checks",
+            side_effect=RepositoryError("SOS_SOURCE_STATUS_CHANGED"),
+        ):
+            for result in (recover_workspace(str(root)), project_tool(str(root), "sos_preflight")):
+                self.assertEqual(result.status.value, "invalid", result.to_dict())
+                self.assertNotIn("checks", result.details)
 
     def test_live_discovery_drift_is_non_green_on_recovery_doctor_and_preflight(self) -> None:
         temporary, root = self.make_project()
