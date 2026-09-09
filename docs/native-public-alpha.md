@@ -14,8 +14,10 @@ SOS-owned Python `3.12.14` when required, and installs all Python dependencies
 from the included offline wheelhouse. It does not modify system Python, PATH,
 shell profiles or package managers.
 
-One bounded network acquisition may occur for the exact managed Python
-runtime. After that verified handoff, SOS itself is local, has no telemetry and
+The disposable controller may acquire pinned Python before preview. After
+confirmation, a new project generation may independently acquire that same
+pinned Python; neither preparation replaces the shared a5 runtime. After that
+verified handoff, SOS itself is local, has no telemetry and
 does not access a package index. Git and Codex must already be available to the
 current user because SOS integrates with an existing Git project and Codex
 session.
@@ -43,15 +45,25 @@ The agent-first route normally performs these steps. For inspection after the
 archive and every digest have already been verified:
 
 ```sh
-./Install-SOS.command install /path/to/project
-./Test-SOS.command /path/to/project
+./Install-SOS.command install /path/to/project --maintenance-release-binding-json "$VERIFIED_RELEASE_BINDING"
+./Test-SOS.command /path/to/project --maintenance-release-binding-json "$VERIFIED_RELEASE_BINDING"
 ```
 
-Use `update` or `remove` as the first argument for those lifecycle operations.
+`VERIFIED_RELEASE_BINDING` is the exact verified route handoff, not a manually
+invented JSON object. Use `update`, `recover`, `detach` or `remove` as the first
+argument for those lifecycle operations, retaining that verified handoff.
 Installation shows one aggregate preview and the human confirms the project
 mutation. Qualification remains a separate action. Removal deletes only the
-SOS-managed Codex integration and SOS-owned environment; `.sigma` records and
-unrelated user files are preserved.
+supported SOS-managed adapters and the selected project generation; `.sigma`,
+unrelated user files, shared a5 and predecessor generations are preserved.
+Same-version update verifies the active generation rather than reinstalling it.
+Pending transitions require explicit recovery; partial deletion is not rollback.
+
+Default controller preparation may require a network connection. Offline
+maintenance can use a separately retained and independently verified Python
+3.12.14 outside project generations with the paired `--controller-python` and
+`--controller-python-sha256` options. This mode never falls back to acquisition.
+The supplied checksum binds consistency, not independent authenticity.
 
 The macOS public artifact is distributed as `.tar.gz`. Extract it with Finder
 or the system `tar` utility into a new directory. Its inner

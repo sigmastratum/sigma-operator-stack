@@ -118,10 +118,21 @@ never be compared.
 
 Every maintenance request starts again from the canonical pointer, downloads
 the exact archive into a new disposable extraction, verifies the pointer,
-index, archive, inner manifest and platform launcher, and compares that
-maintenance binding with `.sigma/lifecycle/p106-install.json`. It then invokes
-the newly extracted launcher. A cached extraction or the MCP Python executable
-is not a substitute for this procedure.
+index, archive, inner manifest and platform launcher. For legacy a5 the
+predecessor binding comes from `.sigma/lifecycle/p106-install.json`. The a6
+carrier instead resolves the active binding from the verified project-runtime
+install record and terminal transition history. It independently verifies that
+predecessor and the requested successor; do not compare only the original a5
+receipt after migration. Pending transitions require the official `recover`
+mode, never an agent-edited receipt or manually chosen launcher. Invoke the
+newly extracted launcher with the verified handoff. A cached extraction or the
+MCP Python executable is not a substitute for this procedure.
+
+For a6, pre-confirmation preparation is disposable. Permanent project runtime
+generation creation follows the single exact preview confirmation. An update
+must leave every other project's runtime and shared a5 unchanged. Same-version
+maintenance verifies the active generation. Removal has its own aggregate
+preview and preserves `.sigma`, shared a5 and predecessor generations.
 
 The repository-owned route projection uses five states: `ready`,
 `user_action_required`, `unsupported`, `blocked` and `invalid`. Only `ready`
