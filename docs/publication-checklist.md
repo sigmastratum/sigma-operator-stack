@@ -48,7 +48,7 @@ evidence.
   made, and executable qualification remains explicitly unsupported;
 - AF102/AF103 and URL-only lifecycle evidence pass for the admitted archive
   routes; promotion uses Linux as the primary demonstrated path;
-- tag `v0.1.0a5`, GitHub Release and the canonical pointer are public;
+- tag `v0.1.0a6`, GitHub Release and the canonical pointer are public;
 - PyPI remains unpublished and is not part of the current installation route;
 - current-candidate launch media and the 24--48 hour observation window remain
   promotion gates.
@@ -112,7 +112,7 @@ later approval explicitly sets that input to true.
 Windows Store artifacts remain a separate predecessor/evidence line. They do
 not authorize a Windows support claim in the current Linux/macOS release.
 
-The current `0.1.0a5` Linux/macOS package set is bound to one reviewed product
+The current `0.1.0a6` Linux/macOS package set is bound to one reviewed product
 candidate. A future product candidate cannot inherit those exact-package
 bindings, and Store certification of an earlier MSIX cannot authorize a
 successor.

@@ -3,13 +3,22 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
-## 0.1.0a6 — Unreleased candidate
+## 0.1.0a6 — 2026-09-09
 
 ### Fixed
 
 - Recovery and preflight report current check discovery after source changes,
   accepted regeneration and separate requalification. Source mismatches refuse
   a ready state; immutable bootstrap evidence and receipt history are preserved.
+- Project-isolated runtime generations keep an updated project independent from
+  projects still using the shared predecessor runtime. Adapter transitions and
+  removal are journaled, recoverable and separately confirmed.
+- Interactive owner confirmation no longer consumes a controller execution
+  deadline. Operation-specific subprocess timeouts and truthful recovery states
+  remain bounded.
+- Runtime cache verification accepts equivalent pinned-CPython marshal graphs
+  while detecting instruction, constant and metadata drift without executing
+  cached code or relying on platform address-space limits.
 
 ## 0.1.0a5 — 2026-09-06
 
@@ -82,8 +91,9 @@ the project uses semantic versioning after the pre-1.0 stability boundary.
 - Package replacement preserves immutable receipt history but fails stale until
   setup rebind, agent restart, and separate per-project qualification complete.
 
-[0.1.0a5](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a5)
+[0.1.0a6](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a6)
 is the current installable Community Alpha. The public
+[0.1.0a5](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a5),
 [0.1.0a3](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a3)
 and [0.1.0a4](https://github.com/sigmastratum/sigma-operator-stack/releases/tag/v0.1.0a4)
 releases are immutable predecessors, not current installation authority.
