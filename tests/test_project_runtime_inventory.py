@@ -1,4 +1,9 @@
 import hashlib
+import base64
+import importlib.util
+import marshal
+import subprocess
+import struct
 import json
 import tempfile
 import py_compile
@@ -8,11 +13,99 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from sos.platforms.project_runtime_inventory import verify_installed_wheels
+from sos.platforms.project_runtime_inventory import verify_installed_wheels, _CACHE_CHECK
 from sos.project_runtime import ProjectRuntimeError
 
 
 class RuntimeInventoryTests(unittest.TestCase):
+    def cache_worker(self, source, body):
+        header = importlib.util.MAGIC_NUMBER + bytes(12)
+        row = dict(source=base64.b64encode(source).decode(),
+            cache=base64.b64encode(header + body).decode(), filename='synthetic.py',
+            tag=sys.implementation.cache_tag, optimize=0)
+        return subprocess.run([sys.executable, '-I', '-S', '-B', '-c', _CACHE_CHECK],
+            input=json.dumps([row]), capture_output=True, text=True, timeout=30)
+
+    def test_cache_reference_sharing_is_not_execution_identity(self):
+        source = b"values = ('synthetic shared value', 'synthetic shared value')\n"
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        def distinct(value):
+            if type(value) is str:
+                return value.encode().decode()
+            if type(value) is tuple:
+                return tuple(distinct(v) for v in value)
+            return value
+        other = code.replace(co_consts=distinct(code.co_consts))
+        self.assertNotEqual(marshal.dumps(code), marshal.dumps(other))
+        for version in (2, 3, 4):
+            result = self.cache_worker(source, marshal.dumps(other, version))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'verified\n')
+
+    def test_cache_execution_and_metadata_drift_refuse(self):
+        source = b"def f(x):\n    try:\n        return x + 1\n    except Exception:\n        return 0\n"
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        variants = [code.replace(co_filename='foreign.py'),
+                    code.replace(co_firstlineno=9), code.replace(co_name='foreign'),
+                    code.replace(co_qualname='foreign'), code.replace(co_linetable=b''),
+                    code.replace(co_flags=code.co_flags ^ 1),
+                    code.replace(co_code=compile(b'pass', 'synthetic.py', 'exec').co_code)]
+        nested = next(v for v in code.co_consts if type(v) is type(code))
+        for changed in (nested.replace(co_exceptiontable=b''),
+                        nested.replace(co_consts=(None, True, 0)),
+                        nested.replace(co_consts=(None, 2, 0)),
+                        nested.replace(co_names=('BaseException',))):
+            variants.append(code.replace(co_consts=tuple(changed if v is nested else v for v in code.co_consts)))
+        for variant in variants:
+            self.assertEqual(self.cache_worker(source, marshal.dumps(variant)).returncode, 2)
+        for body in (marshal.dumps(code)+b'trailing', b'broken', marshal.dumps((1, 2))):
+            self.assertEqual(self.cache_worker(source, body).returncode, 2)
+
+    def test_cache_frozenset_sharing_between_nested_functions(self):
+        source = (b"def first(x):\n    return x in {'alpha', 'beta'}\n"
+                  b"def second(x):\n    return x in {'alpha', 'beta'}\n")
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        def copy_sets(value):
+            if type(value) is frozenset:
+                return frozenset(list(value))
+            if type(value) is type(code):
+                return value.replace(co_consts=tuple(copy_sets(v) for v in value.co_consts))
+            return value
+        changed = copy_sets(code)
+        self.assertNotEqual(marshal.dumps(code), marshal.dumps(changed))
+        self.assertEqual(marshal.dumps(code, 2), marshal.dumps(changed, 2))
+        result = self.cache_worker(source, marshal.dumps(changed))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'verified\n')
+
+    def test_cache_constant_types_and_float_bits_are_not_python_equality(self):
+        for source, original, replacement in (
+                (b'value = -0.0\n', -0.0, 0.0),
+                (b'value = 1\n', 1, True),
+                (b'value = 1j\n', 1j, complex(-0.0, 1.0)),
+                (b'value = x in {1, 2}\n', frozenset({1, 2}), frozenset({True, 2}))):
+            with self.subTest(source=source):
+                self.assertEqual(original, replacement)
+                code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+                constants = tuple(replacement if type(v) is type(original) and v == original else v
+                                  for v in code.co_consts)
+                changed = code.replace(co_consts=constants)
+                self.assertEqual(self.cache_worker(source, marshal.dumps(changed)).returncode, 2)
+
+    def test_cache_large_integer_does_not_require_decimal_conversion(self):
+        source = b'value = 0x' + b'f' * 4000 + b'\n'
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        result = self.cache_worker(source, marshal.dumps(code))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'verified\n')
+
+    def test_cache_declared_allocation_is_bounded_before_decode(self):
+        # A tiny body must not allocate its declared 800 MB tuple in the worker.
+        result = self.cache_worker(b'pass\n', b'(' + struct.pack('<i', 100000000))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, '')
+
     def active_options(self):
         # A managed standalone interpreter needs its adjacent standard library;
         # copying only its executable is not a runnable interpreter fixture.

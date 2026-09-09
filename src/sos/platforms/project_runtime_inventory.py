@@ -30,7 +30,45 @@ _GENERATED = {"INSTALLER", "REQUESTED", "RECORD", "direct_url.json", "uv_cache.j
 _HOOKS = {"_virtualenv.py", "_virtualenv.pth"}
 _LIMIT = 128 * 1024 * 1024
 _CACHE = re.compile(r"(.+)\.cpython-(311|312)(?:\.opt-([12]))?\.pyc\Z")
-_CACHE_CHECK = """import base64, hashlib, importlib.util, json, marshal, sys
+_CACHE_CHECK = """import base64, hashlib, importlib.util, io, json, marshal, resource, struct, sys, types
+# Bound allocations made by the decoder itself, before structural comparison.
+# Never raise an inherited limit; inability to impose the ceiling fails closed.
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    ceiling = 512 * 1024 * 1024
+    limits = [ceiling] + [v for v in (soft, hard) if v != resource.RLIM_INFINITY]
+    ceiling = min(limits)
+    resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+    if resource.getrlimit(resource.RLIMIT_AS) != (ceiling, ceiling):
+        raise ValueError('allocation limit unavailable')
+except (OSError, ValueError):
+    raise SystemExit(2)
+# Marshal reference sharing/interning is not executable meaning. Compare an
+# explicit, type-preserving representation of every execution/debug field.
+FIELDS = ('co_argcount','co_posonlyargcount','co_kwonlyargcount','co_nlocals',
+          'co_stacksize','co_flags','co_code','co_consts','co_names','co_varnames',
+          'co_filename','co_name','co_qualname','co_firstlineno','co_linetable',
+          'co_exceptiontable','co_freevars','co_cellvars')
+def canonical(value, budget, depth=0):
+    budget[0] -= 1
+    if depth > 64 or budget[0] < 0:
+        raise ValueError('code structure limit')
+    kind = type(value)
+    if value is None: return ('none',)
+    if value is Ellipsis: return ('ellipsis',)
+    if kind is bool: return ('bool', value)
+    if kind is int: return ('int', value)
+    if kind is float: return ('float', struct.pack('>d', value).hex())
+    if kind is complex: return ('complex', struct.pack('>dd', value.real, value.imag).hex())
+    if kind is str: return ('str', value)
+    if kind is bytes: return ('bytes', value.hex())
+    if kind is tuple:
+        return ('tuple', tuple(canonical(v, budget, depth+1) for v in value))
+    if kind is frozenset:
+        return ('frozenset', tuple(sorted(canonical(v, budget, depth+1) for v in value)))
+    if kind is types.CodeType:
+        return ('code', tuple(canonical(getattr(value, name), budget, depth+1) for name in FIELDS))
+    raise ValueError('unsupported code constant')
 if sys.implementation.cache_tag not in ('cpython-311', 'cpython-312'):
     raise SystemExit(2)
 for item in json.load(sys.stdin):
@@ -43,7 +81,15 @@ for item in json.load(sys.stdin):
     if int.from_bytes(cache[4:8], 'little') not in (0, 1, 3):
         raise SystemExit(2)
     code = compile(source, item['filename'], 'exec', dont_inherit=True, optimize=item['optimize'])
-    if cache[16:] != marshal.dumps(code):
+    stream = io.BytesIO(cache[16:])
+    try:
+        observed = marshal.load(stream)
+        if stream.read(1) or type(observed) is not types.CodeType:
+            raise ValueError('invalid code body')
+        equal = canonical(observed, [1000000]) == canonical(code, [1000000])
+    except (ValueError, TypeError, EOFError, RecursionError, OverflowError, MemoryError):
+        raise SystemExit(2)
+    if not equal:
         raise SystemExit(2)
 print('verified')
 """
