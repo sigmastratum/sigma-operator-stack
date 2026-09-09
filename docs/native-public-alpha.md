@@ -54,7 +54,7 @@ invented JSON object. Use `update`, `recover`, `detach` or `remove` as the first
 argument for those lifecycle operations, retaining that verified handoff.
 Installation shows one aggregate preview and the human confirms the project
 mutation. Qualification remains a separate action. Removal deletes only the
-supported SOS-managed adapters and the selected project generation; `.sigma`,
+supported SOS-managed adapters and the selected project generation; `.sigma` records,
 unrelated user files, shared a5 and predecessor generations are preserved.
 Same-version update verifies the active generation rather than reinstalling it.
 Pending transitions require explicit recovery; partial deletion is not rollback.

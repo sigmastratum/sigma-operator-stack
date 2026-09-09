@@ -403,6 +403,11 @@ def _regular_digest(path: Path) -> str:
         raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH") from None
 
 
+def resolve_runtime_reference(path: Path) -> Path:
+    """Observe a configured executable link without executing the target."""
+    return path.resolve()
+
+
 def observed_executable_digest(command: str) -> str:
     """Observe an existing interpreter, retaining normal venv link resolution."""
     try:

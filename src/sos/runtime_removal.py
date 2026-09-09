@@ -17,7 +17,7 @@ from .contracts import canonical_json, digest_value
 from .integration_inventory import unknown_integration_files
 from .managed_files import project_managed_file_batch
 from .platform_services import current_platform_services
-from .platforms.project_runtime_posix import runtime_namespace_lock
+from .platforms.project_runtime_posix import runtime_namespace_lock, resolve_runtime_reference
 from .platforms.project_runtime_removal import snapshot_owned_generation, delete_owned_generation, read_removal_snapshot
 from .project_runtime import ProjectRuntimeError
 from .result import Status, TerminalResult
@@ -72,7 +72,7 @@ def _detached(root, binding, generation):
                     if command == binding.command or candidate == generation or generation in candidate.parents:
                         raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_STILL_REFERENCED")
                     if "/" in command:
-                        resolved = candidate.resolve()
+                        resolved = resolve_runtime_reference(candidate)
                         if resolved == generation or generation in resolved.parents:
                             raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_STILL_REFERENCED")
             except ProjectRuntimeError:
