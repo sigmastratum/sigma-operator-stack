@@ -14,7 +14,8 @@ reserialization equality therefore rejects some equivalent caches.
 The isolated verification subprocess compares an explicit recursive structure:
 
 - all argument counts, local count, stack size and flags;
-- instructions, constants (including nested code), names and variable names;
+- internal instructions and their public projection, constants (including nested
+  code), names and variable names;
 - filename, name, qualified name and first line;
 - line and exception tables, free variables and cell variables.
 
@@ -24,11 +25,23 @@ signed zero. Tuples retain order; immutable sets are compared without depending
 on iteration order. Unknown constant types, malformed bodies, trailing bytes,
 excessive recursion or excessive structural expansion are rejected. Cache magic,
 supported interpreter tag and existing inventory, size and process-time limits
-remain enforced. Before decoding, the worker imposes a 512 MiB address-space
-ceiling, retaining any lower inherited limit; failure to set it refuses the
-verification. This bounds decoder allocations before the structural budget can
-be checked. Native platform qualification must verify the limit's behavior.
-Deserialization is not execution: no cached code is evaluated.
+remain enforced. Before decoding, a non-allocating structural preflight parses
+the pinned CPython 3.11/3.12 marshal wire format. Every string/container length,
+reference and nested object must fit the supplied body and bounded node/allocation
+budgets. Reference metadata is retained so code-object construction and later
+recursive comparison are charged for repeated expansion even when the wire
+representation shares one object. The per-code charge conservatively expands all
+code fields, covering private instruction copies and recursive constant/string
+interning. Malformed, unknown or trailing data is rejected before `marshal.load`.
+This avoids platform-dependent address-space limits while bounding allocations
+driven by the decoder itself. Deserialization is not execution: no cached code
+is evaluated.
+
+For the pinned CPython 3.11/3.12 formats, the comparison includes
+`_co_code_adaptive`, not just `co_code`: the latter can deoptimize the exposed
+projection and conceal a different internal encoding. Cache verification requires
+the same unexecuted internal code state as fresh compilation. A future interpreter
+format requires separate qualification, not omission of this check.
 
 ## Recovery provenance boundary
 

@@ -30,41 +30,224 @@ _GENERATED = {"INSTALLER", "REQUESTED", "RECORD", "direct_url.json", "uv_cache.j
 _HOOKS = {"_virtualenv.py", "_virtualenv.pth"}
 _LIMIT = 128 * 1024 * 1024
 _CACHE = re.compile(r"(.+)\.cpython-(311|312)(?:\.opt-([12]))?\.pyc\Z")
-_CACHE_CHECK = """import base64, hashlib, importlib.util, io, json, marshal, resource, struct, sys, types
-# Bound allocations made by the decoder itself, before structural comparison.
-# Never raise an inherited limit; inability to impose the ceiling fails closed.
-try:
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    ceiling = 512 * 1024 * 1024
-    limits = [ceiling] + [v for v in (soft, hard) if v != resource.RLIM_INFINITY]
-    ceiling = min(limits)
-    resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
-    if resource.getrlimit(resource.RLIMIT_AS) != (ceiling, ceiling):
-        raise ValueError('allocation limit unavailable')
-except (OSError, ValueError):
-    raise SystemExit(2)
+_CACHE_CHECK = """import base64, importlib.util, io, json, marshal, struct, sys, types
+# Validate every allocation-driving marshal length before invoking the decoder.
+# This parser follows the pinned CPython 3.11/3.12 wire format but constructs no
+# decoded objects and keeps only position/reference/node counters.
+def marshal_preflight(data):
+    position = 0
+    references = []
+    nodes = 0
+    allocation = 128 * 1024 * 1024
+    size = len(data)
+    null = object()
+    allocation_limit = 128 * 1024 * 1024
+    def charge(amount):
+        nonlocal allocation
+        if amount < 0 or amount > allocation:
+            raise ValueError('marshal allocation limit')
+        allocation -= amount
+    def expanded(base, *items):
+        total = base
+        for value in items:
+            amount = value[2]
+            if amount > allocation_limit - min(total, allocation_limit):
+                return allocation_limit + 1
+            total += amount
+        return total
+    def take(amount):
+        nonlocal position
+        if amount < 0 or amount > size - position:
+            raise ValueError('marshal length')
+        position += amount
+    def byte():
+        nonlocal position
+        if position >= size:
+            raise ValueError('marshal eof')
+        value = data[position]
+        position += 1
+        return value
+    def long():
+        nonlocal position
+        if size - position < 4:
+            raise ValueError('marshal eof')
+        value = int.from_bytes(data[position:position+4], 'little', signed=True)
+        position += 4
+        return value
+    def counted(width):
+        count = byte() if width == 1 else long()
+        if count < 0 or count > size - position:
+            raise ValueError('marshal count')
+        return count
+    def item(depth=0, allow_null=False):
+        nonlocal nodes
+        nodes += 1
+        charge(64)
+        if depth > 64 or nodes > 1000000:
+            raise ValueError('marshal structure limit')
+        raw = byte()
+        flagged = bool(raw & 128)
+        kind = chr(raw & 127)
+        if kind == '0':
+            if flagged or not allow_null:
+                raise ValueError('marshal null')
+            return null
+        if kind == 'r':
+            if flagged:
+                raise ValueError('marshal reference')
+            index = long()
+            if index < 0 or index >= len(references) or references[index] is None:
+                raise ValueError('marshal reference')
+            return references[index]
+        reserved = None
+        if flagged:
+            if len(references) >= 1000000:
+                raise ValueError('marshal reference limit')
+            reserved = len(references)
+            references.append(None)
+            charge(8)
+        if kind in 'NFTS.':
+            meta = ('atom', 0, 64)
+        elif kind == 'i':
+            take(4)
+            meta = ('int', 4, 68)
+        elif kind == 'I':
+            take(8)
+            meta = ('int', 8, 72)
+        elif kind == 'f':
+            length = byte()
+            take(length)
+            charge(length)
+            meta = ('float', length, 64 + length)
+        elif kind == 'g':
+            take(8)
+            meta = ('float', 8, 72)
+        elif kind == 'x':
+            first = byte()
+            take(first)
+            second = byte()
+            take(second)
+            charge(first + second)
+            meta = ('complex', first + second, 64 + first + second)
+        elif kind == 'y':
+            take(16)
+            meta = ('complex', 16, 80)
+        elif kind == 'l':
+            digits = long()
+            if digits == -2147483648:
+                raise ValueError('marshal long')
+            length = abs(digits) * 2
+            take(length)
+            charge(length)
+            meta = ('int', length, 64 + length)
+        elif kind in 'stuaA':
+            length = counted(4)
+            take(length)
+            charge(length * (4 if kind in 'tuaA' else 1))
+            factor = 4 if kind in 'tuaA' else 1
+            meta = ('str' if factor == 4 else 'bytes', length, 64 + length * factor)
+        elif kind in 'zZ':
+            length = counted(1)
+            take(length)
+            charge(length)
+            meta = ('str', length, 64 + length)
+        elif kind in '([<>':
+            count = counted(4)
+            charge(count * (24 if kind in '<>' else 8))
+            children = []
+            for _ in range(count):
+                child = item(depth+1)
+                if child is null:
+                    raise ValueError('marshal null')
+                children.append(child)
+            base = 64 + count * (24 if kind in '<>' else 8)
+            meta = ('tuple' if kind == '(' else 'container', count, expanded(base, *children))
+        elif kind == ')':
+            count = counted(1)
+            charge(count * 8)
+            children = []
+            for _ in range(count):
+                child = item(depth+1)
+                if child is null:
+                    raise ValueError('marshal null')
+                children.append(child)
+            meta = ('tuple', count, expanded(64 + count * 8, *children))
+        elif kind == '{':
+            count = 0
+            children = []
+            while True:
+                key = item(depth+1, allow_null=True)
+                if key is null:
+                    break
+                value = item(depth+1)
+                if value is null:
+                    raise ValueError('marshal null')
+                children.extend((key, value))
+                count += 1
+                charge(32)
+            meta = ('container', count, expanded(64 + count * 32, *children))
+        elif kind == 'c':
+            take(20)
+            fields = [item(depth+1) for _ in range(8)]
+            take(4)
+            fields.extend(item(depth+1) for _ in range(2))
+            if (any(field is null for field in fields)
+                    or fields[0][0] != 'bytes' or fields[1][0] != 'tuple'
+                    or fields[2][0] != 'tuple' or fields[3][0] != 'tuple'
+                    or fields[4][0] != 'bytes'
+                    or any(field[0] != 'str' for field in fields[5:8])
+                    or fields[8][0] != 'bytes' or fields[9][0] != 'bytes'):
+                raise ValueError('marshal code fields')
+            # _PyCode_New copies internal instructions for every code record,
+            # even when the wire format references one shared bytes object.
+            # Charge a conservative expansion of every field. This covers
+            # instruction copies and recursive constant/string interning even
+            # when many code records reference one shared wire object.
+            field_expansion = expanded(512, *fields)
+            charge(field_expansion)
+            meta = ('code', fields[0][1], field_expansion)
+        else:
+            raise ValueError('marshal type')
+        if reserved is not None:
+            references[reserved] = meta
+        return meta
+    if item() is null or position != size:
+        raise ValueError('marshal trailing data')
 # Marshal reference sharing/interning is not executable meaning. Compare an
 # explicit, type-preserving representation of every execution/debug field.
 FIELDS = ('co_argcount','co_posonlyargcount','co_kwonlyargcount','co_nlocals',
-          'co_stacksize','co_flags','co_code','co_consts','co_names','co_varnames',
+          'co_stacksize','co_flags','_co_code_adaptive','co_code','co_consts','co_names','co_varnames',
           'co_filename','co_name','co_qualname','co_firstlineno','co_linetable',
           'co_exceptiontable','co_freevars','co_cellvars')
 def canonical(value, budget, depth=0):
     budget[0] -= 1
-    if depth > 64 or budget[0] < 0:
+    budget[1] -= 64
+    if depth > 64 or budget[0] < 0 or budget[1] < 0:
         raise ValueError('code structure limit')
+    def spend(amount):
+        budget[1] -= amount
+        if budget[1] < 0:
+            raise ValueError('code allocation limit')
     kind = type(value)
     if value is None: return ('none',)
     if value is Ellipsis: return ('ellipsis',)
     if kind is bool: return ('bool', value)
-    if kind is int: return ('int', value)
-    if kind is float: return ('float', struct.pack('>d', value).hex())
-    if kind is complex: return ('complex', struct.pack('>dd', value.real, value.imag).hex())
-    if kind is str: return ('str', value)
-    if kind is bytes: return ('bytes', value.hex())
+    if kind is int:
+        spend(max(1, (value.bit_length() + 7) // 8))
+        return ('int', value)
+    if kind is float: return ('float', struct.pack('>d', value))
+    if kind is complex: return ('complex', struct.pack('>dd', value.real, value.imag))
+    if kind is str:
+        spend(len(value) * 4)
+        return ('str', value)
+    if kind is bytes:
+        spend(len(value))
+        return ('bytes', value)
     if kind is tuple:
+        spend(len(value) * 8)
         return ('tuple', tuple(canonical(v, budget, depth+1) for v in value))
     if kind is frozenset:
+        spend(len(value) * 24)
         return ('frozenset', tuple(sorted(canonical(v, budget, depth+1) for v in value)))
     if kind is types.CodeType:
         return ('code', tuple(canonical(getattr(value, name), budget, depth+1) for name in FIELDS))
@@ -83,10 +266,11 @@ for item in json.load(sys.stdin):
     code = compile(source, item['filename'], 'exec', dont_inherit=True, optimize=item['optimize'])
     stream = io.BytesIO(cache[16:])
     try:
+        marshal_preflight(cache[16:])
         observed = marshal.load(stream)
         if stream.read(1) or type(observed) is not types.CodeType:
             raise ValueError('invalid code body')
-        equal = canonical(observed, [1000000]) == canonical(code, [1000000])
+        equal = canonical(observed, [1000000, 128*1024*1024]) == canonical(code, [1000000, 128*1024*1024])
     except (ValueError, TypeError, EOFError, RecursionError, OverflowError, MemoryError):
         raise SystemExit(2)
     if not equal:

@@ -4,6 +4,7 @@ import importlib.util
 import marshal
 import subprocess
 import struct
+import dis
 import json
 import tempfile
 import py_compile
@@ -105,6 +106,31 @@ class RuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
+
+    def test_cache_allocation_guard_is_structural_and_platform_independent(self):
+        self.assertIn('marshal_preflight(cache[16:])', _CACHE_CHECK)
+        self.assertNotIn('RLIMIT_', _CACHE_CHECK)
+        self.assertNotIn('import resource', _CACHE_CHECK)
+        source = b"value = ({'alpha', 'beta'}, [1, 2], {'key': 3})\n"
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        result = self.cache_worker(source, marshal.dumps(code))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'verified\n')
+
+    def test_cache_internal_bytecode_is_not_hidden_by_public_projection(self):
+        # Pinned CPython's public co_code deoptimizes some encodings. The cache
+        # must match fresh compilation internally too; never execute this fixture.
+        source = b'value = left + right\n'
+        code = compile(source, 'synthetic.py', 'exec', dont_inherit=True)
+        body = marshal.dumps(code, 2)
+        self.assertEqual(body.count(code.co_code), 1)
+        instructions = bytearray(code.co_code)
+        offset = next(i for i in range(0, len(instructions), 2)
+                      if instructions[i] == dis.opmap['BINARY_OP'])
+        instructions[offset] = dis._all_opmap['BINARY_OP_ADD_INT']
+        modified = body.replace(code.co_code, bytes(instructions), 1)
+        self.assertEqual(self.cache_worker(source, body).returncode, 0)
+        self.assertEqual(self.cache_worker(source, modified).returncode, 2)
 
     def active_options(self):
         # A managed standalone interpreter needs its adjacent standard library;
