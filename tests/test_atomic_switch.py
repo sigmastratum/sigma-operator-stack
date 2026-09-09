@@ -18,6 +18,7 @@ from sos.client_integration import (
     LauncherBinding,
     codex_setup_status,
     install_codex_setup,
+    restoring_target_modes,
 )
 from sos.workspace import initialize_workspace
 
@@ -35,7 +36,41 @@ def git(root: Path, *args: str) -> None:
     )
 
 
+def snapshot(root):
+    return {str(path.relative_to(root)): (path.lstat().st_mode,
+            os.readlink(path) if path.is_symlink() else path.read_bytes() if path.is_file() else None)
+            for path in root.rglob("*")}
+
+
 class AtomicSwitchTests(unittest.TestCase):
+    def test_identical_launcher_verification_creates_no_mutation_journal(self):
+        temporary, root, binding = self.project()
+        self.addCleanup(temporary.cleanup)
+        before = snapshot(root)
+        plan = prepare_atomic_switch(str(root), predecessor=binding, successor=binding)
+        calls = []
+        result = execute_atomic_switch(plan, confirmed=True, controlling_tty_observed=True,
+            admission_check=lambda: calls.append("admission"), target_check=lambda: calls.append("target"))
+        self.assertEqual(result.status, "success", result.to_dict())
+        self.assertEqual(calls, ["admission", "target"])
+        self.assertEqual(snapshot(root), before)
+
+    def test_pending_plan_prevents_new_switch(self):
+        from sos.atomic_switch import _write_plan
+        temporary, root, binding = self.project()
+        self.addCleanup(temporary.cleanup)
+        plan = prepare_atomic_switch(str(root), predecessor=binding, successor=self.binding("0.1.0a6", "b"))
+        _write_plan(plan)
+        before = snapshot(root)
+        with self.assertRaisesRegex(AtomicSwitchError, "RECOVERY_REQUIRED"):
+            prepare_atomic_switch(str(root), predecessor=binding, successor=binding)
+        self.assertEqual(snapshot(root), before)
+        recovered = recover_atomic_switch(str(root), plan.switch_id,
+                                          predecessor=binding, successor=plan.successor)
+        self.assertEqual(recovered.status, "success", recovered.to_dict())
+        self.assertTrue(recovered.details["rolled_back"])
+        self.assert_bound(root, binding)
+
     def test_target_drift_before_commit_never_reports_success(self) -> None:
         temporary, root, predecessor = self.project()
         self.addCleanup(temporary.cleanup)
@@ -64,18 +99,21 @@ class AtomicSwitchTests(unittest.TestCase):
         plan = prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
         unknown = root / ".sigma/integrations/unknown-client.json"
         unknown.write_text("{}")
+        before = snapshot(root)
         with self.assertRaisesRegex(AtomicSwitchError, "UNKNOWN_CLIENT"):
             prepare_atomic_switch(str(root), predecessor=predecessor, successor=successor)
         result = execute_atomic_switch(plan, confirmed=True, controlling_tty_observed=True)
         self.assertNotEqual(result.status, "success")
-        self.assertFalse((root / ".sigma/integrations/atomic-switches").exists())
+        self.assertEqual(snapshot(root), before)
         self.assertEqual(unknown.read_text(), "{}")
         self.assert_bound(root, predecessor)
 
     def test_coordinator_metadata_symlink_refuses(self) -> None:
         temporary, root, predecessor = self.project()
         self.addCleanup(temporary.cleanup)
-        (root / ".sigma/integrations/atomic-switches").symlink_to(root, target_is_directory=True)
+        coordinator = root / ".sigma/integrations/atomic-switches"
+        coordinator.rename(root / "retained-coordinator")
+        coordinator.symlink_to(root, target_is_directory=True)
         with self.assertRaisesRegex(AtomicSwitchError, "INVENTORY_INVALID"):
             prepare_atomic_switch(str(root), predecessor=predecessor, successor=self.binding("0.1.0a6", "b"))
 
@@ -99,10 +137,10 @@ class AtomicSwitchTests(unittest.TestCase):
 
     def binding(self, version: str, marker: str) -> LauncherBinding:
         return LauncherBinding(
-            f"/opt/synthetic/sos-python-{marker}", version, marker * 64
+            f"/opt/synthetic/sos-python-{marker}", version, "sha256:" + marker * 64
         )
 
-    def project(self) -> tuple[tempfile.TemporaryDirectory[str], Path, LauncherBinding]:
+    def project(self, target_modes=()) -> tuple[tempfile.TemporaryDirectory[str], Path, LauncherBinding]:
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
         git(root, "init", "-q")
@@ -116,20 +154,22 @@ class AtomicSwitchTests(unittest.TestCase):
         )
         self.assertEqual(initialized.status, "success")
         predecessor = self.binding("0.1.0a5", "a")
-        codex = install_codex_setup(
-            str(root),
-            confirmed=True,
-            controlling_tty_observed=True,
-            launcher=predecessor,
-            require_current=False,
-        )
+        with restoring_target_modes(root, target_modes):
+            codex = install_codex_setup(
+                str(root),
+                confirmed=True,
+                controlling_tty_observed=True,
+                launcher=predecessor,
+                require_current=False,
+            )
         self.assertEqual(codex.status, "success")
-        claude = install_claude_setup(
-            str(root),
-            confirmed=True,
-            controlling_tty_observed=True,
-            launcher=predecessor,
-        )
+        with restoring_target_modes(root, target_modes):
+            claude = install_claude_setup(
+                str(root),
+                confirmed=True,
+                controlling_tty_observed=True,
+                launcher=predecessor,
+            )
         self.assertEqual(claude.status, "owner_required")
         return temporary, root, predecessor
 
@@ -145,6 +185,7 @@ class AtomicSwitchTests(unittest.TestCase):
         temporary, root, predecessor = self.project()
         self.addCleanup(temporary.cleanup)
         successor = self.binding("0.1.0a6", "b")
+        before = snapshot(root)
         plan = prepare_atomic_switch(
             str(root), predecessor=predecessor, successor=successor
         )
@@ -158,17 +199,13 @@ class AtomicSwitchTests(unittest.TestCase):
             successor.digest,
         )
         self.assertEqual(preview.details["package_manager_calls"], 0)
-        self.assertFalse(
-            (root / ".sigma/integrations/atomic-switches").exists()
-        )
+        self.assertEqual(snapshot(root), before)
 
         no_tty = execute_atomic_switch(
             plan, confirmed=True, controlling_tty_observed=False
         )
         self.assertEqual(no_tty.status, "owner_required")
-        self.assertFalse(
-            (root / ".sigma/integrations/atomic-switches").exists()
-        )
+        self.assertEqual(snapshot(root), before)
 
     def test_success_switches_both_clients_and_commits_shared_journal(self) -> None:
         temporary, root, predecessor = self.project()

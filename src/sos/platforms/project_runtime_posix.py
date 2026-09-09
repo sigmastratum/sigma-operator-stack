@@ -26,6 +26,62 @@ _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
+def controller_executable():
+    return str(Path(sys.executable).resolve(strict=True))
+
+
+def run_checked_native_smoke(script, script_digest, launcher, project, clients=("codex",)):
+    if _regular_digest(script) != script_digest:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH")
+    if "sha256:" + observed_executable_digest(launcher.command) != launcher.executable_sha256:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_LAUNCHER_MISMATCH")
+    return subprocess.run([sys.executable, "-I", "-S", "-B", str(script),
+        "--python", launcher.command, "--python-sha256", launcher.executable_sha256[7:],
+        *[arg for client in clients for arg in ("--client", client)],
+        str(project)], stdin=subprocess.DEVNULL, check=False, timeout=180,
+        env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+
+
+def prepare_runtime_namespace(namespace: Path) -> None:
+    """Create the dedicated private namespace only after carrier confirmation.
+
+    The existing user-data parent is walked without following links. Never
+    chmod, replace, or adopt a foreign/unsafe existing namespace.
+    """
+    if namespace.name != "project-runtimes":
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_NAMESPACE_INVALID")
+    try:
+        with _open_absolute(namespace.parent, private=False) as parent:
+            try:
+                os.mkdir(namespace.name, mode=0o700, dir_fd=parent)
+                os.fsync(parent)
+            except FileExistsError:
+                pass
+            child = os.open(namespace.name, _DIR_FLAGS, dir_fd=parent)
+            try:
+                _private(child)
+            finally:
+                os.close(child)
+    except OSError:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_DIRECTORY_UNSAFE") from None
+
+
+@contextlib.contextmanager
+def runtime_namespace_lock(namespace: Path):
+    """Hold after the outer project lock and before the P107 adapter lock."""
+    if namespace.name != "project-runtimes":
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_NAMESPACE_INVALID")
+    with _open_absolute(namespace, private=True) as fd:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_BUSY") from None
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 def _private(fd: int) -> None:
     observed = os.fstat(fd)
     if not stat.S_ISDIR(observed.st_mode) or observed.st_uid != os.geteuid() or observed.st_mode & 0o077:
@@ -193,6 +249,7 @@ def install_reserved_wheel(
     namespace: Path, project: Path, identity: object, *, repository_digest: str,
     confirmed_plan_digest: str, uv: Path, uv_sha256: str, wheel: Path,
     wheelhouse: Path, python_network_allowed: bool = False,
+    wheel_inventory: tuple[tuple[str, str], ...] = (),
 ) -> Path:
     """Populate one reservation using caller-verified acquisition inputs.
 
@@ -212,6 +269,22 @@ def install_reserved_wheel(
     for path, expected in ((uv, uv_sha256), (wheel, record["wheel_digest"][7:])):
         if _regular_digest(path) != expected:
             raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH")
+    from .project_runtime_inventory import checked_wheel_sources, verify_installed_wheels
+    if (not isinstance(wheel_inventory, tuple) or not 1 <= len(wheel_inventory) <= 16
+            or any(not isinstance(row, tuple) or len(row) != 2 for row in wheel_inventory)
+            or any(not isinstance(name, str) or Path(name).name != name or not name.endswith(".whl")
+                   for name, digest in wheel_inventory)):
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INVENTORY_INVALID")
+    if dict(wheel_inventory).get(wheel.name) != record["wheel_digest"][7:]:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH")
+    try:
+        actual_wheels = {p.name for p in wheelhouse.iterdir() if p.name.endswith(".whl")}
+    except OSError:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INVENTORY_INVALID") from None
+    if actual_wheels != {name for name, digest in wheel_inventory}:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INVENTORY_EXTRA")
+    wheels = tuple((wheelhouse / name, digest) for name, digest in wheel_inventory)
+    checked_wheel_sources(wheels, record["maintenance_binding"]["version"])
     target = namespace / record["project_key"][7:] / record["generation_key"][7:]
     reservation = canonical_json({
         "contract": "sos_project_runtime_reservation_v1", "state": "reserved",
@@ -240,6 +313,7 @@ def install_reserved_wheel(
                     "UV_TOOL_BIN_DIR": os.fspath(target / "bin"),
                     "UV_CACHE_DIR": os.fspath(target / "cache"),
                     "TMPDIR": os.fspath(target / "tmp"), "PYTHONNOUSERSITE": "1",
+                    "PYTHONDONTWRITEBYTECODE": "1",
                 }
                 def run(arguments: list[str]) -> str:
                     result = subprocess.run(arguments, env=environment, cwd=target,
@@ -267,15 +341,37 @@ def install_reserved_wheel(
                      "--find-links", os.fspath(wheelhouse), "--no-config", "--no-sources",
                      "--no-build", "--no-python-downloads", "--python", os.fspath(python),
                      os.fspath(wheel)])
+                # Derive import-hook reference bytes from the independently
+                # checked installer, never from the environment under test.
+                reference = target / "tmp" / "installer-reference"
+                run([os.fspath(uv), "venv", "--offline", "--no-config",
+                     "--no-python-downloads", "--python", os.fspath(python), os.fspath(reference)])
+                hook_root = reference / "lib/python3.12/site-packages"
+                hooks = {name: _regular_digest(hook_root / name)
+                         for name in ("_virtualenv.py", "_virtualenv.pth")}
+                inventory = verify_installed_wheels(
+                    target / "tools/sigma-operator-stack/lib/python3.12/site-packages", wheels,
+                    expected_sos_version=record["maintenance_binding"]["version"],
+                    installer_hook_digests=hooks,
+                )
                 launcher = (target / "bin" / "sos").resolve(strict=True)
                 if not launcher.is_relative_to(target / "tools"):
                     raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_LAUNCHER_MISMATCH")
                 if run([os.fspath(launcher), "--version"]) != "sos " + record["maintenance_binding"]["version"]:
                     raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_LAUNCHER_MISMATCH")
+                after = verify_installed_wheels(
+                    target / "tools/sigma-operator-stack/lib/python3.12/site-packages", wheels,
+                    expected_sos_version=record["maintenance_binding"]["version"],
+                    installer_hook_digests=hooks,
+                )
+                if after != inventory:
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INVENTORY_DRIFT")
                 _write_exclusive(generation, "payload-installed.json", canonical_json({
                     "contract": "sos_project_runtime_payload_installed_v1",
                     "identity_digest": record["identity_digest"], "runtime_ready": False,
                     "adapter_switch_performed": False,
+                    "wheel_inventory_digest": inventory["wheel_inventory_digest"],
+                    "installed_inventory_digest": inventory["installed_inventory_digest"],
                 }))
     except (OSError, subprocess.TimeoutExpired, UnicodeError):
         raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_INSTALL_FAILED") from None
@@ -304,4 +400,90 @@ def _regular_digest(path: Path) -> str:
             finally:
                 os.close(fd)
     except OSError:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH") from None
+
+
+def observed_executable_digest(command: str) -> str:
+    """Observe an existing interpreter, retaining normal venv link resolution."""
+    try:
+        return _regular_digest(Path(command).resolve(strict=True))
+    except (OSError, RuntimeError):
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PREDECESSOR_MISMATCH") from None
+
+
+def observe_verified_generation_launcher(
+    namespace: Path, project: Path, identity: object, *, repository_digest: str,
+    confirmed_plan_digest: str, wheels: tuple[tuple[Path, str], ...],
+    active: bool = False,
+) -> tuple[Path, str, str]:
+    """Read-only executable observation for the later P107 handoff.
+
+    Returns an ephemeral venv Python path, version and executable SHA-256, not
+    activation or mutation authority. The caller must revalidate under its
+    transaction locks immediately before switching. No package command is run.
+    """
+    from .project_runtime_inventory import _read, verify_installed_wheels
+    record = validate_runtime_identity(identity, **observe_project(project, repository_digest))
+    if namespace.name != "project-runtimes" or namespace.is_relative_to(project):
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_NAMESPACE_INVALID")
+    target = namespace / record["project_key"][7:] / record["generation_key"][7:]
+    if type(active) is not bool:
+        raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PLAN_INVALID")
+    try:
+        with _open_absolute(namespace, private=True), _open_absolute(target, private=True) as generation:
+            _read_exact(generation, "reservation.json", canonical_json({
+                "contract": "sos_project_runtime_reservation_v1", "state": "reserved",
+                "identity": record, "confirmed_plan_digest": confirmed_plan_digest,
+                "runtime_ready": False,
+            }))
+            reference = target / "tmp/installer-reference/lib/python3.12/site-packages"
+            hooks = {name: _regular_digest(reference / name) for name in ("_virtualenv.py", "_virtualenv.pth")}
+            executable = target / "tools/sigma-operator-stack/bin/python3"
+            with _open_absolute(executable.parent, private=False):
+                resolved = executable.resolve(strict=True)
+            if not resolved.is_relative_to(target / "python"):
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+            digest = _regular_digest(resolved)
+            if "sha256:" + digest != record["interpreter_digest"]:
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+            inventory = verify_installed_wheels(
+                target / "tools/sigma-operator-stack/lib/python3.12/site-packages", wheels,
+                expected_sos_version=record["maintenance_binding"]["version"], installer_hook_digests=hooks,
+                cache_python=resolved if active else None,
+                cache_python_sha256=digest if active else None,
+            )
+            sos_wheel = next(c for c in inventory["components"] if c["name"] == "sigma-operator-stack")
+            if "sha256:" + sos_wheel["wheel_sha256"] != record["wheel_digest"]:
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH")
+            _read_exact(generation, "payload-installed.json", canonical_json({
+                "contract": "sos_project_runtime_payload_installed_v1",
+                "identity_digest": record["identity_digest"], "runtime_ready": False,
+                "adapter_switch_performed": False,
+                "wheel_inventory_digest": inventory["wheel_inventory_digest"],
+                "installed_inventory_digest": inventory["installed_inventory_digest"],
+            }))
+            executable = target / "tools/sigma-operator-stack/bin/python3"
+            with _open_absolute(executable.parent, private=False):
+                resolved = executable.resolve(strict=True)
+            if not resolved.is_relative_to(target / "python"):
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+            config = {}
+            for line in _read(executable.parent.parent / "pyvenv.cfg", 16384).decode("utf-8").splitlines():
+                key, separator, value = line.partition("=")
+                key, value = key.strip(), value.strip()
+                if not separator or key in config:
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+                config[key] = value
+            if (set(config) != {"home", "implementation", "uv", "version_info", "include-system-site-packages"}
+                    or config["home"] != os.fspath(resolved.parent)
+                    or config["implementation"] != "CPython" or config["version_info"] != "3.12.14"
+                    or config["include-system-site-packages"] != "false"):
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+            digest = _regular_digest(resolved)
+            if "sha256:" + digest != record["interpreter_digest"]:
+                raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_INTERPRETER_MISMATCH")
+            return executable, record["maintenance_binding"]["version"], digest
+    except (OSError, RuntimeError, UnicodeError) as exc:
+        if isinstance(exc, ProjectRuntimeError):
+            raise
         raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PAYLOAD_MISMATCH") from None

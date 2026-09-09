@@ -20,6 +20,7 @@ from .client_integration import (
     read_integration_target,
 )
 from .contracts import digest_value
+from .adapter_lock import serialized_setup
 from .managed_files import (
     ManagedFileBatchError,
     ManagedFileError,
@@ -151,6 +152,7 @@ def preview_claude_setup(path: str = ".", *, launcher: LauncherBinding | None = 
         return _error_result(exc)
 
 
+@serialized_setup
 def install_claude_setup(
     path: str = ".",
     *,
@@ -221,6 +223,7 @@ def claude_setup_status(path: str = ".", *, launcher: LauncherBinding | None = N
         return _error_result(exc)
 
 
+@serialized_setup
 def recover_claude_setup(path: str = ".", *, launcher: LauncherBinding | None = None) -> TerminalResult:
     try:
         root = discover_repository_root(path)
@@ -339,6 +342,7 @@ def project_claude_package_update(
         return _error_result(exc)
 
 
+@serialized_setup
 def remove_claude_setup(
     path: str = ".",
     *,

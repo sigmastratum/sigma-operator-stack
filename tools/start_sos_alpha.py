@@ -12,9 +12,13 @@ import re
 import shutil
 import subprocess
 import sys
+import stat
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 VERSION = "0.1.0a6"
@@ -415,6 +419,132 @@ def _offline_tool_install_command(uv: str, bundle: Path, *, force: bool = False)
     return command
 
 
+@dataclass(frozen=True)
+class PreparedController:
+    """Ephemeral checked wheel import root, never a project's launcher."""
+
+    python: Path
+    packages: Path
+    interpreter_sha256: str
+    inventory: tuple[tuple[str, str], ...]
+
+    def command(self, module: str, arguments: Sequence[str]) -> list[str]:
+        if module not in {"sos", "sos.native_maintenance"}:
+            raise ValueError("unsupported controller entrypoint")
+        if (_sha256(self.python) != self.interpreter_sha256
+                or _controller_inventory(self.packages) != self.inventory):
+            raise _fail("SOS_ALPHA_CONTROLLER_CHANGED", "Prepared controller changed.",
+                        "Repeat verified disposable preparation; keep installed runtimes unchanged.")
+        return [os.fspath(self.python), "-I", "-S", "-B", "-c",
+                "import runpy,sys; root,module=sys.argv[1:3]; "
+                "sys.path.insert(0,root); sys.argv=[module]+sys.argv[3:]; "
+                "runpy.run_module(module,run_name='__main__')",
+                os.fspath(self.packages), module, *arguments]
+
+
+def _controller_inventory(packages: Path) -> tuple[tuple[str, str], ...]:
+    if packages.is_symlink() or not packages.is_dir():
+        raise _fail("SOS_ALPHA_CONTROLLER_CHANGED", "Controller directory changed.",
+                    "Repeat verified disposable preparation.")
+    result = []
+    total = 0
+    for count, path in enumerate(packages.rglob("*"), start=1):
+        if count > 60000:
+            raise _fail("SOS_ALPHA_CONTROLLER_CHANGED", "Controller inventory exceeded its bound.",
+                        "Repeat verified disposable preparation.")
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise _fail("SOS_ALPHA_CONTROLLER_CHANGED", "Controller entry changed.",
+                        "Repeat verified disposable preparation.")
+        if path.is_file():
+            size = path.stat().st_size
+            total += size
+            if size > 32 * 1024 * 1024 or total > 256 * 1024 * 1024:
+                raise _fail("SOS_ALPHA_CONTROLLER_CHANGED", "Controller file size changed.",
+                            "Repeat verified disposable preparation.")
+            result.append((path.relative_to(packages).as_posix(), _sha256(path)))
+    return tuple(sorted(result))
+
+
+def _extract_controller_wheels(bundle: Path, packages: Path, artifacts: dict[str, str]) -> None:
+    """Unpack only digest-bound root-layout wheels; never process .pth files."""
+    seen: set[str] = set()
+    total = 0
+    try:
+        for filename, expected in sorted(artifacts.items()):
+            wheel = bundle / filename
+            if wheel.is_symlink() or not wheel.is_file() or _sha256(wheel) != expected:
+                raise ValueError("wheel changed")
+            with zipfile.ZipFile(wheel) as archive:
+                members = archive.infolist()
+                if not 1 <= len(members) <= 10000:
+                    raise ValueError("wheel inventory")
+                wheel_seen = set()
+                for item in members:
+                    name = item.filename
+                    path = PurePosixPath(name)
+                    mode = item.external_attr >> 16
+                    if (not path.parts or path.is_absolute() or "\\" in name or "\x00" in name
+                            or name.rstrip("/") != str(path) or ".." in path.parts
+                            or name in wheel_seen or any(p.endswith(".data") for p in path.parts)
+                            or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}):
+                        raise ValueError("unsafe wheel member")
+                    wheel_seen.add(name)
+                    if item.is_dir():
+                        continue
+                    total += item.file_size
+                    if name in seen or len(seen) >= 30000 or total > 256 * 1024 * 1024:
+                        raise ValueError("conflicting or oversized wheels")
+                    if item.file_size > 32 * 1024 * 1024 or name.endswith((".pth", ".pyc")):
+                        raise ValueError("unsupported import hook")
+                    seen.add(name)
+                    destination = packages.joinpath(*path.parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with destination.open("xb") as output:
+                        output.write(archive.read(item))
+                    destination.chmod(0o600)
+            if _sha256(wheel) != expected:
+                raise ValueError("wheel changed")
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile):
+        raise _fail("SOS_ALPHA_CONTROLLER_WHEEL_INVALID",
+                    "The checked wheels cannot form an isolated controller.",
+                    "Keep the installed runtime unchanged and obtain the exact complete bundle.") from None
+
+
+@contextmanager
+def prepare_controller(bundle: Path, *, python: Path, interpreter_sha256: str,
+                       maintenance_handoff_json: str, runner=subprocess.run):
+    """Prepare outside shared/runtime/project state; no package manager or network.
+
+    Python must have been independently acquired and observed by the bootstrap.
+    Root-layout wheel files are directly unpacked; entrypoint scripts and .pth
+    processing are unnecessary for the isolated module invocation.
+    """
+    manifest = verify_bundle(bundle)
+    _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+    python = python.resolve(strict=True)
+    if not SHA256.fullmatch(interpreter_sha256) or _sha256(python) != interpreter_sha256:
+        raise _fail("SOS_ALPHA_CONTROLLER_PYTHON_INVALID", "Controller Python changed.",
+                    "Repeat verified disposable preparation.")
+    version = runner([str(python), "-I", "-S", "-B", "--version"],
+                     capture_output=True, text=True, check=False, timeout=15)
+    if version.returncode != 0 or version.stdout.strip() != "Python " + PYTHON_VERSION:
+        raise _fail("SOS_ALPHA_CONTROLLER_PYTHON_INVALID", "Controller Python is not pinned.",
+                    "Use the checked managed Python runtime.")
+    names = UNIVERSAL_WHEELS | PLATFORM_WHEELS[platform.system()] | {WHEEL}
+    wheels = {a["filename"]: a["sha256"] for a in manifest["artifacts"] if a["filename"] in names}
+    if set(wheels) != names:
+        raise _fail("SOS_ALPHA_CONTROLLER_WHEEL_INVALID", "Controller wheelhouse is incomplete.",
+                    "Obtain the complete checked bundle.")
+    with tempfile.TemporaryDirectory(prefix="sos-controller-") as temporary:
+        packages = Path(temporary).resolve() / "packages"
+        packages.mkdir(mode=0o700)
+        _extract_controller_wheels(bundle, packages, wheels)
+        if _sha256(python) != interpreter_sha256:
+            raise _fail("SOS_ALPHA_CONTROLLER_PYTHON_INVALID", "Controller Python changed.",
+                        "Repeat verified disposable preparation.")
+        yield PreparedController(python, packages, interpreter_sha256, _controller_inventory(packages))
+
+
 def _expected_files(system: str) -> frozenset[str]:
     return EXPECTED_FILES | NATIVE_FILES.get(system, frozenset())
 
@@ -805,23 +935,67 @@ def run_update(
     if uv_path is not None:
         _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
-    if maintenance_binding is not None:
-        _require_recorded_maintenance_binding(root, maintenance_binding)
-    sos = _installed_sos(uv, runner)
-    version = runner([os.fspath(sos), "--version"], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if version.returncode != 0 or version.stdout.strip() != f"sos {manifest['version']}":
-        raise _fail(
-            "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED",
-            "A version-changing shared package update cannot inventory every project.",
-            "Keep the installed package or use a future inventory-qualified update route.",
-        )
-    rebound = runner([os.fspath(sos), "setup", "update-all", os.fspath(root)], check=False)
-    if rebound.returncode != 0:
-        raise _fail(
-            "SOS_ALPHA_SETUP_UPDATE_FAILED",
-            "SOS did not complete the previewed project integration update.",
-            "Do not uninstall; read the typed SOS result and retry the same checked bundle.",
-        )
+    if maintenance_binding is None:
+        raise _fail("SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED", "A checked release binding is required.",
+                    "Use the canonical verified release route.")
+    _run_isolated_maintenance_controller(bundle, root, maintenance_binding, mode="update", runner=runner)
+    return root
+
+
+def _run_isolated_maintenance_controller(bundle, root, maintenance_binding, *, mode, runner,
+                                         client="codex", primary_authority_id=None,
+                                         confirmation_seed=None, expected_plan_digest=None):
+    print("Preparing a disposable checked SOS controller; existing runtimes stay unchanged.", flush=True)
+    python = Path(sys.executable).resolve(strict=True)
+    binding_json = json.dumps(maintenance_binding, sort_keys=True)
+    handoff = {key: value for key, value in maintenance_binding.items()
+               if key not in {"platform_launcher_sha256", "binding_digest",
+                              "raw_content_serialized", "absolute_paths_serialized"}}
+    handoff["contract"] = "sos_public_maintenance_handoff_v1"
+    with prepare_controller(bundle, python=python, interpreter_sha256=_sha256(python),
+                            maintenance_handoff_json=json.dumps(handoff), runner=runner) as controller:
+        arguments = ["--mode", mode, "--project", str(root),
+                     "--bundle", str(bundle.resolve(strict=True)),
+                     "--namespace", str(Path.home() / ".local/share/sigma-operator-stack/project-runtimes"),
+                     "--binding-json", binding_json,
+                     "--interpreter-digest", "sha256:" + controller.interpreter_sha256,
+                     "--client", client]
+        if primary_authority_id is not None:
+            arguments.extend(["--primary-authority", primary_authority_id])
+        if confirmation_seed is not None:
+            arguments.extend(["--confirmation-seed", confirmation_seed])
+        if expected_plan_digest is not None:
+            arguments.extend(["--expected-plan-digest", expected_plan_digest])
+        result = runner(controller.command("sos.native_maintenance", arguments), check=False, timeout=600,
+                        env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "LANG": "C.UTF-8"})
+    if result.returncode != 0:
+        raise _fail("SOS_ALPHA_RUNTIME_MAINTENANCE_STOPPED",
+                    "SOS did not complete the isolated maintenance operation.",
+                    "Read the typed controller result and use recover if requested.")
+
+
+def run_isolated_install(bundle, project, *, primary_authority_id=None,
+                         maintenance_handoff_json=None, resume_confirmation_seed=None,
+                         expected_plan_digest=None, uv_path=None, which=shutil.which,
+                         runner=subprocess.run, client="codex"):
+    validate_platform()
+    git = _required_command("git", which)
+    if client == "codex":
+        find_codex(which=which)
+    elif client != "claude-code":
+        raise _fail("SOS_ALPHA_CLIENT_UNSUPPORTED", "The requested client is not supported.",
+                    "Use codex or claude-code.")
+    manifest = verify_bundle(bundle)
+    if maintenance_handoff_json is None:
+        raise _fail("SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED", "A checked release binding is required.",
+                    "Use the canonical verified release route.")
+    binding = _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+    if uv_path is not None:
+        _admit_exact_uv(uv_path, manifest, runner)
+    root = discover_project_root(project, git, runner)
+    _run_isolated_maintenance_controller(bundle, root, binding, mode="install", runner=runner,
+        client=client, primary_authority_id=primary_authority_id,
+        confirmation_seed=resume_confirmation_seed, expected_plan_digest=expected_plan_digest)
     return root
 
 
@@ -846,13 +1020,28 @@ def run_remove(
     if uv_path is not None:
         _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
-    if maintenance_binding is not None:
-        _require_recorded_maintenance_binding(root, maintenance_binding)
-    raise _fail(
-        "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED",
-        "The shared SOS package cannot be removed without a global project inventory.",
-        "Detach project adapters individually; keep the shared package installed.",
-    )
+    if maintenance_binding is None:
+        raise _fail("SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED", "A checked release binding is required.",
+                    "Use the canonical verified release route.")
+    _run_isolated_maintenance_controller(bundle, root, maintenance_binding, mode="remove", runner=runner)
+    return root
+
+
+def run_recover(bundle, project, *, uv_path=None, maintenance_handoff_json=None,
+                which=shutil.which, runner=subprocess.run):
+    validate_platform()
+    git = _required_command("git", which)
+    uv = uv_path or _required_command("uv", which)
+    manifest = verify_bundle(bundle)
+    if uv_path is not None:
+        _admit_exact_uv(uv, manifest, runner)
+    if maintenance_handoff_json is None:
+        raise _fail("SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED", "A checked release binding is required.",
+                    "Use the canonical verified release route.")
+    binding = _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+    root = discover_project_root(project, git, runner)
+    _run_isolated_maintenance_controller(bundle, root, binding, mode="recover", runner=runner)
+    return root
 
 
 def run_detach(
@@ -871,12 +1060,11 @@ def run_detach(
     manifest = verify_bundle(bundle)
     if uv_path is not None: _admit_exact_uv(uv, manifest, runner)
     root = discover_project_root(project, git, runner)
-    if maintenance_handoff_json is not None:
-        _require_recorded_maintenance_binding(root, _maintenance_binding(bundle, manifest, maintenance_handoff_json))
-    sos = _installed_sos(uv, runner)
-    removed = runner([os.fspath(sos), "setup", "remove", client, os.fspath(root)], check=False)
-    if removed.returncode != 0:
-        raise _fail("SOS_ALPHA_SETUP_REMOVE_FAILED", "SOS did not detach the exact client adapter.", "Read the typed SOS result and run its recovery action.")
+    if maintenance_handoff_json is None:
+        raise _fail("SOS_ALPHA_MAINTENANCE_BINDING_REQUIRED", "Verified release binding is required.",
+                    "Use the canonical release route.")
+    binding = _maintenance_binding(bundle, manifest, maintenance_handoff_json)
+    _run_isolated_maintenance_controller(bundle, root, binding, mode="detach", runner=runner, client=client)
     return root
 
 
@@ -892,7 +1080,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--resume-confirmation-seed")
     parser.add_argument("--expected-plan-digest")
     parser.add_argument("--client", choices=("codex", "claude-code"), default="codex")
-    parser.add_argument("--mode", choices=("install", "detach", "update", "remove"), default="install")
+    parser.add_argument("--mode", choices=("install", "detach", "update", "remove", "recover", "test"), default="install")
     arguments = parser.parse_args(argv)
     launcher = Path(__file__).absolute()
     try:
@@ -927,7 +1115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Start from the public GitHub URL so Codex can verify and supply the binding.",
             )
         if arguments.mode == "install":
-            run_onboarding(
+            run_isolated_install(
                 launcher.parent,
                 arguments.project,
                 primary_authority_id=arguments.primary_authority,
@@ -946,13 +1134,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 uv_path=arguments.uv,
                 maintenance_handoff_json=arguments.maintenance_release_binding_json,
             )
-        else:
+        elif arguments.mode == "remove":
             run_remove(
                 launcher.parent,
                 arguments.project,
                 uv_path=arguments.uv,
                 maintenance_handoff_json=arguments.maintenance_release_binding_json,
             )
+        elif arguments.mode == "test":
+            manifest = verify_bundle(launcher.parent)
+            binding = _maintenance_binding(launcher.parent, manifest, arguments.maintenance_release_binding_json)
+            root = discover_project_root(arguments.project, _required_command("git", shutil.which), subprocess.run)
+            _run_isolated_maintenance_controller(launcher.parent, root, binding, mode="test", runner=subprocess.run)
+        else:
+            run_recover(launcher.parent, arguments.project, uv_path=arguments.uv,
+                        maintenance_handoff_json=arguments.maintenance_release_binding_json)
     except StartError as error:
         print("\nSOS alpha setup stopped.", file=sys.stderr)
         print(f"Code: {error.code}", file=sys.stderr)

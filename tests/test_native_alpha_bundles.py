@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -91,6 +92,56 @@ def _synthetic_pe(manifests: list[bytes]) -> bytes:
 
 
 class NativeAlphaBundleTests(unittest.TestCase):
+    def test_controller_unpacks_checked_code_without_import_hooks_or_shared_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wheel = root / "synthetic.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("sos/__init__.py", "")
+                archive.writestr("sos/__main__.py", "print('isolated-controller')")
+            packages = root / "packages"
+            packages.mkdir()
+            alpha._extract_controller_wheels(root, packages, {wheel.name: alpha._sha256(wheel)})
+            controller = alpha.PreparedController(Path(sys.executable), packages,
+                                                  alpha._sha256(Path(sys.executable)),
+                                                  alpha._controller_inventory(packages))
+            result = subprocess.run(controller.command("sos", []), capture_output=True,
+                                    text=True, timeout=15, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "isolated-controller\n")
+            self.assertFalse(list(packages.rglob("*.pyc")))
+            with self.assertRaises(ValueError):
+                controller.command("unapproved", [])
+            (packages / "sos/__main__.py").write_text("raise SystemExit(99)")
+            with self.assertRaises(alpha.StartError):
+                controller.command("sos", [])
+
+    def test_controller_rejects_unsafe_duplicate_hook_and_changed_wheels(self):
+        for name in ("../escape", "/escape", "sos/../../escape", "bad.pth", "bad.pyc"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                wheel = root / "synthetic.whl"
+                with zipfile.ZipFile(wheel, "w") as archive:
+                    archive.writestr(name, "bad")
+                packages = root / "packages"
+                packages.mkdir()
+                with self.assertRaises(alpha.StartError):
+                    alpha._extract_controller_wheels(root, packages, {wheel.name: alpha._sha256(wheel)})
+                self.assertEqual(list(packages.iterdir()), [])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wheels = {}
+            for name in ("one.whl", "two.whl"):
+                with zipfile.ZipFile(root / name, "w") as archive:
+                    archive.writestr("duplicate.py", "pass")
+                wheels[name] = alpha._sha256(root / name)
+            packages = root / "packages"
+            packages.mkdir()
+            with self.assertRaises(alpha.StartError):
+                alpha._extract_controller_wheels(root, packages, wheels)
+            with self.assertRaises(alpha.StartError):
+                alpha._extract_controller_wheels(root, packages, {"one.whl": "0" * 64})
+
     def test_windows_installer_builder_rejects_dirty_or_mismatched_source(self) -> None:
         builder = ROOT / "tools/build_windows_installer.py"
         with tempfile.TemporaryDirectory() as temporary:
@@ -484,7 +535,7 @@ class NativeAlphaBundleTests(unittest.TestCase):
         self.assertIn("uv_python_install_dir", joined)
         self.assertNotIn("install Python", joined)
 
-    def test_bootstrap_is_digest_bound_and_remove_cannot_acquire(self) -> None:
+    def test_bootstrap_is_digest_bound_and_maintenance_acquires_only_disposable_controller(self) -> None:
         shell = (ROOT / "installers/Install-SOS.command").read_text(encoding="utf-8")
         powershell = (ROOT / "installers/Install-SOS.ps1").read_text(encoding="utf-8")
         for digest in (
@@ -493,8 +544,10 @@ class NativeAlphaBundleTests(unittest.TestCase):
             "965816e654d8fac650b282345c89c1daff16a0cfe45e9d2d2a8f5af3fed466a4",
         ):
             self.assertIn(digest, shell + powershell)
+        self.assertIn("removal cannot acquire a runtime from the network", powershell)
+        self.assertIn('RUNTIME_ROOT="$CONTROLLER_ROOT/runtime"', shell)
+        self.assertNotIn('RUNTIME_ROOT="$HOME/', shell)
         for launcher in (shell, powershell):
-            self.assertIn("removal cannot acquire a runtime from the network", launcher)
             self.assertIn("--no-python-downloads", launcher)
         self.assertIn("invalid --primary-authority", shell)
         self.assertIn('set -- "$@" --primary-authority "$PRIMARY_AUTHORITY"', shell)
@@ -513,6 +566,117 @@ class NativeAlphaBundleTests(unittest.TestCase):
             shell.index('[ -n "$PRIMARY_AUTHORITY" ] && [ "$MODE" != "install" ]'),
             shell.index('/bin/mkdir -p "$RUNTIME_ROOT/bootstrap"'),
         )
+
+    def test_explicit_offline_controller_skips_acquisition_and_refuses_bad_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            uv = base / "uv"
+            uv.write_text('#!/bin/sh\nexit 99\n')
+            uv.chmod(0o700)
+            shell = (ROOT / "installers/Install-SOS.command").read_text()
+            for digest in ('d381f11517c66523211b0876552ff7dea5c1b4b0f13800571b35225761302fba',
+                           'e8929237934c8679686428f5a7736c7ae7a5fe7a33b0504d1b03446cdbc43c94'):
+                shell = shell.replace(digest, hashlib.sha256(uv.read_bytes()).hexdigest())
+            launcher = base / 'Install-SOS.command'
+            launcher.write_text(shell)
+            # Synthetic executable tests shell admission on both matrix Pythons.
+            python = base / 'checked-python'
+            python.write_text('#!/bin/sh\ncase "$*" in *--version) echo "Python 3.12.14"; exit 0;; esac\nexec "' + sys.executable + '" "$@"\n')
+            python.chmod(0o700)
+            (base / 'start-sos-alpha').write_text('print("offline-admitted")\n')
+            digest = hashlib.sha256(python.read_bytes()).hexdigest()
+            def run(mode, path=python, checksum=digest):
+                return subprocess.run(['/bin/sh', str(launcher), mode, str(base/'project'),
+                    '--controller-python', str(path), '--controller-python-sha256', checksum],
+                    capture_output=True, text=True, timeout=10)
+            for mode in ('remove', 'detach', 'recover', 'test'):
+                result = run(mode)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('offline-admitted', result.stdout)
+            self.assertEqual(run('remove', checksum='0'*64).returncode, 2)
+            forbidden = base / 'project-runtimes' / 'python'
+            forbidden.parent.mkdir()
+            forbidden.write_bytes(python.read_bytes())
+            forbidden.chmod(0o700)
+            self.assertEqual(run('remove', forbidden).returncode, 2)
+            linked = base / 'linked-python'
+            linked.symlink_to(python)
+            self.assertEqual(run('remove', linked).returncode, 2)
+            python.write_text('#!/bin/sh\necho "Python 3.11.14"\n')
+            self.assertEqual(run('remove', checksum=hashlib.sha256(python.read_bytes()).hexdigest()).returncode, 2)
+
+    def test_maintenance_shell_preserves_shared_runtime_before_admission(self) -> None:
+        shell = (ROOT / "installers/Install-SOS.command").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            home = base / "home"
+            home.mkdir()
+            bundle = base / "bundle"
+            bundle.mkdir()
+            uv = bundle / "uv"
+            uv.write_text(
+                '#!/bin/sh\n'
+                'printf "%s\\n" "$*" >> "$TEST_CALLS"\n'
+                '[ "$UV_NO_CACHE" = 1 ] || exit 91\n'
+                '[ "$PYTHONDONTWRITEBYTECODE" = 1 ] || exit 92\n'
+                'case "$UV_PYTHON_INSTALL_DIR" in /tmp/sos-controller.*/runtime/python|/private/tmp/sos-controller.*/runtime/python) ;; *) exit 94 ;; esac\n'
+                'if [ "$1" = python ] && [ "$2" = install ]; then touch "$UV_PYTHON_INSTALL_DIR/acquired"; exit 0; fi\n'
+                '[ "$1" = python ] && [ "$2" = find ] || exit 93\n'
+                '[ "$TEST_MISSING" = no ] || [ -f "$UV_PYTHON_INSTALL_DIR/acquired" ] || exit 1\n'
+                'printf "%s\\n" "$TEST_PYTHON"\n', encoding="utf-8")
+            uv.chmod(0o700)
+            # This is an executable synthetic shell test, not product uv evidence.
+            fixture_digest = hashlib.sha256(uv.read_bytes()).hexdigest()
+            for product_digest in (
+                "d381f11517c66523211b0876552ff7dea5c1b4b0f13800571b35225761302fba",
+                "e8929237934c8679686428f5a7736c7ae7a5fe7a33b0504d1b03446cdbc43c94",
+            ):
+                shell = shell.replace(product_digest, fixture_digest)
+            launcher = bundle / "Install-SOS.command"
+            launcher.write_text(shell, encoding="utf-8")
+            (bundle / "start-sos-alpha").write_text(
+                'import os, sys\n'
+                'from pathlib import Path\n'
+                'uv = Path(sys.argv[sys.argv.index("--uv") + 1])\n'
+                'assert uv.name == "uv-0.12.6" and uv.parent.parent.parent.name.startswith("sos-controller.")\n'
+                'Path(os.environ["TEST_DISPOSABLE"]).write_text(str(uv.parent.parent.parent))\n'
+                'print("synthetic-admission-reached")\n', encoding="utf-8")
+            runtime = home / ".local/share/sigma-operator-stack/runtime"
+
+            def snapshot():
+                return {
+                    str(p.relative_to(home)): (
+                        p.lstat().st_mode, p.lstat().st_mtime_ns,
+                        p.read_bytes() if p.is_file() else None,
+                    ) for p in home.rglob("*")
+                }
+
+            for installed in (False, True):
+                if installed:
+                    (runtime / "bootstrap").mkdir(parents=True)
+                    (runtime / "bootstrap/uv-0.12.6").write_bytes(b"retained-a5-bootstrap")
+                    (runtime / "user-sentinel").write_bytes(b"other-project-runtime")
+                for mode in ("install", "update", "detach", "remove", "recover", "test"):
+                    for missing in ("yes", "no"):
+                        with self.subTest(installed=installed, mode=mode, missing=missing):
+                            before = snapshot()
+                            calls = base / "calls"
+                            calls.write_text("", encoding="utf-8")
+                            env = dict(os.environ, HOME=str(home), TEST_CALLS=str(calls),
+                                       TEST_MISSING=missing, TEST_PYTHON=sys.executable,
+                                       TEST_DISPOSABLE=str(base / "disposable"))
+                            result = subprocess.run(
+                                ["/bin/sh", str(launcher), mode, str(base / "project")],
+                                env=env, capture_output=True, text=True, timeout=10)
+                            self.assertEqual(result.returncode, 0,
+                                             result.stdout + result.stderr)
+                            self.assertEqual(snapshot(), before)
+                            self.assertEqual(len(calls.read_text().splitlines()), 3 if missing == "yes" else 1)
+                            self.assertIn("--no-python-downloads", calls.read_text())
+                            if missing == "yes":
+                                self.assertIn("--no-bin", calls.read_text())
+                            self.assertIn("synthetic-admission-reached", result.stdout)
+                            self.assertFalse(Path((base / "disposable").read_text()).exists())
 
     def test_checked_uv_must_match_manifest_digest_and_exact_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -617,51 +781,74 @@ class NativeAlphaBundleTests(unittest.TestCase):
             with (
                 mock.patch.object(alpha, "validate_platform"),
                 mock.patch.object(alpha, "verify_bundle", return_value={"version": alpha.VERSION}),
+                mock.patch.object(alpha, "_maintenance_binding", return_value={"synthetic": True}),
+                mock.patch.object(alpha, "_run_isolated_maintenance_controller") as controller,
             ):
                 alpha.run_update(
                     bundle,
                     project,
                     which=lambda name: f"/bin/{name}",
                     runner=runner,
+                    maintenance_handoff_json="synthetic",
                 )
-            self.assertIn(
-                [str(tool_bin / "sos"), "setup", "update-all", str(project)],
-                calls,
-            )
+            controller.assert_called_once_with(bundle, project, {"synthetic": True}, mode="update", runner=runner)
+            self.assertFalse(any(str(tool_bin / "sos") in call for call in calls))
             self.assertFalse(any(call[1:3] == ["tool", "install"] for call in calls))
 
-    def test_remove_blocks_without_global_inventory_and_never_calls_package_manager(self) -> None:
+    def test_cross_version_update_dispatches_checked_controller_not_shared_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "project"; project.mkdir()
+            bundle = root / "bundle"; bundle.mkdir()
+            calls = []
+            def runner(arguments, **kwargs):
+                calls.append(arguments)
+                if arguments[-1] == "--version":
+                    return subprocess.CompletedProcess(arguments, 0, "sos 0.1.0a5\n", "")
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+            controller = mock.Mock(interpreter_sha256="a" * 64)
+            controller.command.return_value = ["synthetic-controller"]
+            with mock.patch.object(alpha, "validate_platform"), \
+                 mock.patch.object(alpha, "verify_bundle", return_value={"version": alpha.VERSION}), \
+                 mock.patch.object(alpha, "_maintenance_binding", return_value={"synthetic": True}), \
+                 mock.patch.object(alpha, "discover_project_root", return_value=project), \
+                 mock.patch.object(alpha, "_installed_sos", return_value=root / "old-sos"), \
+                 mock.patch.object(alpha, "prepare_controller") as prepare, \
+                 mock.patch.object(alpha, "_require_recorded_maintenance_binding") as legacy_gate:
+                prepare.return_value.__enter__.return_value = controller
+                self.assertEqual(alpha.run_update(bundle, project, maintenance_handoff_json="{}",
+                    which=lambda name: "/bin/" + name, runner=runner), project)
+                prepare.assert_called_once()
+                legacy_gate.assert_not_called()
+                self.assertEqual(controller.command.call_args.args[0], "sos.native_maintenance")
+            self.assertEqual(calls, [["synthetic-controller"]])
+
+    def test_remove_dispatches_checked_controller_and_never_calls_package_manager(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bundle = root / "bundle"
             project = root / "project"
-            tool_bin = root / "bin"
-            for path in (bundle, project, tool_bin):
+            for path in (bundle, project):
                 path.mkdir()
-            (tool_bin / "sos").write_text("launcher", encoding="utf-8")
-            (tool_bin / "sos").chmod(0o755)
             calls: list[list[str]] = []
 
             def runner(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
                 calls.append(arguments)
                 if arguments[-2:] == ["rev-parse", "--show-toplevel"]:
                     return subprocess.CompletedProcess(arguments, 0, str(project) + "\n", "")
-                if arguments[1:] == ["tool", "dir", "--bin"]:
-                    return subprocess.CompletedProcess(arguments, 0, str(tool_bin) + "\n", "")
                 return subprocess.CompletedProcess(arguments, 0, "", "")
-
-            with (
-                mock.patch.object(alpha, "validate_platform"),
-                mock.patch.object(alpha, "verify_bundle"),
-            ):
-                with self.assertRaises(alpha.StartError) as raised:
-                    alpha.run_remove(
-                        bundle,
-                        project,
-                        which=lambda name: f"/bin/{name}",
-                        runner=runner,
-                    )
-            self.assertEqual(raised.exception.code, "SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED")
+            controller = mock.Mock(interpreter_sha256="a" * 64)
+            controller.command.return_value = ["synthetic-controller"]
+            with mock.patch.object(alpha, "validate_platform"), \
+                 mock.patch.object(alpha, "verify_bundle", return_value={"version": alpha.VERSION}), \
+                 mock.patch.object(alpha, "_maintenance_binding", return_value={"synthetic": True}), \
+                 mock.patch.object(alpha, "discover_project_root", return_value=project), \
+                 mock.patch.object(alpha, "prepare_controller") as prepare:
+                prepare.return_value.__enter__.return_value = controller
+                self.assertEqual(alpha.run_remove(bundle, project, maintenance_handoff_json="{}",
+                    which=lambda name: f"/bin/{name}", runner=runner), project)
+            self.assertEqual(controller.command.call_args.args[0], "sos.native_maintenance")
+            self.assertIn("remove", controller.command.call_args.args[1])
             self.assertFalse(any(call[1:3] == ["tool", "uninstall"] for call in calls))
             self.assertFalse(any("setup" in call for call in calls))
 
@@ -810,6 +997,18 @@ class NativeAlphaBundleTests(unittest.TestCase):
         )
         self.assertEqual(preflight["status"], "owner_required")
         self.assertEqual(preflight["reasons"], ["SOS_CURRENT_WORK_NOT_CONFIGURED"])
+
+    def test_smoke_preserves_stale_only_with_complete_valid_control_plane(self):
+        for name, contract in (("status", "sos_workspace_status_v1"), ("preflight", "sos_preflight_result_v1")):
+            payload = {"contract": contract, "status": "stale", "reasons": ["SOS_SOURCE_STATUS_CHANGED"],
+                       "details": {"control_plane_integrity": "valid", "application_observation_complete": True}}
+            observed = smoke._validate_observation(name, 2, payload)
+            self.assertEqual(observed["status"], "stale")
+            for bad in ({"details": {"control_plane_integrity": "invalid", "application_observation_complete": True}},
+                        {"details": {"control_plane_integrity": "valid", "application_observation_complete": False}},
+                        {"reasons": ["SOS_SUCCESSOR_SEQUENCE_INCOMPLETE"]}, {"reasons": []}):
+                with self.subTest(name=name, bad=bad), self.assertRaises(RuntimeError):
+                    smoke._validate_observation(name, 2, {**payload, **bad})
 
 
 if __name__ == "__main__":

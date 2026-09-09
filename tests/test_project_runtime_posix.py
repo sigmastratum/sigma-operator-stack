@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -13,9 +14,20 @@ from sos.contracts import digest_value
 from sos.maintenance_binding import MaintenanceLauncherBinding
 from sos.project_runtime import ProjectRuntimeError, runtime_identity
 from sos.platforms.project_runtime_posix import observe_project, reserve_generation, install_reserved_wheel
+from sos.platforms.project_runtime_posix import observe_verified_generation_launcher
+from sos.platforms.project_runtime_posix import observed_executable_digest
 
 
 class RuntimeReservationTests(unittest.TestCase):
+    def test_executable_observation_preserves_venv_link_support_and_refuses_missing(self):
+        executable = self.base / "synthetic-python"
+        executable.write_bytes(b"synthetic executable bytes")
+        alias = self.base / "python3"
+        alias.symlink_to(executable)
+        self.assertEqual(observed_executable_digest(str(alias)), hashlib.sha256(executable.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(ProjectRuntimeError, "PREDECESSOR_MISMATCH"):
+            observed_executable_digest(str(self.base / "missing-python"))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -56,6 +68,19 @@ class RuntimeReservationTests(unittest.TestCase):
         self.assertEqual((self.legacy / "sentinel").read_bytes(), b"legacy runtime remains unchanged")
         self.assertEqual(target.stat().st_mode & 0o777, 0o700)
         self.assertEqual((target / "reservation.json").stat().st_mode & 0o777, 0o600)
+
+    def test_reserved_generation_cannot_provide_verified_launcher(self):
+        target = self.reserve()
+        before = (target / "reservation.json").read_bytes()
+        with mock.patch("sos.platforms.project_runtime_posix.subprocess.run") as run:
+            with self.assertRaises(ProjectRuntimeError):
+                observe_verified_generation_launcher(
+                    self.namespace, self.project, self.identity(), repository_digest=self.repo,
+                    confirmed_plan_digest=self.plan, wheels=(),
+                )
+            run.assert_not_called()
+        self.assertEqual((target / "reservation.json").read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in target.iterdir()), ["reservation.json"])
 
     def test_two_projects_have_separate_generations(self):
         other = self.base / "second-project"
@@ -153,7 +178,11 @@ class RuntimeReservationTests(unittest.TestCase):
         uv = self.base / "uv"
         wheel = self.base / "synthetic.whl"
         uv.write_bytes(b"synthetic uv")
-        wheel.write_bytes(b"synthetic wheel")
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("sigma_operator_stack-0.1.0a6.dist-info/METADATA",
+                             "Name: sigma-operator-stack\nVersion: 0.1.0a6\n")
+            archive.writestr("sigma_operator_stack-0.1.0a6.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+            archive.writestr("sigma_operator_stack-0.1.0a6.dist-info/RECORD", "")
         old = self.identity()
         identity = runtime_identity(
             **observe_project(self.project, self.repo),
@@ -164,7 +193,8 @@ class RuntimeReservationTests(unittest.TestCase):
         target = self.reserve(identity=identity)
         args = dict(repository_digest=self.repo, confirmed_plan_digest=self.plan,
                     uv=uv, uv_sha256=hashlib.sha256(uv.read_bytes()).hexdigest(),
-                    wheel=wheel, wheelhouse=self.base)
+                    wheel=wheel, wheelhouse=self.base,
+                    wheel_inventory=((wheel.name, hashlib.sha256(wheel.read_bytes()).hexdigest()),))
         with mock.patch("sos.platforms.project_runtime_posix.subprocess.run",
                         return_value=mock.Mock(returncode=1)) as run:
             with self.assertRaises(ProjectRuntimeError):

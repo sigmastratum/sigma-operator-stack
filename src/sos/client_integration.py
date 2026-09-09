@@ -8,12 +8,15 @@ import os
 import re
 import stat
 import tomllib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .contracts import digest_value
+from .adapter_lock import serialized_setup
 from .managed_files import (
     ManagedFileBatchError,
     ManagedFileError,
@@ -143,6 +146,25 @@ class CodexBootstrapSetup:
                 "package_version": self.manifest["package_version"],
             }
         )
+
+
+_ROLLBACK_TARGET_MODES = ContextVar("sos_rollback_target_modes", default=None)
+
+
+@contextmanager
+def restoring_target_modes(root, targets):
+    modes = {}
+    for row in targets:
+        name, mode = row["target"], row["before_mode"]
+        if (name not in {"AGENTS.md", ".codex/config.toml", "CLAUDE.md", ".mcp.json"}
+                or name in modes or type(mode) is not int or not 0 <= mode <= 0o777):
+            raise ClientIntegrationError("SOS_CODEX_SETUP_TARGET_DRIFT", Status.STALE)
+        modes[name] = mode
+    token = _ROLLBACK_TARGET_MODES.set((root, modes))
+    try:
+        yield
+    finally:
+        _ROLLBACK_TARGET_MODES.reset(token)
 
 
 def read_integration_target(root: Path, relative_path: str) -> tuple[bytes, bool, int]:
@@ -551,6 +573,7 @@ def preview_codex_setup(
         return _setup_error_result(exc)
 
 
+@serialized_setup
 def install_codex_setup(
     path: str = ".",
     *,
@@ -758,12 +781,14 @@ def project_codex_package_update(
         return _setup_error_result(exc)
 
 
+@serialized_setup
 def update_codex_setup(
     path: str = ".",
     *,
     confirmed: bool,
     controlling_tty_observed: bool = False,
     launcher: LauncherBinding | None = None,
+    allow_source_stale: bool = False,
 ) -> TerminalResult:
     """Replace an exact stale setup through one previewed owner action."""
     if not confirmed:
@@ -808,7 +833,12 @@ def update_codex_setup(
             details,
         )
     current = workspace_status(path)
-    if require_current_after_update and current.status != Status.SUCCESS:
+    admitted_transition_stale = (
+        allow_source_stale is True and current.status == Status.STALE
+        and current.details.get("application_observation_complete") is True
+        and current.details.get("control_plane_integrity") == "valid"
+    )
+    if require_current_after_update and current.status != Status.SUCCESS and not admitted_transition_stale:
         rollback = remove_codex_setup(
             path,
             confirmed=True,
@@ -829,6 +859,7 @@ def update_codex_setup(
     return TerminalResult(_RESULT_CONTRACT, Status.SUCCESS, ("SOS_CODEX_SETUP_UPDATED",), details)
 
 
+@serialized_setup
 def recover_codex_setup(
     path: str = ".", *, launcher: LauncherBinding | None = None
 ) -> TerminalResult:
@@ -868,6 +899,7 @@ def recover_codex_setup(
         return _setup_error_result(exc)
 
 
+@serialized_setup
 def remove_codex_setup(
     path: str = ".",
     *,
@@ -1160,6 +1192,9 @@ def _read_setup_target(root: Path, target: str) -> tuple[bytes, bool]:
 
 def _read_setup_target_mode(root: Path, target: str, existed: bool, default: int) -> int:
     if not existed:
+        restoration = _ROLLBACK_TARGET_MODES.get()
+        if restoration is not None and restoration[0] == root:
+            return restoration[1].get(target, default)
         return default
     try:
         service = current_platform_services()

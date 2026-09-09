@@ -24,7 +24,7 @@ SPEC.loader.exec_module(alpha)
 class AlphaOnboardingTests(unittest.TestCase):
     def test_main_routes_explicit_claude_install_and_detach(self) -> None:
         binding = '{"contract":"synthetic"}'
-        with mock.patch.object(alpha, "run_onboarding") as onboarding:
+        with mock.patch.object(alpha, "run_isolated_install") as onboarding:
             status = alpha.main(
                 [
                     "--client",

@@ -75,9 +75,9 @@ def _exact_sos(uv: Path) -> str:
     return os.fspath(sos)
 
 
-def _run(sos: str, arguments: list[str]) -> tuple[int, dict[str, object]]:
+def _run(sos: str | list[str], arguments: list[str]) -> tuple[int, dict[str, object]]:
     completed = subprocess.run(
-        [sos, *arguments, "--json"],
+        [*([sos] if isinstance(sos, str) else sos), *arguments, "--json"],
         check=False,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -155,6 +155,19 @@ def _validate_observation(
     contract = payload.get("contract")
     status = payload.get("status")
     reasons = payload.get("reasons")
+    if name in {"status", "preflight"} and status == "stale":
+        allowed = {"SOS_SOURCE_TREE_CHANGED", "SOS_SOURCE_STATUS_CHANGED", "SOS_QUALIFICATION_STALE"}
+        details = payload.get("details", {})
+        complete = (details.get("application_observation_complete",
+                    name == "preflight" and details.get("contract") == "sos_recovery_view_v1"
+                    and details.get("status") in {"stale", "success"}) if isinstance(details, dict) else False)
+        if (exit_code != 2 or contract != ("sos_workspace_status_v1" if name == "status" else "sos_preflight_result_v1")
+                or not isinstance(reasons, list) or not reasons or not set(reasons) <= allowed
+                or not isinstance(details, dict) or details.get("control_plane_integrity") != "valid"
+                or complete is not True):
+            raise RuntimeError("SOS_NATIVE_SMOKE_OBSERVATION_INVALID")
+        return {"name": name, "exit_code": exit_code, "contract": contract,
+                "status": status, "reasons": reasons}
     expected = {
         "status": (0, "sos_workspace_status_v1", "success", _EXPECTED_STATUS_REASONS),
         "setup_status": (
@@ -163,6 +176,8 @@ def _validate_observation(
             "success",
             ["SOS_CODEX_SETUP_INSTALLED"],
         ),
+        "claude_setup_status": (2, "sos_claude_code_setup_result_v1", "owner_required",
+                                ["SOS_INTERACTIVE_USER_HANDOFF_REQUIRED"]),
     }
     if name == "check":
         if exit_code != 0 or contract != "sos_check_plan_v1":
@@ -210,15 +225,30 @@ def _validate_observation(
     }
 
 
-def smoke(project: Path, uv: Path) -> dict[str, object]:
-    sos = _exact_sos(uv)
+def smoke(project: Path, uv: Path | None, *, python: Path | None = None,
+          python_sha256: str | None = None, clients=("codex",)) -> dict[str, object]:
+    if not clients or len(set(clients)) != len(clients) or not set(clients) <= {"codex", "claude-code"}:
+        raise RuntimeError("SOS_NATIVE_SMOKE_CLIENT_INVALID")
+    if python is None:
+        sos = _exact_sos(uv)
+    else:
+        if (not python.is_absolute() or not python_sha256
+                or hashlib.sha256(python.read_bytes()).hexdigest() != python_sha256):
+            raise RuntimeError("SOS_NATIVE_SMOKE_TOOL_BINDING_INVALID")
+        sos = [str(python), "-I", "-B", "-m", "sos"]
+        version = subprocess.run([*sos, "--version"], capture_output=True, text=True,
+                                 check=False, timeout=30, env=_closed_environment())
+        if version.returncode != 0 or version.stdout.strip() != f"sos {VERSION}":
+            raise RuntimeError("SOS_NATIVE_SMOKE_VERSION_MISMATCH")
     observations: list[dict[str, object]] = []
-    for name, arguments in (
-        ("status", ["status", str(project)]),
-        ("setup_status", ["setup", "status", "codex", str(project)]),
+    queries = [("status", ["status", str(project)])]
+    queries.extend(("setup_status" if client == "codex" else "claude_setup_status",
+                    ["setup", "status", client, str(project)]) for client in clients)
+    queries.extend((
         ("preflight", ["preflight", str(project)]),
         ("check", ["check", str(project)]),
-    ):
+    ))
+    for name, arguments in queries:
         exit_code, payload = _run(sos, arguments)
         observations.append(_validate_observation(name, exit_code, payload))
     material = json.dumps(observations, sort_keys=True, separators=(",", ":")).encode()
@@ -236,16 +266,24 @@ def smoke(project: Path, uv: Path) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--uv", required=True, type=Path)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--uv", type=Path)
+    group.add_argument("--python", type=Path)
+    parser.add_argument("--python-sha256")
+    parser.add_argument("--client", choices=("codex", "claude-code"), action="append")
     parser.add_argument("project", nargs="?", type=Path, default=Path.cwd())
     args = parser.parse_args()
     try:
-        report = smoke(args.project, args.uv)
+        report = smoke(args.project, args.uv, python=args.python, python_sha256=args.python_sha256,
+                       clients=tuple(args.client or ("codex",)))
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        reason = str(error)
+        if not reason.startswith("SOS_NATIVE_SMOKE_") or not all(c.isupper() or c == "_" for c in reason):
+            reason = "SOS_NATIVE_SMOKE_PROCESS_FAILED"
         report = {
             "contract": "sos_native_alpha_smoke_v1",
             "status": "failed",
-            "reason": str(error),
+            "reason": reason,
             "absolute_paths_serialized": False,
             "raw_content_serialized": False,
             "network_performed": False,

@@ -26,6 +26,7 @@ from .client_integration import (
     read_integration_control_file,
     recover_codex_setup,
     update_codex_setup,
+    restoring_target_modes,
 )
 from .contracts import digest_value
 from .integration_inventory import unknown_integration_files
@@ -102,6 +103,10 @@ def prepare_atomic_switch(
     switch_nonce: str | None = None,
 ) -> AtomicSwitchPlan:
     root = discover_repository_root(path)
+    try:
+        _require_terminal_switches(root)
+    except PlatformServiceError as exc:
+        raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_INVENTORY_INVALID", Status.INVALID) from exc
     current = workspace_status(os.fspath(root))
     repository_id = current.details.get("repository_id")
     if current.status in {Status.INVALID, Status.BLOCKED, Status.UNSUPPORTED}:
@@ -147,6 +152,10 @@ def execute_atomic_switch(
     confirmed: bool,
     controlling_tty_observed: bool,
     fault: Callable[[str], None] | None = None,
+    admission_check: Callable[[], None] | None = None,
+    target_check: Callable[[], None] | None = None,
+    rollback_check: Callable[[], None] | None = None,
+    rollback_targets: tuple | list = (),
 ) -> TerminalResult:
     # Preview and an unattended refusal are strictly read-only.  In particular,
     # do not create the coordinator lock until mutation has been authorized.
@@ -173,6 +182,10 @@ def execute_atomic_switch(
                 confirmed=confirmed,
                 controlling_tty_observed=controlling_tty_observed,
                 fault=fault,
+                admission_check=admission_check,
+                target_check=target_check,
+                rollback_check=rollback_check,
+                rollback_targets=rollback_targets,
             )
     except (AtomicSwitchError, RepositoryError) as exc:
         return _result(getattr(exc, "status", Status.INVALID), exc.reason, plan, recovery_required=False)
@@ -191,6 +204,10 @@ def _execute_atomic_switch_locked(
     confirmed: bool,
     controlling_tty_observed: bool,
     fault: Callable[[str], None] | None = None,
+    admission_check: Callable[[], None] | None = None,
+    target_check: Callable[[], None] | None = None,
+    rollback_check: Callable[[], None] | None = None,
+    rollback_targets: tuple | list = (),
 ) -> TerminalResult:
     if not confirmed:
         return plan.preview()
@@ -214,6 +231,15 @@ def _execute_atomic_switch_locked(
             )
         if _read_plan(plan.root, plan.switch_id) is not None:
             raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_RECOVERY_REQUIRED")
+        if admission_check is not None:
+            admission_check()
+        if plan.predecessor == plan.successor:
+            # No adapter bytes change for an identical verified launcher. Do not
+            # create a mutation journal that could strand a no-op on interruption.
+            if target_check is not None:
+                target_check()
+            return _result(Status.SUCCESS, "SOS_ATOMIC_ADAPTER_SWITCH_ALREADY_CURRENT",
+                           plan, recovery_required=False)
         _write_plan(plan)
         journal_started = True
         _append_event(plan, "prepared")
@@ -227,12 +253,15 @@ def _execute_atomic_switch_locked(
                     source=plan.predecessor,
                     target=plan.successor,
                     fault=fault,
+                    allow_source_stale=target_check is not None,
                 )
             _call_fault(fault, f"after_client:{client}")
             _append_event(plan, "client_applied", client)
         _call_fault(fault, "before_commit")
         if _configured_clients(plan.root, plan.successor) != plan.clients:
             raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE)
+        if target_check is not None:
+            target_check()
         _append_event(plan, "committed")
         return _result(
             Status.SUCCESS,
@@ -249,7 +278,7 @@ def _execute_atomic_switch_locked(
                 recovery_required=False,
             )
         try:
-            _rollback_switch(plan, fault=fault)
+            _rollback_switch(plan, fault=fault, rollback_check=rollback_check, rollback_targets=rollback_targets)
         except Exception as rollback_exc:
             return _result(
                 Status.BLOCKED,
@@ -282,6 +311,8 @@ def recover_atomic_switch(
     *,
     predecessor: LauncherBinding,
     successor: LauncherBinding,
+    rollback_check: Callable[[], None] | None = None,
+    rollback_targets: tuple | list = (),
 ) -> TerminalResult:
     try:
         root = discover_repository_root(path)
@@ -291,6 +322,8 @@ def recover_atomic_switch(
                 switch_id,
                 predecessor=predecessor,
                 successor=successor,
+                rollback_check=rollback_check,
+                rollback_targets=rollback_targets,
             )
     except (RepositoryError, PlatformServiceError):
         return TerminalResult(
@@ -307,6 +340,8 @@ def _recover_atomic_switch_locked(
     *,
     predecessor: LauncherBinding,
     successor: LauncherBinding,
+    rollback_check: Callable[[], None] | None = None,
+    rollback_targets: tuple | list = (),
 ) -> TerminalResult:
     try:
         root = discover_repository_root(path)
@@ -322,7 +357,12 @@ def _recover_atomic_switch_locked(
         _verify_bindings(plan)
         events = _read_events(root, switch_id, plan.plan_digest, plan.clients)
         if not events:
-            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_JOURNAL_INVALID")
+            # Plan publication may precede a process crash before the first
+            # event. Only unchanged, fully bound predecessors can reconcile it.
+            if _configured_clients(root, predecessor) != plan.clients:
+                raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE)
+            _append_event(plan, "prepared")
+            events = _read_events(root, switch_id, plan.plan_digest, plan.clients)
         if events[-1]["state"] == "committed":
             for client in plan.clients:
                 if not _is_bound(root, client, successor):
@@ -341,6 +381,8 @@ def _recover_atomic_switch_locked(
                     raise AtomicSwitchError(
                         "SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE
                     )
+            if rollback_check is not None:
+                rollback_check()
             return _result(
                 Status.SUCCESS,
                 "SOS_ATOMIC_ADAPTER_SWITCH_ALREADY_ROLLED_BACK",
@@ -348,7 +390,7 @@ def _recover_atomic_switch_locked(
                 recovery_required=False,
                 rolled_back=True,
             )
-        _rollback_switch(plan)
+        _rollback_switch(plan, rollback_check=rollback_check, rollback_targets=rollback_targets)
         return _result(
             Status.SUCCESS,
             "SOS_ATOMIC_ADAPTER_SWITCH_ROLLBACK_RECOVERED",
@@ -363,6 +405,26 @@ def _recover_atomic_switch_locked(
             (getattr(exc, "reason", "SOS_ATOMIC_ADAPTER_SWITCH_INVALID"),),
             {"switch_id": switch_id, "package_manager_calls": 0},
         )
+
+
+def _require_terminal_switches(root: Path) -> None:
+    service = current_platform_services()
+    relative = ".sigma/integrations/atomic-switches"
+    with service.open_repository(root) as repository:
+        if service.observe_object(repository, relative).kind == "absent":
+            return
+        listing = service.enumerate_directory_bounded(repository, relative, 64)
+    for entry in listing.entries:
+        if entry.name == "coordinator.lock" and entry.kind == "regular":
+            continue
+        if entry.kind != "directory":
+            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_JOURNAL_INVALID")
+        plan = _read_plan(root, entry.name)
+        if plan is None:
+            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_RECOVERY_REQUIRED")
+        events = _read_events(root, entry.name, plan["plan_digest"], tuple(plan["clients"]))
+        if not events or events[-1]["state"] not in {"committed", "rolled_back"}:
+            raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_RECOVERY_REQUIRED")
 
 
 def _configured_clients(root: Path, binding: LauncherBinding) -> tuple[str, ...]:
@@ -393,6 +455,7 @@ def _switch_client(
     source: LauncherBinding,
     target: LauncherBinding,
     fault: Callable[[str], None] | None = None,
+    allow_source_stale: bool = False,
 ) -> None:
     if client == "codex":
         result = update_codex_setup(
@@ -400,6 +463,7 @@ def _switch_client(
             confirmed=True,
             controlling_tty_observed=True,
             launcher=target,
+            allow_source_stale=allow_source_stale,
         )
         if result.status != Status.SUCCESS:
             raise AtomicSwitchError(result.reasons[0], result.status)
@@ -427,9 +491,13 @@ def _rollback_switch(
     plan: AtomicSwitchPlan,
     *,
     fault: Callable[[str], None] | None = None,
+    rollback_check: Callable[[], None] | None = None,
+    rollback_targets: tuple | list = (),
 ) -> None:
     events = _read_events(plan.root, plan.switch_id, plan.plan_digest, plan.clients)
     if events and events[-1]["state"] == "rolled_back":
+        if rollback_check is not None:
+            rollback_check()
         return
     rollback_events = [event for event in events if event["state"] == "client_rolled_back"]
     completed = [event["client"] for event in rollback_events]
@@ -441,14 +509,19 @@ def _rollback_switch(
     if not any(event["state"] == "rollback_started" for event in events):
         _append_event(plan, "rollback_started")
     for client in rollback_order[len(completed) :]:
-        _ensure_binding(
-            plan.root,
-            client,
-            desired=plan.predecessor,
-            alternative=plan.successor,
-        )
+        with restoring_target_modes(plan.root, rollback_targets):
+            _ensure_binding(
+                plan.root,
+                client,
+                desired=plan.predecessor,
+                alternative=plan.successor,
+            )
         _call_fault(fault, f"after_rollback_client:{client}")
         _append_event(plan, "client_rolled_back", client)
+    if rollback_check is not None:
+        rollback_check()
+    if _configured_clients(plan.root, plan.predecessor) != plan.clients:
+        raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE)
     _append_event(plan, "rolled_back")
 
 
@@ -699,11 +772,7 @@ def _validate_plan(value: object) -> None:
             raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_PLAN_INVALID", Status.INVALID)
         if (
             _DIGEST.fullmatch(binding["binding_digest"]) is None
-            or len(binding["executable_sha256"]) != 64
-            or any(
-                character not in "0123456789abcdef"
-                for character in binding["executable_sha256"]
-            )
+            or _DIGEST.fullmatch(binding["executable_sha256"]) is None
         ):
             raise AtomicSwitchError(
                 "SOS_ATOMIC_ADAPTER_SWITCH_PLAN_INVALID", Status.INVALID
@@ -809,14 +878,9 @@ def _call_fault(fault: Callable[[str], None] | None, point: str) -> None:
 
 @contextmanager
 def _switch_lock(root: Path):
-    service = current_platform_services()
-    with service.open_repository(root) as repository:
-        with service.acquire_repository_lock(
-            repository,
-            None,
-            relative_lock_path=".sigma/integrations/atomic-switches/coordinator.lock",
-        ):
-            yield
+    from .adapter_lock import adapter_mutation_lock
+    with adapter_mutation_lock(root):
+        yield
 
 
 def _result(

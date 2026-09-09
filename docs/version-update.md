@@ -68,7 +68,30 @@ sos setup update codex PATH
 Restart Codex and run `sos qualify PATH` separately. Do not delete `.sigma` or
 run regeneration to hide an update failure.
 
-## Shared tool environment
+## Project-isolated native runtime (a6 candidate)
+
+This section describes the unpublished a6 candidate, not an activated release
+pointer. Release admission and native platform replay remain separate gates.
+
+The checked native launcher prepares a disposable controller without replacing
+shared a5. A version-changing update shows one plan for the successor generation,
+all installed supported adapters and preserved data. Exact confirmation precedes
+permanent provisioning. Verified adapters switch through the shared P107 journal.
+Another project still bound to a5 continues using its unchanged environment.
+
+Fresh a6 installs also use project-isolated generations. Same-version maintenance
+verifies the active generation; it does not reinstall it. An identical adapter
+binding requires no mutation journal. Smoke uses the active verified interpreter,
+not PATH, and preserves truthful stale/not_verified qualification states.
+
+Interrupted mutation blocks ordinary maintenance. Use `recover` on the freshly
+verified exact bundle, with its release binding and a separate confirmation.
+Recovery reconstructs disk records; it does not depend on a previous extraction
+or Python process. Incomplete provisioning may remain recovery-required with its
+owned files retained. It must not be repaired by overwriting markers or manually
+changing adapter configuration.
+
+## Historical shared tool environment
 
 One user-level SOS installation may serve more than one project. SOS does not
 keep a global project inventory in this alpha. Qualification is bound to the
@@ -77,7 +100,7 @@ the new package independently reports its previous qualification as stale and
 requires its own setup rebind and qualification. No receipt, accepted record
 or currentness state is shared between projects.
 
-Because that global inventory is absent, the successor launcher refuses a
+Because that global inventory is absent, shared-environment maintenance refuses a
 version-changing package update and any package removal with
 `SOS_SHARED_ENVIRONMENT_INVENTORY_REQUIRED`. An exact same-version maintenance
 run may repair every adapter recorded in the selected repository through
@@ -92,8 +115,11 @@ rebind.
 Detach a project integration through the verified launcher before considering
 application removal. Select the exact client (`codex` or `claude-code`); detach
 never removes the shared application or managed tool environment. Application
-removal remains blocked until a future route can prove a global project
-inventory.
+removal from that shared environment remains blocked without a global project
+inventory. The a6 candidate's project-isolated `remove` instead shows one aggregate
+preview, detaches all supported adapters after confirmation and deletes only the
+selected owned generation. It preserves shared a5 and all predecessor generations.
+Partial deletion is recovery-required, not rollback.
 
 Detach deletes only exact SOS-managed client integration bytes after a
 preview and confirmation. It preserves `.sigma`, accepted records,
@@ -104,6 +130,6 @@ foreign managed bytes, or an unverifiable target stops without overwrite.
 
 ## Deferred
 
-Automatic update discovery, background network calls, side-by-side package
-slots, automatic binary rollback, schema migration, vector-memory activation
+Automatic update discovery, background network calls, automatic predecessor
+pruning, automatic binary rollback, schema migration, vector-memory activation
 and fleet rollout are outside this alpha contract.

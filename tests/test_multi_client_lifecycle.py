@@ -26,7 +26,7 @@ class MultiClientLifecycleTests(unittest.TestCase):
         return temporary, root
 
     def binding(self):
-        return LauncherBinding("/opt/synthetic/sos-python", "0.2.0a1", "c" * 64)
+        return LauncherBinding("/opt/synthetic/sos-python", "0.2.0a1", "sha256:" + "c" * 64)
 
     def test_fresh_claude_bootstrap_is_one_plan_and_hands_off(self) -> None:
         temporary, root = self.project(); self.addCleanup(temporary.cleanup)
@@ -85,7 +85,7 @@ class MultiClientLifecycleTests(unittest.TestCase):
         coexistence = project_package_update(str(root), launcher=self.binding())
         self.assertEqual(coexistence.status, "success")
         self.assertEqual(set(coexistence.details["client_bindings"]), {"codex", "claude-code"})
-        successor = LauncherBinding("/opt/synthetic/sos-python-v2", "0.2.0a2", "d" * 64)
+        successor = LauncherBinding("/opt/synthetic/sos-python-v2", "0.2.0a2", "sha256:" + "d" * 64)
         stale = project_package_update(str(root), launcher=successor)
         self.assertEqual(stale.status, "success")
         self.assertEqual(stale.reasons, ("SOS_UPDATE_AVAILABLE",))

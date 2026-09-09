@@ -54,7 +54,7 @@ class ProjectRuntimeAdapterIsolationTests(unittest.TestCase):
         )
         # A synthetic binding tests adapter routing only. This reserved location
         # contains no installed Python and is deliberately not marked ready.
-        successor = LauncherBinding(str(generation / "python"), "0.1.0a6", "b" * 64)
+        successor = LauncherBinding(str(generation / "python"), "0.1.0a6", "sha256:" + "b" * 64)
         return fixture, first, second, predecessor, successor, generation, legacy
 
     def test_switch_and_detach_one_project_preserve_other_and_runtime_material(self):
