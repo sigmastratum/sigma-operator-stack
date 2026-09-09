@@ -14,6 +14,8 @@ import subprocess
 import sys
 import stat
 import tempfile
+import signal
+import time
 import zipfile
 from contextlib import contextmanager
 from collections.abc import Callable, Sequence
@@ -98,7 +100,7 @@ UV_VERSION_OUTPUT = re.compile(
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class StartError(Exception):
     code: str
     problem: str
@@ -535,7 +537,9 @@ def prepare_controller(bundle: Path, *, python: Path, interpreter_sha256: str,
     if set(wheels) != names:
         raise _fail("SOS_ALPHA_CONTROLLER_WHEEL_INVALID", "Controller wheelhouse is incomplete.",
                     "Obtain the complete checked bundle.")
-    with tempfile.TemporaryDirectory(prefix="sos-controller-") as temporary:
+    temporary = tempfile.mkdtemp(prefix="sos-controller-")
+    retain = False
+    try:
         packages = Path(temporary).resolve() / "packages"
         packages.mkdir(mode=0o700)
         _extract_controller_wheels(bundle, packages, wheels)
@@ -543,6 +547,91 @@ def prepare_controller(bundle: Path, *, python: Path, interpreter_sha256: str,
             raise _fail("SOS_ALPHA_CONTROLLER_PYTHON_INVALID", "Controller Python changed.",
                         "Repeat verified disposable preparation.")
         yield PreparedController(python, packages, interpreter_sha256, _controller_inventory(packages))
+    except StartError as error:
+        retain = error.code == "SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED"
+        raise
+    finally:
+        if not retain:
+            shutil.rmtree(temporary)
+
+
+def _controller_group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # Lack of observation is not proof that a group exited.
+
+
+def _stop_controller_group(process, *, grace=5.0):
+    """Only our new session; never match processes by executable or path."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            return False
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            process.poll()
+            if not _controller_group_exists(process.pid):
+                process.wait()
+                return True
+            time.sleep(0.05)
+    process.poll()
+    return not _controller_group_exists(process.pid)
+
+
+def _supervise_controller(command, *, env, popen=subprocess.Popen, grace=5.0):
+    """Human wait has no deadline. Individual worker operations remain bounded.
+
+    Inherited stdin is a TTY; the new session isolates cancellation from other
+    project MCP servers. A nonzero child result is never a rollback claim.
+    """
+    process = None
+    spawning = False
+    previous = {}
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            previous[sig] = signal.signal(sig, interrupted)
+        spawning = True
+        process = popen(command, env=env, start_new_session=True)
+        spawning = False
+        code = process.wait()
+        if _controller_group_exists(process.pid):
+            if not _stop_controller_group(process, grace=grace):
+                raise _fail("SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED",
+                    "Controller descendants are not confirmed stopped; preparation is retained.",
+                    "Do not repeat maintenance until process termination is verified.")
+            raise _fail("SOS_ALPHA_CONTROLLER_DESCENDANTS_INTERRUPTED",
+                        "Controller exited with running descendants.",
+                        "Inspect the durable transition before further maintenance.")
+        return subprocess.CompletedProcess(command, code)
+    except (KeyboardInterrupt, subprocess.SubprocessError, OSError):
+        # Ignore repeated cancellation while reaping our group. Never write a
+        # guessed terminal state into the product journal from the supervisor.
+        for sig in previous:
+            signal.signal(sig, signal.SIG_IGN)
+        if spawning and process is None:
+            # Popen can be interrupted after fork but before returning its
+            # handle. Without a registered group, termination is unproven.
+            raise _fail("SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED",
+                "Controller creation was interrupted; preparation is retained.",
+                "Verify process termination before repeating maintenance.") from None
+        if process is not None and not _stop_controller_group(process, grace=grace):
+            raise _fail("SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED",
+                "Controller termination is unverified; preparation is retained.",
+                "Do not repeat maintenance until process termination is verified.") from None
+        raise _fail("SOS_ALPHA_CONTROLLER_INTERRUPTED", "The controller was interrupted.",
+                    "Inspect the durable transition; use official recovery if pending.") from None
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 def _expected_files(system: str) -> frozenset[str]:
@@ -966,8 +1055,30 @@ def _run_isolated_maintenance_controller(bundle, root, maintenance_binding, *, m
             arguments.extend(["--confirmation-seed", confirmation_seed])
         if expected_plan_digest is not None:
             arguments.extend(["--expected-plan-digest", expected_plan_digest])
-        result = runner(controller.command("sos.native_maintenance", arguments), check=False, timeout=600,
-                        env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "LANG": "C.UTF-8"})
+        command = controller.command("sos.native_maintenance", arguments)
+        environment = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "LANG": "C.UTF-8"}
+        try:
+            result = (_supervise_controller(command, env=environment) if runner is subprocess.run
+                      else runner(command, check=False, env=environment))
+            if result.returncode not in {0, 2}:
+                raise _fail("SOS_ALPHA_CONTROLLER_INTERRUPTED", "Controller exited without a normal terminal result.",
+                            "Inspect durable state before any further maintenance.")
+        except StartError as error:
+            # Diagnostics cannot mutate the journal or adopt a different binding.
+            observation = {"status": "blocked", "reasons": [error.code],
+                           "details": {"transition_state": "unknown"}}
+            if error.code != "SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED":
+                try:
+                    readback = subprocess.run(controller.command("sos.native_maintenance",
+                        [*arguments, "--observe-only"]), env=environment, stdin=subprocess.DEVNULL,
+                        capture_output=True, text=True, check=False, timeout=30)
+                    value = json.loads(readback.stdout)
+                    if readback.returncode == 0 and value.get("status") == "blocked":
+                        observation["details"] = value["details"]
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    pass
+            print(json.dumps(observation, sort_keys=True), flush=True)
+            raise
     if result.returncode != 0:
         raise _fail("SOS_ALPHA_RUNTIME_MAINTENANCE_STOPPED",
                     "SOS did not complete the isolated maintenance operation.",
@@ -1154,6 +1265,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Code: {error.code}", file=sys.stderr)
         print(f"Problem: {error.problem}", file=sys.stderr)
         print(f"Fix: {error.correction}", file=sys.stderr)
+        return 3 if error.code == "SOS_ALPHA_CONTROLLER_PROCESSES_UNRESOLVED" else 2
+    except (subprocess.SubprocessError, KeyboardInterrupt):
+        print(json.dumps({"status": "blocked", "reasons": ["SOS_ALPHA_CONTROLLER_FAILED"],
+                          "details": {"transition_state": "unknown"}}), flush=True)
         return 2
     except OSError:
         print("\nSOS alpha setup stopped.", file=sys.stderr)

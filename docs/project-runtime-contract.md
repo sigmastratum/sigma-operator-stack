@@ -217,6 +217,17 @@ a5 environment, PATH, shell profile or system Python is changed. The disposable
 controller is cleaned on normal exit. Permanent generations are created only
 after exact confirmation.
 
+The interactive controller has no whole-session deadline: time spent awaiting
+the owner's answer never confirms or cancels a plan automatically. Interpreter,
+inventory, provisioning and smoke operations retain their individual deadlines.
+Cancellation targets only the controller's newly created process group, with
+bounded graceful and forced termination. If termination cannot be confirmed,
+disposable preparation is retained and maintenance is blocked. Diagnostic
+readback never modifies transition journals or claims a rollback. A pending
+transition requires official recovery using its original exact release binding;
+matching the unpublished version number alone does not grant recovery authority.
+Best-effort stage messages are progress, not proof of a committed transition.
+
 ## Disposable controller and fresh-process reconstruction
 
 Controller preparation verifies the extraction's manifest/release handoff and

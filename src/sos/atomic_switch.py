@@ -258,11 +258,15 @@ def _execute_atomic_switch_locked(
             _call_fault(fault, f"after_client:{client}")
             _append_event(plan, "client_applied", client)
         _call_fault(fault, "before_commit")
+        # Progress is not a terminal receipt and does not change journal state.
+        from .result import report_progress
+        report_progress("verifying_clients")
         if _configured_clients(plan.root, plan.successor) != plan.clients:
             raise AtomicSwitchError("SOS_ATOMIC_ADAPTER_SWITCH_TARGET_DRIFT", Status.STALE)
         if target_check is not None:
             target_check()
         _append_event(plan, "committed")
+        report_progress("adapter_committed")
         return _result(
             Status.SUCCESS,
             "SOS_ATOMIC_ADAPTER_SWITCH_COMMITTED",

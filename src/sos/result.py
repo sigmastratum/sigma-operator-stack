@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any
 
+
+def report_progress(stage: str) -> None:
+    """Best-effort static stage label, never an authoritative receipt."""
+    try:
+        print("SOS stage: " + stage, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
 
 class Status(StrEnum):
     INVALID = "invalid"
@@ -45,4 +53,3 @@ class TerminalResult:
 def highest_status(statuses: list[Status]) -> Status:
     observed = set(statuses)
     return next(status for status in STATUS_PRECEDENCE if status in observed)
-

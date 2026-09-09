@@ -82,7 +82,27 @@ case "$(uname -s)" in
   *) echo "SOS_PLATFORM_UNSUPPORTED: this installer supports Linux and macOS only." >&2; exit 2 ;;
 esac
 CONTROLLER_ROOT=""
+CONTROLLER_RUNNING=0
+CONTROLLER_PID=""
+stop_controller() {
+  trap '' INT HUP TERM
+  if [ -n "$CONTROLLER_PID" ]; then
+    kill -TERM "$CONTROLLER_PID" 2>/dev/null || true
+    set +e
+    wait "$CONTROLLER_PID"
+    STOP_STATUS=$?
+    set -e
+    if [ "$STOP_STATUS" -ne 3 ] && [ "$STOP_STATUS" -lt 128 ]; then
+      CONTROLLER_RUNNING=0
+    fi
+  fi
+  exit "$1"
+}
 cleanup_controller() {
+  if [ "$CONTROLLER_RUNNING" -ne 0 ]; then
+    echo "SOS_ALPHA_CONTROLLER_RETAINED: process termination is not confirmed." >&2
+    return
+  fi
   case "$CONTROLLER_ROOT" in
     /tmp/sos-controller.*|/private/tmp/sos-controller.*) /bin/rm -rf -- "$CONTROLLER_ROOT" ;;
   esac
@@ -123,8 +143,10 @@ fi
 case "$(uname -s)" in Darwin) CONTROLLER_BASE="/private/tmp" ;; *) CONTROLLER_BASE="/tmp" ;; esac
 CONTROLLER_ROOT=$(/usr/bin/mktemp -d "$CONTROLLER_BASE/sos-controller.XXXXXX")
 trap cleanup_controller EXIT
-trap 'exit 130' INT
-trap 'exit 143' HUP TERM
+trap 'stop_controller 130' INT
+trap 'stop_controller 143' HUP TERM
+# Conservatively retain bootstrap on interruption during acquisition as well.
+CONTROLLER_RUNNING=1
 RUNTIME_ROOT="$CONTROLLER_ROOT/runtime"
 UV="$RUNTIME_ROOT/bootstrap/uv-0.12.6"
 PYTHON_ROOT="$RUNTIME_ROOT/python"
@@ -186,8 +208,18 @@ fi
 set -- "$@" "$PROJECT"
 
 set +e
-"$@"
+CONTROLLER_RUNNING=1
+exec 3<&0
+"$@" <&3 &
+CONTROLLER_PID=$!
+wait "$CONTROLLER_PID"
 STATUS=$?
+CONTROLLER_PID=""
+exec 3<&-
+if [ "$STATUS" -ne 3 ] && [ "$STATUS" -lt 128 ]; then
+  CONTROLLER_RUNNING=0
+fi
+if [ "$STATUS" -eq 3 ]; then STATUS=2; fi
 set -e
 
 exit "$STATUS"

@@ -31,7 +31,7 @@ from .platforms.project_runtime_posix import (
 from .platforms.project_runtime_inventory import checked_wheel_sources
 from .project_runtime import ProjectRuntimeError, validate_runtime_identity, transition_event, validate_transition_chain
 from .repository import discover_repository_root
-from .result import Status, TerminalResult
+from .result import Status, TerminalResult, report_progress
 from .workspace import workspace_status, project_workspace_application
 
 
@@ -372,7 +372,7 @@ def prepare_runtime_transition(path, *, namespace, identity, predecessor, uv, uv
 def _lock(root):
     service = current_platform_services()
     with service.open_repository(root) as repository:
-        with service.acquire_repository_lock(repository, None,
+        with service.acquire_repository_lock(repository, 2.0,
                 relative_lock_path=".sigma/lifecycle/runtime-transition.lock"):
             yield
 
@@ -384,6 +384,7 @@ def _event(root, rows, state):
         predecessor_receipt_digest=plan["original_receipt_digest"], identity_digest=plan["identity"]["identity_digest"],
         previous=row["events"][-1] if row["events"] else None))
     publish_integration_control_file(root, _LEDGER, canonical_json(rows))
+    report_progress(state)
 
 
 def _result(state, plan):
@@ -453,6 +454,7 @@ def execute_runtime_transition(plan, *, confirmed_plan_digest=None, controlling_
                         or _hash(_original(plan.root)[0]) != p["original_receipt_digest"]):
                     raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_PREVIEW_STALE")
             def postcheck():
+                report_progress("verifying_targets")
                 verify_adapter_targets(plan.root, p["targets"], after=True)
                 current = workspace_status(str(plan.root))
                 if (current.details.get("application_fingerprint") != p["after_application_fingerprint"]

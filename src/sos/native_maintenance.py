@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 from . import __version__
-from .result import Status
+from .result import Status, report_progress
 from .contracts import digest_value
 from .maintenance_binding import MaintenanceLauncherBinding, MaintenanceBindingError
 from .project_runtime import runtime_identity, ProjectRuntimeError
@@ -147,9 +148,42 @@ def main(argv=None):
     parser.add_argument("--primary-authority")
     parser.add_argument("--confirmation-seed")
     parser.add_argument("--expected-plan-digest")
+    parser.add_argument("--observe-only", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         binding = _parse(args.binding_json)
+        if args.observe_only:
+            # Diagnostic only: retain the exact durable state, never reconcile it.
+            root, _bundle, _release, _files, _wheels = _release_inputs(
+                args.project, bundle=args.bundle, binding=binding)
+            rows, _ = _history(root)
+            removal = removal_record(root)
+            intent = read_install_intent(Path(args.namespace), root)
+            state = "no_transition_record"
+            pending = False
+            if intent is not None:
+                if not isinstance(intent, dict) or not isinstance(intent.get("plan"), dict):
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_HISTORY_INVALID")
+                identity = intent["plan"].get("identity")
+                if not isinstance(identity, dict):
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_HISTORY_INVALID")
+                state = intent.get("state", "unknown")
+                if (not isinstance(state, str) or state not in {"preparing", "provisioned", "committed"}
+                        or identity.get("maintenance_binding") != binding):
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_HISTORY_INVALID")
+                pending = state != "committed"
+            if rows:
+                if rows[-1]["plan"]["identity"]["maintenance_binding"] != binding:
+                    raise ProjectRuntimeError("SOS_PROJECT_RUNTIME_HISTORY_INVALID")
+                state = rows[-1]["events"][-1]["state"]
+                pending = state not in {"committed", "rolled_back", "aborted"}
+            if removal is not None:
+                state = removal["state"]
+                pending = state != "removed"
+            print(json.dumps({"status": "blocked", "reasons": ["SOS_CONTROLLER_READ_ONLY_OBSERVATION"],
+                "details": {"transition_state": state, "recovery_required": pending,
+                            "terminal_success_claimed": False}}, sort_keys=True), flush=True)
+            return 0
         if args.mode == "recover":
             root, bundle, release, files, wheels = _release_inputs(args.project, bundle=args.bundle, binding=binding)
             intent = read_install_intent(Path(args.namespace), root)
@@ -246,8 +280,10 @@ def main(argv=None):
         prompt = ("Remove this exact project runtime? [y/N] " if args.mode == "remove"
                   else "Apply this exact runtime and adapter transition? [y/N] ")
         print(prompt, end="", flush=True)
+        report_progress("awaiting_confirmation")
         if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
             return 2
+        report_progress("applying_confirmed_plan")
         result = (execute_native_install(plan, confirmed_plan_digest=plan.payload["plan_digest"],
                                          controlling_tty_observed=True)
                   if isinstance(plan, NativeInstallPlan) else
@@ -267,8 +303,9 @@ def main(argv=None):
     except (ProjectRuntimeError, MaintenanceBindingError) as error:
         print(json.dumps({"status": "blocked", "reasons": [error.reason]}), flush=True)
         return 2
-    except (OSError, ValueError, RuntimeError):
-        print(json.dumps({"status": "blocked", "reasons": ["SOS_PROJECT_RUNTIME_CONTROLLER_FAILED"]}), flush=True)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        print(json.dumps({"status": "blocked", "reasons": ["SOS_PROJECT_RUNTIME_CONTROLLER_FAILED"],
+                          "details": {"transition_state": "unknown"}}), flush=True)
         return 2
 
 

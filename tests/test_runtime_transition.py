@@ -25,6 +25,33 @@ from sos.result import TerminalResult, Status
 
 
 class RuntimeTransitionTests(unittest.TestCase):
+    def test_closed_progress_stream_cannot_undo_committed_transition(self):
+        from unittest.mock import Mock
+        from sos.runtime_transition import _history
+        _fixture, root, _other, _old, plan, _reserve, _install = self.scenario()
+        with patch("sos.result.sys.stderr", Mock(write=Mock(side_effect=BrokenPipeError()))):
+            result = self.execute(plan)
+        self.assertEqual(result.status, Status.SUCCESS)
+        self.assertEqual(_history(root)[0][-1]["events"][-1]["state"], "committed")
+
+    def test_crash_after_client_applied_recovers_without_changing_other_project(self):
+        fixture, root, other, old, plan, _reserve, _install = self.scenario()
+        before = snapshot(other)
+        def crash(stage):
+            if stage == "before_commit":
+                raise atomic_fixtures.SyntheticCrash()
+        with self.assertRaises(atomic_fixtures.SyntheticCrash):
+            self.execute(plan, fault=crash)
+        from sos.runtime_transition import _history
+        self.assertEqual(_history(root)[0][-1]["events"][-1]["state"], "switching")
+        result = recover_runtime_transition(self.reload(plan), confirmed=True)
+        self.assertEqual(result.status, Status.BLOCKED, result.to_dict())
+        self.assertEqual(result.reasons, ("SOS_PROJECT_RUNTIME_ROLLED_BACK",))
+        self.assertFalse(result.details["recovery_required"])
+        self.assertEqual(_history(root)[0][-1]["events"][-1]["state"], "rolled_back")
+        fixture.assert_bound(root, old)
+        self.assertEqual(snapshot(other), before)
+
     def test_source_stale_requires_explicit_transition_and_complete_valid_observation(self):
         import sos.client_integration as client
         for allowed, state, complete, expected in (

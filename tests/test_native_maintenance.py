@@ -2,6 +2,7 @@
 
 import io
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,58 @@ from sos.maintenance_binding import MaintenanceLauncherBinding
 
 
 class NativeMaintenanceTests(unittest.TestCase):
+    def test_operation_timeout_returns_blocked_without_traceback(self):
+        import subprocess
+        args = ["--mode", "update", "--project", "synthetic", "--bundle", "bundle",
+                "--namespace", "namespace", "--binding-json", "{}",
+                "--interpreter-digest", "sha256:" + "a"*64]
+        with patch.object(native, "prepare_native_update", side_effect=subprocess.TimeoutExpired("synthetic", 0.01)), \
+             patch.object(native.sys, "stdout", io.StringIO()) as output:
+            self.assertEqual(native.main(args), 2)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["details"]["transition_state"], "unknown")
+
+    def test_observation_rejects_malformed_intent_without_traceback(self):
+        args = ["--mode", "update", "--observe-only", "--project", "synthetic", "--bundle", "bundle",
+                "--namespace", "namespace", "--binding-json", "{}",
+                "--interpreter-digest", "sha256:" + "a"*64]
+        for intent in ([], {"plan": None}, {"plan": {"identity": []}},
+                       {"plan": {"identity": {}}, "state": []}):
+            with self.subTest(intent=intent), \
+                 patch.object(native, "_release_inputs", return_value=(Path("synthetic"), None, None, {}, ())), \
+                 patch.object(native, "read_install_intent", return_value=intent), \
+                 patch.object(native, "_history", return_value=([], None)), \
+                 patch.object(native, "removal_record", return_value=None), \
+                 patch.object(native.sys, "stdout", io.StringIO()) as output:
+                self.assertEqual(native.main(args), 2)
+                self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+
+    def test_observation_preserves_pending_and_committed_journal_states(self):
+        args = ["--mode", "update", "--observe-only", "--project", "synthetic", "--bundle", "bundle",
+                "--namespace", "namespace", "--binding-json", "{}",
+                "--interpreter-digest", "sha256:" + "a"*64]
+        release = SimpleNamespace(version="0.1.0a6", payload=lambda: {})
+        for state, pending in (("switching", True), ("recovery_required", True), ("committed", False)):
+            rows = [{"plan": {"identity": {"maintenance_binding": {}}}, "events": [{"state": state}]}]
+            before = json.dumps(rows)
+            with patch.object(native, "_release_inputs", return_value=(Path("synthetic"), Path("bundle"), release, {}, ())), \
+                 patch.object(native, "read_install_intent", return_value=None), \
+                 patch.object(native, "_history", return_value=(rows, None)), \
+                 patch.object(native, "removal_record", return_value=None), \
+                 patch.object(native, "execute_runtime_transition") as execute, \
+                 patch.object(native, "recover_runtime_transition") as recover, \
+                 patch.object(native.sys, "stdout", io.StringIO()) as output:
+                self.assertEqual(native.main(args), 0)
+                result = json.loads(output.getvalue())
+                self.assertEqual(result["status"], "blocked")
+                self.assertEqual(result["details"]["transition_state"], state)
+                self.assertEqual(result["details"]["recovery_required"], pending)
+                self.assertFalse(result["details"]["terminal_success_claimed"])
+                execute.assert_not_called()
+                recover.assert_not_called()
+            self.assertEqual(json.dumps(rows), before)
+
     def test_fresh_recovery_returns_success_exit_only_after_confirmation(self):
         args = ["--mode", "recover", "--project", "synthetic", "--bundle", "bundle",
                 "--namespace", "namespace", "--binding-json", "{}",

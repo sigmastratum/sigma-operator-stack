@@ -53,7 +53,7 @@ def adapter_mutation_lock(root):
         return
     service = current_platform_services()
     with service.open_repository(root) as repository:
-        with service.acquire_repository_lock(repository, None,
+        with service.acquire_repository_lock(repository, 2.0,
                 relative_lock_path=".sigma/integrations/atomic-switches/coordinator.lock"):
             token = _HELD.set(held | {key})
             try:
