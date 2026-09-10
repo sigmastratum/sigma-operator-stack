@@ -145,8 +145,6 @@ CONTROLLER_ROOT=$(/usr/bin/mktemp -d "$CONTROLLER_BASE/sos-controller.XXXXXX")
 trap cleanup_controller EXIT
 trap 'stop_controller 130' INT
 trap 'stop_controller 143' HUP TERM
-# Conservatively retain bootstrap on interruption during acquisition as well.
-CONTROLLER_RUNNING=1
 RUNTIME_ROOT="$CONTROLLER_ROOT/runtime"
 UV="$RUNTIME_ROOT/bootstrap/uv-0.12.6"
 PYTHON_ROOT="$RUNTIME_ROOT/python"
@@ -187,8 +185,22 @@ else
   set -e
   if [ "$PYTHON_STATUS" -ne 0 ]; then
     echo "SOS acquisition: installing the pinned managed Python 3.12.14 runtime."
+    set +e
     "$UV" python install --no-config --no-progress --no-bin --no-registry --install-dir "$PYTHON_ROOT" 3.12.14
+    ACQUISITION_STATUS=$?
+    set -e
+    if [ "$ACQUISITION_STATUS" -ne 0 ]; then
+      echo "SOS_ALPHA_PYTHON_ACQUISITION_FAILED: the pinned managed Python runtime could not be acquired; verify network availability and retry the unchanged checked bundle." >&2
+      exit 2
+    fi
+    set +e
     PYTHON=$("$UV" python find --no-config --managed-python --no-python-downloads 3.12.14)
+    PYTHON_STATUS=$?
+    set -e
+    if [ "$PYTHON_STATUS" -ne 0 ]; then
+      echo "SOS_ALPHA_PYTHON_ACQUISITION_INVALID: the acquired managed Python runtime could not be resolved; discard this preparation and retry the unchanged checked bundle." >&2
+      exit 2
+    fi
   fi
 fi
 

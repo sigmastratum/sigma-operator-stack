@@ -678,6 +678,44 @@ class NativeAlphaBundleTests(unittest.TestCase):
                             self.assertIn("synthetic-admission-reached", result.stdout)
                             self.assertFalse(Path((base / "disposable").read_text()).exists())
 
+    def test_python_acquisition_failure_is_typed_without_false_controller_retention(self) -> None:
+        shell = (ROOT / "installers/Install-SOS.command").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            bundle = base / "bundle"
+            bundle.mkdir()
+            uv = bundle / "uv"
+            uv.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = python ] && [ \"$2\" = find ]; then exit 1; fi\n"
+                "if [ \"$1\" = python ] && [ \"$2\" = install ]; then exit 71; fi\n"
+                "exit 72\n",
+                encoding="utf-8",
+            )
+            uv.chmod(0o700)
+            fixture_digest = hashlib.sha256(uv.read_bytes()).hexdigest()
+            for product_digest in (
+                "d381f11517c66523211b0876552ff7dea5c1b4b0f13800571b35225761302fba",
+                "e8929237934c8679686428f5a7736c7ae7a5fe7a33b0504d1b03446cdbc43c94",
+            ):
+                shell = shell.replace(product_digest, fixture_digest)
+            launcher = bundle / "Install-SOS.command"
+            launcher.write_text(shell, encoding="utf-8")
+            (bundle / "start-sos-alpha").write_text(
+                "raise AssertionError('controller must not start')\n", encoding="utf-8"
+            )
+
+            result = subprocess.run(
+                ["/bin/sh", str(launcher), "install", str(base / "project")],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("SOS_ALPHA_PYTHON_ACQUISITION_FAILED", result.stderr)
+            self.assertNotIn("SOS_ALPHA_CONTROLLER_RETAINED", result.stderr)
+
     def test_checked_uv_must_match_manifest_digest_and_exact_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             uv = Path(temporary) / "uv"
