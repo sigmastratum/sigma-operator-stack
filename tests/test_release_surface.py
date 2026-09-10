@@ -99,8 +99,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
             'cd "$RUNNER_TEMP/existing"',
             "sha256sum -c SHA256SUMS",
-            "SOS-Linux-0.1.0a6.zip",
-            "SOS-macOS-0.1.0a6.tar.gz",
+            "SOS-Linux-0.1.0a5.zip",
+            "SOS-macOS-0.1.0a5.tar.gz",
             "--json isDraft",
         ):
             self.assertIn(required, workflow)
@@ -227,11 +227,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertLess(preserve, checkout)
         self.assertLess(checkout, execute)
         self.assertIn(
-            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a6-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a5-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
         self.assertNotIn(
-            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a6-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a5-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
 
@@ -449,7 +449,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
     def test_alpha_scope_issue_is_local_public_safe_draft(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs/alpha-scope-issue.md").read_text(encoding="utf-8")
-        self.assertIn("Community alpha scope and known limitations — 0.1.0a6", text)
+        self.assertIn("Community alpha scope and known limitations — 0.1.0a5", text)
         self.assertIn("Remote creation and pinning remain", text)
         self.assertIn("## Exact test requested", text)
         self.assertIn("Stars, clones, views, forks and", text)
@@ -469,26 +469,6 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             "adfd7fdf5e5270748244c4a8ecb8bb1a22b5282f1864dec0217133738c4ad89c",
             "547f3d229ffb9d7d6b77dcf3ea869c7591a135c9f003fac333704cb311701ae8",
             "6ac14b7f3e05c2348dfe189312648dffc402846b42a9def12c3431623974111c",
-        ):
-            self.assertIn(value, text)
-        self.assertIn(
-            "Install SOS in my current project. Show me the preview before changing it.",
-            text,
-        )
-
-    def test_a6_release_notes_bind_exact_qualified_artifacts(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        text = (root / "docs" / "release-notes-0.1.0a6.md").read_text(
-            encoding="utf-8"
-        )
-        for value in (
-            "154a9dfdf3e014a0443ada8f1dca5e796477bafb",
-            "aab1a509e95e44cbf817abf0a94428c3d1f798ac",
-            "782e1fce7b3209dd627a0bb81f9028fb56edc35ce0ebd82ea3ec72cf60f3af20",
-            "33fb2df159e38afabb8c19560eeec5ec6780ab07e26739fbc4e375062cbe6c0c",
-            "2c4062e5f235d2613aca0ece40076a0901beeaaffd88693aa64efd3aea138f1e",
-            "b728cd5012a4438cf7477251b36026d1b086ada9bae082b92a2f220688da9fa5",
-            "9ab3364f5c01b926a8642e3eeaaeecacd56d3f78e06c22bee541d0455e7e1f65",
         ):
             self.assertIn(value, text)
         self.assertIn(

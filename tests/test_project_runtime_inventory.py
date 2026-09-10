@@ -13,7 +13,6 @@ import sys
 import unittest
 import zipfile
 from pathlib import Path
-from unittest import mock
 
 from sos.platforms.project_runtime_inventory import verify_installed_wheels, _CACHE_CHECK
 from sos.project_runtime import ProjectRuntimeError
@@ -134,19 +133,10 @@ class RuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(self.cache_worker(source, modified).returncode, 2)
 
     def active_options(self):
-        # The cache worker needs the complete setup-python installation. Its
-        # hosted-runner parent is root-owned, unlike a managed SOS runtime, so
-        # cache-specific tests inject only the already computed executable
-        # observation. POSIX ownership and symlink checks have separate tests.
+        # A managed standalone interpreter needs its adjacent standard library;
+        # copying only its executable is not a runnable interpreter fixture.
         python = Path(sys.executable).resolve()
         return {"cache_python": python, "cache_python_sha256": hashlib.sha256(python.read_bytes()).hexdigest()}
-
-    def verify_active(self, **changes):
-        options = self.active_options()
-        with mock.patch(
-                "sos.platforms.project_runtime_inventory.observed_executable_digest",
-                return_value=options["cache_python_sha256"]):
-            return self.verify(**(options | changes))
 
     def test_active_cache_matches_recompiled_checked_source_without_execution(self):
         initial = self.verify()
@@ -154,7 +144,7 @@ class RuntimeInventoryTests(unittest.TestCase):
         for optimize in (0, 1, 2):
             py_compile.compile(str(source), doraise=True, optimize=optimize)
         before = {str(p): p.read_bytes() for p in self.site.rglob("*") if p.is_file()}
-        result = self.verify_active()
+        result = self.verify(**self.active_options())
         self.assertEqual(result, initial)
         self.assertEqual(before, {str(p): p.read_bytes() for p in self.site.rglob("*") if p.is_file()})
         with self.assertRaisesRegex(ProjectRuntimeError, "EXTRA"):
@@ -164,6 +154,7 @@ class RuntimeInventoryTests(unittest.TestCase):
         source = self.site / "sos/__init__.py"
         cache = Path(py_compile.compile(str(source), doraise=True))
         good = cache.read_bytes()
+        options = self.active_options()
         # Preserve the valid header; replace the executable body.
         source.write_bytes(b"raise RuntimeError('synthetic foreign bytecode')\n")
         py_compile.compile(str(source), doraise=True)
@@ -171,24 +162,21 @@ class RuntimeInventoryTests(unittest.TestCase):
         source.write_bytes(self.files["sos/__init__.py"])
         cache.write_bytes(good[:16] + foreign)
         with self.assertRaisesRegex(ProjectRuntimeError, "CACHE_INVALID"):
-            self.verify_active()
+            self.verify(**options)
         cache.rename(cache.with_name("unknown.cpython-312.pyc"))
         with self.assertRaisesRegex(ProjectRuntimeError, "CACHE_INVALID"):
-            self.verify_active()
+            self.verify(**options)
 
     def test_active_cache_wrong_interpreter_and_symlink_refuse(self):
         cache = Path(py_compile.compile(str(self.site / "sos/__init__.py"), doraise=True))
         options = self.active_options()
-        with mock.patch(
-                "sos.platforms.project_runtime_inventory.observed_executable_digest",
-                return_value=options["cache_python_sha256"]):
-            with self.assertRaisesRegex(ProjectRuntimeError, "INTERPRETER_MISMATCH"):
-                self.verify(**(options | {"cache_python_sha256": "0" * 64}))
-            foreign = self.root / "cache.pyc"
-            cache.rename(foreign)
-            cache.symlink_to(foreign)
-            with self.assertRaises(ProjectRuntimeError):
-                self.verify(**options)
+        with self.assertRaisesRegex(ProjectRuntimeError, "INTERPRETER_MISMATCH"):
+            self.verify(**(options | {"cache_python_sha256": "0" * 64}))
+        foreign = self.root / "cache.pyc"
+        cache.rename(foreign)
+        cache.symlink_to(foreign)
+        with self.assertRaises(ProjectRuntimeError):
+            self.verify(**options)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

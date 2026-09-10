@@ -19,7 +19,7 @@ Codex verifies the release and prepares the installation. You see one project
 preview and confirm before project files change. The installer manages Python,
 `uv`, and dependencies; you do not need to install them or repair PATH.
 
-**Current installable Community alpha: `0.1.0a6`. Linux is the primary
+**Current installable Community alpha: `0.1.0a5`. Linux is the primary
 supported path.** Also available: unsigned experimental macOS 14+ Apple Silicon
 control plane; an explicit **Open Anyway** approval may be needed.
 Windows 11 x86_64 pending Store lifecycle — no Windows install claim yet.
@@ -36,7 +36,7 @@ Windows 11 x86_64 pending Store lifecycle — no Windows install claim yet.
 ![SOS installation and fresh-session recovery with unconfigured work and unverified checks](demo/recovery-terminal.png)
 
 The [current narrated demo](demo/recovery-demo.mp4) and
-[text transcript](demo/transcript.md) show the predecessor `0.1.0a5` Linux installation:
+[text transcript](demo/transcript.md) show the `0.1.0a5` Linux installation:
 URL-only discovery, release verification, one preview, human confirmation,
 and genuinely fresh-session recovery.
 

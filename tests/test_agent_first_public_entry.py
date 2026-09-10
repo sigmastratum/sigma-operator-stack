@@ -33,7 +33,7 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
         self.assertIn("docs/install-with-codex.md", first_viewport)
         self.assertIn("INSTALL.md", first_viewport)
         self.assertIn(POINTER_URL, first_viewport)
-        self.assertIn("Current installable Community alpha: `0.1.0a6`", first_viewport)
+        self.assertIn("Current installable Community alpha: `0.1.0a5`", first_viewport)
         self.assertIn("Linux is the primary", first_viewport)
         normalized = " ".join(readme.split())
         self.assertIn("unsigned experimental macOS", normalized)
@@ -150,8 +150,8 @@ class AgentFirstPublicEntryTests(unittest.TestCase):
     def test_checked_in_release_routes_linux_and_macos_without_external_actions(self) -> None:
         tool = ROOT / "tools" / "resolve_agent_first_route.py"
         for system, architecture, filename in (
-            ("linux", "x86_64", "SOS-Linux-0.1.0a6.zip"),
-            ("darwin", "arm64", "SOS-macOS-0.1.0a6.tar.gz"),
+            ("linux", "x86_64", "SOS-Linux-0.1.0a5.zip"),
+            ("darwin", "arm64", "SOS-macOS-0.1.0a5.tar.gz"),
         ):
             with self.subTest(system=system):
                 completed = subprocess.run(
