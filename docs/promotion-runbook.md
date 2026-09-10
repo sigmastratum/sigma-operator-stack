@@ -13,7 +13,9 @@ or promotion authority by itself.
 - Read back `README.md`, `INSTALL.md`, `LICENSE`, `release/current.json` and the
   current demo anonymously.
 
-The immutable `v0.1.0a5` tag and package assets are not moved or replaced.
+The immutable predecessor tags and package assets are not moved or replaced.
+The exact `v0.1.0a7` tag and package assets are the only current release
+authority for this promotion transaction.
 
 ## 2. Complete the GitHub surface
 
@@ -24,7 +26,7 @@ The immutable `v0.1.0a5` tag and package assets are not moved or replaced.
   `@sigmastratum`, and pin it.
 - Create the five issues from `good-first-issues/` with the GitHub
   `good first issue` label and only their applicable typed category label.
-- Replace the `v0.1.0a5` release body with the reviewed release notes, adding
+- Set the `v0.1.0a7` release body to the reviewed release notes, adding
   the exact documentation successor SHA/tree and links to its current demo.
 
 Every remote write is followed by an API and anonymous-web readback. Stop on

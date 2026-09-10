@@ -18,7 +18,7 @@ release promise or a compatibility claim.
 - one portable decision core with qualified Linux, Windows, and macOS
   filesystem adapters;
 - native macOS Apple Silicon install/update/remove lifecycle evidence;
-- a public source repository, immutable Linux/macOS `v0.1.0a5` artifacts and a
+- a public source repository, immutable Linux/macOS `v0.1.0a7` artifacts and a
   canonical release pointer;
 - URL-only Codex installation, fresh recovery, same-version update, smoke and
   removal lifecycle evidence for the admitted Linux/macOS archive routes;
@@ -27,7 +27,7 @@ release promise or a compatibility claim.
 
 ## Next
 
-- bind a current `0.1.0a5` Linux URL-only launch demonstration and complete the
+- bind a current `0.1.0a7` Linux URL-only launch demonstration and complete the
   24--48 hour promotion observation window;
 - finish Microsoft Store certification, then run Store-signed Windows
   install/update/remove and AF104 on a clean ordinary-user profile;

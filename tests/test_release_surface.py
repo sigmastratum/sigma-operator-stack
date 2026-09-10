@@ -99,8 +99,8 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             'python "$RUNNER_TEMP/routing/check_native_release_assets.py" --index',
             'cd "$RUNNER_TEMP/existing"',
             "sha256sum -c SHA256SUMS",
-            "SOS-Linux-0.1.0a5.zip",
-            "SOS-macOS-0.1.0a5.tar.gz",
+            "SOS-Linux-0.1.0a7.zip",
+            "SOS-macOS-0.1.0a7.tar.gz",
             "--json isDraft",
         ):
             self.assertIn(required, workflow)
@@ -227,11 +227,11 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         self.assertLess(preserve, checkout)
         self.assertLess(checkout, execute)
         self.assertIn(
-            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a5-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/existing/sigma_operator_stack-0.1.0a7-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
         self.assertNotIn(
-            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a5-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
+            'cp "$RUNNER_TEMP/a/sigma_operator_stack-0.1.0a7-py3-none-any.whl" "$RUNNER_TEMP/publish/"',
             workflow,
         )
 
@@ -449,7 +449,7 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
     def test_alpha_scope_issue_is_local_public_safe_draft(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs/alpha-scope-issue.md").read_text(encoding="utf-8")
-        self.assertIn("Community alpha scope and known limitations — 0.1.0a5", text)
+        self.assertIn("Community alpha scope and known limitations — 0.1.0a7", text)
         self.assertIn("Remote creation and pinning remain", text)
         self.assertIn("## Exact test requested", text)
         self.assertIn("Stars, clones, views, forks and", text)
@@ -476,6 +476,26 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
             text,
         )
 
+    def test_a7_release_notes_bind_exact_qualified_artifacts(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs" / "release-notes-0.1.0a7.md").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            "936195c24334ae2fbfd5bfd2fbdc45229a431b7c",
+            "66098fb45f35e65cdf02ef3368aecb33e5d77fa0",
+            "b389f4b66f27487486002973d7722b17aa49ac6c1e5e13dcef33ed4e5086589d",
+            "be754567f71ff8beb62c813771a4dfd4429395f32146bae113aac0462b98d962",
+            "cd739f6dfaca422fc0547ffc3a41e1023b99b9627667ba0d7a7e90fd1d0ee736",
+            "fa8e770a90cac79ced4c80209781d64dd4d20b26b8210d4243f23fe4fc01bee3",
+            "ea97c5b766d66515ea9b9f8e544534c34a433cf173da48d1758cfcbd1bb38d85",
+        ):
+            self.assertIn(value, text)
+        self.assertIn(
+            "Install SOS in my current project. Show me the preview before changing it.",
+            text,
+        )
+
     def test_promotion_runbook_freezes_remote_safeguards(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "docs" / "promotion-runbook.md").read_text(encoding="utf-8")
@@ -493,7 +513,13 @@ class PublicReleaseSurfaceTests(unittest.TestCase):
         ):
             self.assertIn(required, text)
         self.assertIn("PyPI remains disabled", text)
-        self.assertIn("immutable `v0.1.0a5` tag", text)
+        self.assertIn("exact `v0.1.0a7` tag", text)
+        self.assertNotIn("Replace the `v0.1.0a5` release body", text)
+
+        roadmap = (root / "docs" / "roadmap.md").read_text(encoding="utf-8")
+        self.assertIn("immutable Linux/macOS `v0.1.0a7` artifacts", roadmap)
+        self.assertIn("current `0.1.0a7` Linux URL-only", roadmap)
+        self.assertNotIn("current `0.1.0a5` Linux URL-only", roadmap)
 
     def test_issue_forms_are_typed_and_public_safe(self) -> None:
         root = Path(__file__).resolve().parents[1]

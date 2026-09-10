@@ -1,4 +1,4 @@
-# Community alpha scope and known limitations — 0.1.0a5
+# Community alpha scope and known limitations — 0.1.0a7
 
 This is the canonical source for the issue that will be created, assigned to
 `@sigmastratum` and pinned before promotion. Remote creation and pinning remain
@@ -19,7 +19,7 @@ Codex-first, local-first and has no telemetry.
 - Other agents, platforms and check families are unverified or unsupported as
   described in the README support matrix.
 
-The only public installation authority is the immutable `v0.1.0a5` release
+The only public installation authority is the immutable `v0.1.0a7` release
 selected by `main:release/current.json`. `not_configured`, `not_verified`,
 ambiguous and unsupported states are never green.
 
