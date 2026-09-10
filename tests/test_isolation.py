@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sos.checks import discover_checks, qualify_supported
 from sos.cli import main as cli_main
-from sos.isolation import run_isolated_unittest
+from sos.isolation import _writable_budget_exceeded, run_isolated_unittest
 from sos import _isolation_worker
 from sos.workspace import initialize_workspace, qualify_once
 
@@ -21,6 +21,32 @@ def git(root: Path, *args: str) -> None:
 
 
 class IsolatedQualificationTests(unittest.TestCase):
+    def test_worker_private_sink_is_outside_monitored_output_tree(self) -> None:
+        execution_root = Path("/synthetic/execution")
+        sink = _isolation_worker._private_sink_path(execution_root)
+        self.assertEqual(sink, execution_root / ".sos-worker-output")
+        self.assertNotEqual(sink.parent, execution_root / "output")
+
+    def test_worker_main_opens_the_private_sink_selected_from_execution_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            execution_root = Path(temporary).resolve()
+            (execution_root / "source").mkdir()
+            (execution_root / "output").mkdir()
+            marker = execution_root / ".synthetic-private-sink"
+            with mock.patch.object(_isolation_worker.os, "dup", return_value=9), mock.patch.object(
+                _isolation_worker, "_private_sink_path", return_value=marker
+            ) as private_sink, mock.patch.object(
+                _isolation_worker.os, "open", side_effect=RuntimeError("stop after sink selection")
+            ) as open_sink:
+                with self.assertRaisesRegex(RuntimeError, "stop after sink selection"):
+                    _isolation_worker.main([str(execution_root)])
+            private_sink.assert_called_once_with(execution_root)
+            self.assertEqual(open_sink.call_args.args[0], marker)
+
+    def test_writable_budget_scanner_remains_fail_closed_on_observation_error(self) -> None:
+        with mock.patch("sos.isolation.os.scandir", side_effect=FileNotFoundError):
+            self.assertTrue(_writable_budget_exceeded(Path("/synthetic/output")))
+
     def test_interpreter_roots_are_exact_read_candidates_without_filesystem_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary) / "base"

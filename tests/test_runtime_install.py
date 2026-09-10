@@ -47,11 +47,11 @@ class NativeRuntimeInstallTests(unittest.TestCase):
         self.addCleanup(payload.cleanup)
         bundle = Path(payload.name)
         uv = bundle / "uv"; uv.write_bytes(b"uv")
-        wheel = bundle / "sigma_operator_stack-0.1.0a6-py3-none-any.whl"
+        wheel = bundle / "sigma_operator_stack-0.1.0a7-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         wheels = ((wheel, hashlib.sha256(b"wheel").hexdigest()),)
-        release = MaintenanceLauncherBinding("0.1.0a6", "v0.1.0a6", "1"*40, "2"*40,
-            "SOS-Linux-0.1.0a6.zip", "3"*64, "4"*64, "linux", "x86_64",
+        release = MaintenanceLauncherBinding("0.1.0a7", "v0.1.0a7", "1"*40, "2"*40,
+            "SOS-Linux-0.1.0a7.zip", "3"*64, "4"*64, "linux", "x86_64",
             "linux-alpha", "Install-SOS.command", "5"*64)
         executable = Path(sys.executable).resolve()
         digest = "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()

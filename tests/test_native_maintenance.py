@@ -49,7 +49,7 @@ class NativeMaintenanceTests(unittest.TestCase):
         args = ["--mode", "update", "--observe-only", "--project", "synthetic", "--bundle", "bundle",
                 "--namespace", "namespace", "--binding-json", "{}",
                 "--interpreter-digest", "sha256:" + "a"*64]
-        release = SimpleNamespace(version="0.1.0a6", payload=lambda: {})
+        release = SimpleNamespace(version="0.1.0a7", payload=lambda: {})
         for state, pending in (("switching", True), ("recovery_required", True), ("committed", False)):
             rows = [{"plan": {"identity": {"maintenance_binding": {}}}, "events": [{"state": state}]}]
             before = json.dumps(rows)
@@ -74,7 +74,7 @@ class NativeMaintenanceTests(unittest.TestCase):
         args = ["--mode", "recover", "--project", "synthetic", "--bundle", "bundle",
                 "--namespace", "namespace", "--binding-json", "{}",
                 "--interpreter-digest", "sha256:" + "a"*64]
-        release = SimpleNamespace(version="0.1.0a6", payload=lambda: {})
+        release = SimpleNamespace(version="0.1.0a7", payload=lambda: {})
         for tty, response, expected in ((False, "yes\n", 2), (True, "no\n", 2), (True, "yes\n", 0)):
             with self.subTest(tty=tty, response=response):
                 source = io.StringIO(response)
@@ -95,10 +95,10 @@ class NativeMaintenanceTests(unittest.TestCase):
             root = Path(temporary).resolve()
             bundle = root / "bundle"
             bundle.mkdir()
-            release = MaintenanceLauncherBinding("0.1.0a6", "v0.1.0a6", "1"*40, "2"*40,
-                "SOS-Linux-0.1.0a6.zip", "3"*64, "4"*64, "linux", "x86_64", "linux-alpha",
+            release = MaintenanceLauncherBinding("0.1.0a7", "v0.1.0a7", "1"*40, "2"*40,
+                "SOS-Linux-0.1.0a7.zip", "3"*64, "4"*64, "linux", "x86_64", "linux-alpha",
                 "Install-SOS.command", "5"*64)
-            wheel = bundle / "sigma_operator_stack-0.1.0a6-py3-none-any.whl"
+            wheel = bundle / "sigma_operator_stack-0.1.0a7-py3-none-any.whl"
             files = {wheel.name: "6"*64, "uv": "7"*64}
             predecessor = LauncherBinding("/synthetic/python", "0.1.0a5", "sha256:" + "8"*64)
             with patch.object(native, "_release_inputs", return_value=(root, bundle, release, files, ((wheel, "6"*64),))), \

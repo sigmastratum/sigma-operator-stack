@@ -347,6 +347,11 @@ def _emit(report_fd: int, payload: dict[str, object]) -> None:
     os.write(report_fd, serialized)
 
 
+def _private_sink_path(execution_root: Path) -> Path:
+    """Keep the unlinked worker sink outside the monitored writable output tree."""
+    return execution_root / ".sos-worker-output"
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if len(arguments) == 2 and arguments[0] == "--probe":
@@ -359,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     if not source.is_dir() or not output.is_dir():
         return 64
     report_fd = os.dup(1)
-    sink_path = output / ".sos-worker-output"
+    sink_path = _private_sink_path(execution_root)
     sink_fd = os.open(sink_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.unlink(sink_path)
     os.dup2(sink_fd, 1)

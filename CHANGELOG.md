@@ -3,7 +3,16 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
-## 0.1.0a6 — Unreleased candidate
+## 0.1.0a7 — Unreleased candidate
+
+### Fixed
+
+- Keep the qualification worker's private, unlinked output sink outside the
+  writable directory observed by the parent process. This removes a race that
+  could falsely report `SOS_QUALIFICATION_WRITABLE_LIMIT_EXCEEDED` while
+  preserving fail-closed handling of genuine observation errors.
+
+## 0.1.0a6 — Unpublished candidate
 
 ### Fixed
 
