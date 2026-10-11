@@ -147,7 +147,9 @@ exposes exactly eight read/proposal MCP tools.
 
 On Linux, `sos capabilities --json` reports the exact local qualification
 profile decision. Exit `0` means the complete named profile is available; exit
-`2` gives a typed unsupported reason. Windows and macOS control-plane support
+`2` gives a typed unsupported reason. A healthy control plane (`sos status`, `sos doctor`)
+operating normally does not imply executable-profile admission, which strictly
+requires Landlock ABI >= 3 and seccomp enforcement. Windows and macOS control-plane support
 does not imply executable qualification support.
 
 ## Coexistence with an existing project
