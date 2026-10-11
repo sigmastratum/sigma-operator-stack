@@ -54,15 +54,39 @@ replayed, missing, or hash-invalid authority remains invalid.
 
 ## Capability refusal
 
-Run `sos capabilities --json` without changing the project. Common reasons:
+`sos capabilities --json` reports the authoritative diagnostic decision for
+local executable qualification without mutating the project.
 
-- `SOS_LANDLOCK_SYSCALL_UNAVAILABLE`;
-- `SOS_LANDLOCK_ABI_TOO_OLD`;
-- `SOS_NO_NEW_PRIVS_UNAVAILABLE`;
-- `SOS_SECCOMP_FILTER_UNAVAILABLE`.
+Distinguish control-plane health from executable-profile admission:
+- **Control plane**: Diagnostic and management commands (`sos status`,
+  `sos doctor`, `sos compatibility`) can report healthy and exit 0 even when
+  executable test qualification is unsupported.
+- **Executable profile**: Running test suites or sandboxed workloads requires
+  strict kernel and backend profile admission (Landlock ABI >= 3 and seccomp
+  filters). When these boundary invariants cannot be established, SOS refuses
+  execution and exits 2.
 
-Control-plane commands can remain available while executable unittest is
-unsupported. SOS does not fall back to unisolated execution.
+Common refusal reason codes:
+
+- `SOS_LANDLOCK_SYSCALL_UNAVAILABLE`: The Linux kernel lacks the
+  `landlock_create_ruleset` syscall (requires Linux kernel >= 5.13).
+- `SOS_LANDLOCK_ABI_TOO_OLD`: The kernel exposes Landlock but its ABI version
+  is below 3 (e.g., Landlock ABI 1 on certain WSL2 or virtualized kernels).
+- `SOS_NO_NEW_PRIVS_UNAVAILABLE`: The `PR_SET_NO_NEW_PRIVS` prctl failed or
+  is disallowed by the container environment.
+- `SOS_SECCOMP_FILTER_UNAVAILABLE`: Seccomp BPF filter installation is
+  unsupported or blocked by host security policy.
+
+Backend-specific notes:
+- **Docker / Containers**: A healthy control plane inside a container does not
+  mean executable-profile admission is satisfied. The host kernel and container
+  seccomp profile must expose Landlock syscalls and permit unprivileged
+  user/mount namespaces without requiring root or broad privilege escalation.
+- **WSL2**: A successful check on a specific WSL2 build does not guarantee broad
+  compatibility across virtualized distributions. Verify the effective kernel
+  version via `uname -r` and rely solely on `sos capabilities --json`.
+
+SOS never degrades silently or falls back to unisolated execution.
 
 ## Stale or not verified
 
