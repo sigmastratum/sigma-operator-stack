@@ -50,11 +50,11 @@ class PublicReleaseContractTests(unittest.TestCase):
         self.assertIn('version = "0.1.0a7"', pyproject)
         self.assertIn('requires-python = ">=3.11,<3.13"', pyproject)
         self.assertIn('license = {text = "Apache-2.0"}', pyproject)
-        self.assertIn('requires = ["setuptools==84.0.0"]', pyproject)
+        self.assertIn('requires = ["setuptools==84.1.0"]', pyproject)
         self.assertTrue((root / "LICENSE").is_file())
 
         release_requirements = (root / "requirements" / "release.txt").read_text(encoding="utf-8")
-        for requirement in ("Pillow==12.3.0", "setuptools==84.0.0", "wheel==0.48.0"):
+        for requirement in ("Pillow==13.0.0", "setuptools==84.1.0", "wheel==0.48.0"):
             self.assertIn(requirement, release_requirements)
         self.assertEqual(
             (root / "requirements" / "audit.txt").read_text(encoding="utf-8").strip(),

@@ -3,6 +3,15 @@
 All notable changes are recorded here. The format follows Keep a Changelog and
 the project uses semantic versioning after the pre-1.0 stability boundary.
 
+## Unreleased
+
+### Security
+
+- Update the release-tooling pins to Pillow 13.0.0 and setuptools 84.1.0.
+  Pillow 13.0.0 replaces the vulnerable 12.3.0 release identified by the
+  registered dependency audit; runtime and published release artifacts are
+  unchanged.
+
 ## 0.1.0a7 — 2026-09-10
 
 ### Fixed
