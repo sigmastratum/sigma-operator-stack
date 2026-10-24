@@ -60,7 +60,7 @@
       ],
       "name": "Pillow",
       "requirement_file": "requirements/release.txt",
-      "version": "12.3.0"
+      "version": "13.0.0"
     },
     {
       "license_expression": "MIT",
@@ -78,7 +78,7 @@
       ],
       "name": "setuptools",
       "requirement_file": "requirements/release.txt",
-      "version": "84.0.0"
+      "version": "84.1.0"
     },
     {
       "license_expression": "MIT",
